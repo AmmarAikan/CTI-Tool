@@ -57,8 +57,5 @@
     "25": "I-Tool",
     "26": "I-Way"
   },
-  "num_labels": 27,
-  "train_sentences": 5251,
-  "valid_sentences": 662,
-  "test_sentences": 664
+  "num_labels": 27
 }

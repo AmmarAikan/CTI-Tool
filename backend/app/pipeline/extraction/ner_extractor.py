@@ -95,18 +95,125 @@ class NERExtractor:
 
     def _extract_with_transformer(self, text: str) -> list[dict[str, object]]:
         results = self.ner_pipeline(text)
-        entities = []
+        entities: list[dict[str, object]] = []
+
+        def coerce_offset(value: object) -> int | None:
+            if value is None:
+                return None
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return None
+
+        def clean_value(value: str) -> str:
+            value = value.replace(" ##", "").replace("##", "")
+            value = " ".join(value.split())
+            while " - " in value or " -" in value or "- " in value:
+                value = value.replace(" - ", "-").replace(" -", "-").replace("- ", "-")
+            return value.strip().rstrip(".,;:")
+
+        def has_valid_offsets(start: int | None, end: int | None) -> bool:
+            return start is not None and end is not None and 0 <= start < end <= len(text)
+
+        def is_entity_token_char(character: str) -> bool:
+            return character.isalnum() or character in "-_"
+
+        def expand_offsets_to_token(start: int, end: int) -> tuple[int, int]:
+            while start > 0 and is_entity_token_char(text[start - 1]) and is_entity_token_char(text[start]):
+                start -= 1
+            while end < len(text) and is_entity_token_char(text[end - 1]) and is_entity_token_char(text[end]):
+                end += 1
+            return start, end
+
+        spans: list[dict[str, object]] = []
         for item in results:
             entity_type = item.get("entity_group") or item.get("entity")
-            value = item.get("word")
+            raw_value = item.get("word")
             score = item.get("score", 0.0)
-            if not entity_type or not value:
+            if not entity_type or not raw_value:
                 continue
-            entities.append(
+
+            start = coerce_offset(item.get("start"))
+            end = coerce_offset(item.get("end"))
+            if has_valid_offsets(start, end):
+                start, end = expand_offsets_to_token(start, end)
+                value = text[start:end]
+            else:
+                start = None
+                end = None
+                value = str(raw_value)
+
+            value = clean_value(value)
+            if not value:
+                continue
+
+            spans.append(
                 {
                     "type": self._normalize_entity_type(str(entity_type)),
-                    "value": str(value).strip(),
-                    "confidence": round(float(score) * 100, 2),
+                    "value": value,
+                    "score": float(score),
+                    "start": start,
+                    "end": end,
+                    "raw_value": str(raw_value),
+                    "scores": [float(score)],
+                }
+            )
+
+        merged_spans: list[dict[str, object]] = []
+        for span in spans:
+            if not merged_spans:
+                merged_spans.append(span)
+                continue
+
+            previous = merged_spans[-1]
+            previous_start = previous.get("start")
+            previous_end = previous.get("end")
+            span_start = span.get("start")
+            span_end = span.get("end")
+            same_type = previous["type"] == span["type"]
+            adjacent_offsets = (
+                isinstance(previous_start, int)
+                and isinstance(previous_end, int)
+                and isinstance(span_start, int)
+                and isinstance(span_end, int)
+                and (
+                    previous_end >= span_start
+                    or (previous_end <= span_start and not text[previous_end:span_start].strip())
+                )
+            )
+            wordpiece_continuation = str(span.get("raw_value", "")).startswith("##")
+
+            if same_type and (adjacent_offsets or wordpiece_continuation):
+                if (
+                    isinstance(previous_start, int)
+                    and isinstance(previous_end, int)
+                    and isinstance(span_start, int)
+                    and isinstance(span_end, int)
+                ):
+                    previous["start"] = min(previous_start, span_start)
+                    span_end = max(previous_end, span_end)
+                    previous["end"] = span_end
+                    previous["value"] = clean_value(text[previous["start"]:span_end])
+                else:
+                    separator = "" if wordpiece_continuation else " "
+                    previous["value"] = clean_value(f"{previous['value']}{separator}{span['value']}")
+                previous_scores = previous.setdefault("scores", [])
+                if isinstance(previous_scores, list):
+                    previous_scores.extend(span["scores"])
+                continue
+
+            merged_spans.append(span)
+
+        for span in merged_spans:
+            scores = span.get("scores", [span["score"]])
+            if not isinstance(scores, list):
+                scores = [float(span["score"])]
+            confidence = sum(float(score) for score in scores) / len(scores)
+            entities.append(
+                {
+                    "type": span["type"],
+                    "value": span["value"],
+                    "confidence": round(confidence * 100, 2),
                     "source": "dnrti_bert_ner",
                 }
             )

@@ -6,31 +6,39 @@ __pycache__/
 
 # Virtual environments
 .venv/
+.venv_bert312/
 venv/
 env/
 
-# IDE settings
-.idea/
-.vscode/
-
-# Codex local state
+# Codex local files
 .codex/
 .codex_old/
 
-# OS files
+# OS / IDE files
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 
-# Logs
+# Logs and temporary files
 *.log
+*.tmp
 
-# Archives / duplicates
+# Archives
 *.zip
 *.rar
 *.7z
 
-# Large transformer/BERT model output if created later
-!ml/models/dnrti_bert_ner/
+# Large BERT model files - do not upload to GitHub
+ml/models/dnrti_bert_ner/
 
-# Keep sklearn model because Part 0 uses it
+# Hugging Face / checkpoints
+checkpoint-*/
+ml/models/**/checkpoint-*/
+
+# Keep sklearn baseline model
+!ml/models/dnrti_sklearn_ner/
 !ml/models/dnrti_sklearn_ner/model.joblib
+!ml/models/dnrti_sklearn_ner/metadata.json
+
+*.lnk
