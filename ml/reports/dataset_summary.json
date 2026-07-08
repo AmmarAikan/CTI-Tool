@@ -1,0 +1,391 @@
+{
+  "data_dir": "ml\\datasets\\dnrti",
+  "splits": {
+    "train": {
+      "sentences": 5251,
+      "tokens": 140348,
+      "min_sentence_length": 2,
+      "max_sentence_length": 82,
+      "avg_sentence_length": 26.73,
+      "malformed_lines": 179,
+      "malformed_examples": [
+        {
+          "line_number": 44202,
+          "line": " O"
+        },
+        {
+          "line_number": 68280,
+          "line": "O"
+        },
+        {
+          "line_number": 68301,
+          "line": "O"
+        },
+        {
+          "line_number": 68371,
+          "line": "O"
+        },
+        {
+          "line_number": 68383,
+          "line": "O"
+        },
+        {
+          "line_number": 68467,
+          "line": "O"
+        },
+        {
+          "line_number": 68554,
+          "line": "O"
+        },
+        {
+          "line_number": 68625,
+          "line": "O"
+        },
+        {
+          "line_number": 68716,
+          "line": "O"
+        },
+        {
+          "line_number": 68740,
+          "line": "O"
+        },
+        {
+          "line_number": 68785,
+          "line": "O"
+        },
+        {
+          "line_number": 68819,
+          "line": "O"
+        },
+        {
+          "line_number": 68911,
+          "line": "O"
+        },
+        {
+          "line_number": 68926,
+          "line": "O"
+        },
+        {
+          "line_number": 68965,
+          "line": "O"
+        },
+        {
+          "line_number": 68988,
+          "line": "O"
+        },
+        {
+          "line_number": 69004,
+          "line": "O"
+        },
+        {
+          "line_number": 69016,
+          "line": "O"
+        },
+        {
+          "line_number": 69059,
+          "line": "O"
+        },
+        {
+          "line_number": 69116,
+          "line": "O"
+        },
+        {
+          "line_number": 69149,
+          "line": "O"
+        },
+        {
+          "line_number": 69193,
+          "line": "O"
+        },
+        {
+          "line_number": 69211,
+          "line": "O"
+        },
+        {
+          "line_number": 69236,
+          "line": "O"
+        },
+        {
+          "line_number": 69287,
+          "line": "O"
+        }
+      ],
+      "label_distribution": {
+        "B-Area": 2171,
+        "B-Exp": 1068,
+        "B-Features": 812,
+        "B-HackOrg": 3419,
+        "B-Idus": 1349,
+        "B-OffAct": 1412,
+        "B-Org": 1113,
+        "B-Purp": 721,
+        "B-SamFile": 1221,
+        "B-SecTeam": 997,
+        "B-Time": 1328,
+        "B-Tool": 2449,
+        "B-Way": 828,
+        "I-Area": 816,
+        "I-Exp": 538,
+        "I-Features": 1178,
+        "I-HackOrg": 977,
+        "I-Idus": 482,
+        "I-OffAct": 851,
+        "I-Org": 958,
+        "I-Purp": 1231,
+        "I-SamFile": 556,
+        "I-SecTeam": 473,
+        "I-Time": 794,
+        "I-Tool": 1386,
+        "I-Way": 785,
+        "O": 110435
+      },
+      "entity_type_distribution": {
+        "Area": 2987,
+        "Exp": 1606,
+        "Features": 1990,
+        "HackOrg": 4396,
+        "Idus": 1831,
+        "OffAct": 2263,
+        "Org": 2071,
+        "Purp": 1952,
+        "SamFile": 1777,
+        "SecTeam": 1470,
+        "Time": 2122,
+        "Tool": 3835,
+        "Way": 1613
+      }
+    },
+    "valid": {
+      "sentences": 662,
+      "tokens": 17602,
+      "min_sentence_length": 7,
+      "max_sentence_length": 62,
+      "avg_sentence_length": 26.59,
+      "malformed_lines": 7,
+      "malformed_examples": [
+        {
+          "line_number": 9610,
+          "line": "O"
+        },
+        {
+          "line_number": 9700,
+          "line": "O"
+        },
+        {
+          "line_number": 10101,
+          "line": "O"
+        },
+        {
+          "line_number": 10417,
+          "line": "O"
+        },
+        {
+          "line_number": 12752,
+          "line": "O"
+        },
+        {
+          "line_number": 14804,
+          "line": "O"
+        },
+        {
+          "line_number": 16823,
+          "line": "O"
+        }
+      ],
+      "label_distribution": {
+        "B-Area": 144,
+        "B-Exp": 131,
+        "B-Features": 97,
+        "B-HackOrg": 426,
+        "B-Idus": 103,
+        "B-OffAct": 100,
+        "B-Org": 111,
+        "B-Purp": 82,
+        "B-SamFile": 191,
+        "B-SecTeam": 178,
+        "B-Time": 183,
+        "B-Tool": 317,
+        "B-Way": 109,
+        "I-Area": 48,
+        "I-Exp": 41,
+        "I-Features": 87,
+        "I-HackOrg": 141,
+        "I-Idus": 37,
+        "I-OffAct": 65,
+        "I-Org": 69,
+        "I-Purp": 130,
+        "I-SamFile": 89,
+        "I-SecTeam": 65,
+        "I-Time": 86,
+        "I-Tool": 156,
+        "I-Way": 107,
+        "O": 14309
+      },
+      "entity_type_distribution": {
+        "Area": 192,
+        "Exp": 172,
+        "Features": 184,
+        "HackOrg": 567,
+        "Idus": 140,
+        "OffAct": 165,
+        "Org": 180,
+        "Purp": 212,
+        "SamFile": 280,
+        "SecTeam": 243,
+        "Time": 269,
+        "Tool": 473,
+        "Way": 216
+      }
+    },
+    "test": {
+      "sentences": 664,
+      "tokens": 17716,
+      "min_sentence_length": 7,
+      "max_sentence_length": 68,
+      "avg_sentence_length": 26.68,
+      "malformed_lines": 16,
+      "malformed_examples": [
+        {
+          "line_number": 4734,
+          "line": "O"
+        },
+        {
+          "line_number": 5938,
+          "line": "O"
+        },
+        {
+          "line_number": 6515,
+          "line": "O"
+        },
+        {
+          "line_number": 7520,
+          "line": "O"
+        },
+        {
+          "line_number": 10729,
+          "line": " O"
+        },
+        {
+          "line_number": 13961,
+          "line": "O"
+        },
+        {
+          "line_number": 13964,
+          "line": "O"
+        },
+        {
+          "line_number": 14027,
+          "line": "O"
+        },
+        {
+          "line_number": 14666,
+          "line": "O"
+        },
+        {
+          "line_number": 14732,
+          "line": "O"
+        },
+        {
+          "line_number": 14741,
+          "line": "O"
+        },
+        {
+          "line_number": 15281,
+          "line": "O"
+        },
+        {
+          "line_number": 16007,
+          "line": "O"
+        },
+        {
+          "line_number": 16010,
+          "line": "O"
+        },
+        {
+          "line_number": 16073,
+          "line": "O"
+        },
+        {
+          "line_number": 17265,
+          "line": "O"
+        }
+      ],
+      "label_distribution": {
+        "B-Area": 216,
+        "B-Exp": 132,
+        "B-Features": 116,
+        "B-HackOrg": 369,
+        "B-Idus": 127,
+        "B-OffAct": 150,
+        "B-Org": 137,
+        "B-Purp": 115,
+        "B-SamFile": 248,
+        "B-SecTeam": 152,
+        "B-Time": 167,
+        "B-Tool": 315,
+        "B-Way": 100,
+        "I-Area": 52,
+        "I-Exp": 49,
+        "I-Features": 151,
+        "I-HackOrg": 133,
+        "I-Idus": 38,
+        "I-OffAct": 91,
+        "I-Org": 101,
+        "I-Purp": 145,
+        "I-SamFile": 95,
+        "I-SecTeam": 56,
+        "I-Time": 101,
+        "I-Tool": 161,
+        "I-Way": 89,
+        "O": 14110
+      },
+      "entity_type_distribution": {
+        "Area": 268,
+        "Exp": 181,
+        "Features": 267,
+        "HackOrg": 502,
+        "Idus": 165,
+        "OffAct": 241,
+        "Org": 238,
+        "Purp": 260,
+        "SamFile": 343,
+        "SecTeam": 208,
+        "Time": 268,
+        "Tool": 476,
+        "Way": 189
+      }
+    }
+  },
+  "total_sentences": 6577,
+  "total_tokens": 175666,
+  "num_labels": 27,
+  "labels": [
+    "O",
+    "B-Area",
+    "B-Exp",
+    "B-Features",
+    "B-HackOrg",
+    "B-Idus",
+    "B-OffAct",
+    "B-Org",
+    "B-Purp",
+    "B-SamFile",
+    "B-SecTeam",
+    "B-Time",
+    "B-Tool",
+    "B-Way",
+    "I-Area",
+    "I-Exp",
+    "I-Features",
+    "I-HackOrg",
+    "I-Idus",
+    "I-OffAct",
+    "I-Org",
+    "I-Purp",
+    "I-SamFile",
+    "I-SecTeam",
+    "I-Time",
+    "I-Tool",
+    "I-Way"
+  ]
+}

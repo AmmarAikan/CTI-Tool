@@ -1,0 +1,36 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE settings
+.idea/
+.vscode/
+
+# Codex local state
+.codex/
+.codex_old/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Archives / duplicates
+*.zip
+*.rar
+*.7z
+
+# Large transformer/BERT model output if created later
+!ml/models/dnrti_bert_ner/
+
+# Keep sklearn model because Part 0 uses it
+!ml/models/dnrti_sklearn_ner/model.joblib
