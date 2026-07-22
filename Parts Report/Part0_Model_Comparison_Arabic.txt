@@ -1,0 +1,316 @@
+تقرير Part 0: مقارنة نموذج sklearn ونموذج BERT بعد التعديل النهائي
+====================================================================
+
+اسم المشروع:
+AI-Based Cyber Threat Intelligence Tool / CTI-Tool
+
+الجزء:
+Part 0: DNRTI NER Model Training Pipeline
+
+الهدف من Part 0
+----------------
+الهدف من هذا الجزء هو تدريب نموذج NER على Dataset اسمها DNRTI لاستخراج الكيانات السيبرانية من النصوص.
+هذه الكيانات تشمل أمثلة مثل:
+- Threat Actor
+- Malware / Tool
+- Organization
+- Location
+- Attack Method
+- Security Team
+- Exploit
+- Objective
+- Time
+
+الـ Dataset المستخدمة
+----------------------
+اسم الـ Dataset:
+DNRTI
+
+مكان الملفات داخل المشروع:
+ml/datasets/dnrti/train.txt
+ml/datasets/dnrti/valid.txt
+ml/datasets/dnrti/test.txt
+
+شكل البيانات:
+البيانات مكتوبة بأسلوب BIO Tagging، حيث يحتوي كل سطر على token و label.
+
+مثال مبسط:
+APT28      B-HackOrg
+used       O
+X-Agent    B-Tool
+malware    I-Tool
+Ukraine    B-Area
+
+معنى BIO:
+B = بداية كيان
+I = داخل أو تكملة الكيان
+O = خارج أي كيان
+
+تقسيم البيانات الذي تم التأكد منه:
+train = 5251 sentence
+valid = 662 sentence
+test  = 664 sentence
+
+النموذج الأول: sklearn baseline
+-------------------------------
+الفكرة:
+هذا نموذج محلي وخفيف باستخدام scikit-learn. لا يحتاج تحميل موديل خارجي ولا يحتاج GPU.
+يعتمد على تحويل كل كلمة إلى features مثل:
+- شكل الكلمة
+- وجود أرقام
+- وجود شرطة
+- حروف كبيرة/صغيرة
+- الكلمة السابقة واللاحقة
+ثم يستخدم classifier لتوقع BIO label لكل token.
+
+ملف التدريب:
+ml/training/train_ner_sklearn.py
+
+النموذج الناتج:
+ml/models/dnrti_sklearn_ner/model.joblib
+
+ملفات التقييم:
+ml/reports/sklearn_ner_metrics.json
+ml/reports/sklearn_ner_classification_report.txt
+
+أمر تدريب sklearn:
+python ml\training\train_ner_sklearn.py
+
+أمر اختبار تحميل النموذج:
+python -c "import joblib; model=joblib.load('ml/models/dnrti_sklearn_ner/model.joblib'); print('MODEL LOADED OK:', type(model))"
+
+المخرج الفعلي:
+MODEL LOADED OK: <class 'sklearn.pipeline.Pipeline'>
+
+أمر اختبار الاستخراج:
+python -c "from backend.app.pipeline.extraction.ner_extractor import NERExtractor; e=NERExtractor(); print(e.extract_entities('APT28 used X-Agent malware to target government organizations in Ukraine through spear phishing attack.'))"
+
+مخرجات sklearn قبل BERT:
+[
+ {'type': 'threat_actor', 'value': 'APT28', 'confidence': 91.85, 'source': 'dnrti_sklearn_ner'},
+ {'type': 'tool_or_malware', 'value': 'X-Agent malware', 'confidence': 67.52, 'source': 'dnrti_sklearn_ner'},
+ {'type': 'organization', 'value': 'government organizations', 'confidence': 60.31, 'source': 'dnrti_sklearn_ner'},
+ {'type': 'location', 'value': 'Ukraine', 'confidence': 91.98, 'source': 'dnrti_sklearn_ner'},
+ {'type': 'attack_method', 'value': 'spear phishing attack', 'confidence': 71.45, 'source': 'dnrti_sklearn_ner'}
+]
+
+نتائج sklearn التقريبية:
+Token Accuracy = 0.8833
+Entity F1      = 0.6379
+
+مميزات sklearn:
+- سريع وخفيف.
+- مناسب كـ baseline.
+- يعمل بدون إنترنت بعد تثبيت المكتبات.
+- سهل التشغيل والاختبار.
+
+عيوبه:
+- قدرته أقل من BERT في فهم السياق.
+- يعتمد على features يدوية.
+- أداؤه أقل من BERT في نتائج F1.
+
+النموذج الثاني: BERT Transformer
+--------------------------------
+الفكرة:
+BERT هو النموذج الأساسي الأقوى في Part 0.
+تم استخدام bert-base-cased ثم عمل fine-tuning له على DNRTI حتى يتعلم Labels الخاصة بمجال CTI.
+
+ملف التدريب:
+ml/training/train_ner_bert.py
+
+النموذج الناتج:
+ml/models/dnrti_bert_ner/
+
+ملف نتائج الاختبار:
+ml/reports/ner_test_metrics.json
+
+المشكلة التي واجهتنا:
+في البداية كان BERT لا يعمل بسبب مشكلة في بيئة Python 3.14، حيث كان يحدث crash عند تحميل موديل Hugging Face.
+الخطأ كان:
+Windows fatal exception: access violation
+EXIT_CODE=-1073741819
+
+سبب المشكلة:
+Python 3.14 لم يكن مستقرًا مع مكتبات BERT/Transformers/Hugging Face في هذه البيئة.
+
+الحل:
+استخدمنا Python 3.12 وأنشأنا بيئة مستقلة خاصة بـ BERT:
+.venv_bert312
+
+أوامر إنشاء البيئة:
+cd /d "C:\My Projects\Graduation project"
+py -3.12 -m venv .venv_bert312
+.venv_bert312\Scripts\activate
+
+أوامر تثبيت المكتبات:
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python -m pip install "transformers==4.49.0" "huggingface-hub==0.29.3" accelerate scikit-learn numpy pandas joblib tqdm
+
+إعدادات Hugging Face:
+set HF_HUB_DISABLE_TELEMETRY=1
+set HF_HUB_DISABLE_XET=1
+
+اختبار tokenizer:
+python -c "from transformers import AutoTokenizer; print('loading tokenizer'); AutoTokenizer.from_pretrained('bert-base-cased'); print('tokenizer OK')"
+
+المخرج:
+loading tokenizer
+tokenizer OK
+
+اختبار تحميل الموديل:
+python -c "from transformers import AutoModelForTokenClassification; print('loading model'); AutoModelForTokenClassification.from_pretrained('bert-base-cased', num_labels=25); print('model OK')"
+
+المخرج:
+loading model
+model.safetensors: 100%
+model OK
+
+أمر تدريب BERT:
+python -u ml\training\train_ner_bert.py --epochs 1 --batch-size 2 --max-length 96
+
+ملاحظات أثناء التدريب:
+- تم التدريب على CPU، لذلك استغرق حوالي 53 دقيقة.
+- التحذير الخاص بـ pin_memory طبيعي لأنه لا يوجد GPU.
+- التحذير الخاص بـ classifier طبيعي لأن طبقة التصنيف الجديدة يتم تدريبها من الصفر على DNRTI.
+
+دليل نجاح التدريب:
+ظهر السطر:
+BERT NER training completed.
+
+نتائج BERT بعد التدريب:
+eval_precision = 0.7614233724221593
+eval_recall    = 0.8019591141396933
+eval_f1        = 0.781165733250363
+eval_accuracy  = 0.9376270038383382
+eval_loss      = 0.20586909353733063
+
+مقارنة مباشرة بين sklearn و BERT
+---------------------------------
+sklearn:
+Token Accuracy = 0.8833
+Entity F1      = 0.6379
+Source         = dnrti_sklearn_ner
+
+BERT:
+Accuracy       = 0.9376
+Entity F1      = 0.7812
+Source         = dnrti_bert_ner
+
+الاستنتاج:
+BERT أفضل من sklearn من ناحية F1 والدقة العامة، لكنه أثقل ويحتاج وقت ومساحة وبيئة مستقرة.
+
+مشكلة مخرجات BERT قبل التعديل
+------------------------------
+بعد التدريب، كان BERT يعمل لكن المخرجات كانت تحتوي على WordPiece tokens مثل:
+AP
+##T
+X - Agent ma
+
+مثال قبل التعديل:
+[
+ {'type': 'threat_actor', 'value': 'AP', 'source': 'dnrti_bert_ner'},
+ {'type': 'threat_actor', 'value': '##T', 'source': 'dnrti_bert_ner'},
+ {'type': 'tool_or_malware', 'value': 'X - Agent ma', 'source': 'dnrti_bert_ner'}
+]
+
+سبب المشكلة:
+BERT يستخدم WordPiece Tokenization، لذلك قد يقسم الكلمة إلى أجزاء مثل:
+APT28 -> AP + ##T + ##28
+
+التعديل النهائي في ner_extractor.py
+------------------------------------
+تم تعديل الملف:
+backend/app/pipeline/extraction/ner_extractor.py
+
+هدف التعديل:
+تحسين دالة استخراج مخرجات BERT بحيث:
+- تستخدم start/end offsets من النص الأصلي.
+- توسع الحدود إذا كانت داخل الكلمة.
+- تنظف رموز WordPiece مثل ##.
+- تزيل المسافات الزائدة حول الشرطة مثل X - Agent وتحولها إلى X-Agent.
+- تحافظ على نفس شكل المخرجات:
+  type, value, confidence, source
+
+أمر الاختبار النهائي بعد التعديل:
+python -c "from backend.app.pipeline.extraction.ner_extractor import NERExtractor; e=NERExtractor(); print(e.backend); print(e.extract_entities('APT28 used X-Agent malware to target government organizations in Ukraine through spear phishing attack.'))"
+
+المخرج النهائي:
+Device set to use cpu
+transformer
+[
+ {'type': 'threat_actor', 'value': 'APT28', 'confidence': 93.92, 'source': 'dnrti_bert_ner'},
+ {'type': 'tool_or_malware', 'value': 'X-Agent malware', 'confidence': 85.38, 'source': 'dnrti_bert_ner'},
+ {'type': 'organization', 'value': 'government organizations', 'confidence': 86.53, 'source': 'dnrti_bert_ner'},
+ {'type': 'location', 'value': 'Ukraine', 'confidence': 97.12, 'source': 'dnrti_bert_ner'},
+ {'type': 'attack_method', 'value': 'spear phishing attack', 'confidence': 60.06, 'source': 'dnrti_bert_ner'}
+]
+
+معنى هذا:
+- النظام يستخدم BERT فعليًا لأن e.backend = transformer.
+- المخرجات أصبحت نظيفة.
+- مشكلة WordPiece تم حلها.
+- Part 0 أصبح مكتملًا بنموذج BERT ونموذج sklearn fallback.
+
+كيف يعمل NERExtractor الآن؟
+----------------------------
+عند تشغيل NERExtractor:
+1. يحاول أولًا تحميل BERT من:
+   ml/models/dnrti_bert_ner
+2. إذا وجد config.json وملفات النموذج، يستخدم BERT.
+3. إذا لم يجد BERT أو فشل تحميله، يرجع تلقائيًا إلى sklearn:
+   ml/models/dnrti_sklearn_ner/model.joblib
+
+هذا يجعل النظام مرنًا:
+- إذا BERT موجود: يستخدم transformer.
+- إذا BERT غير موجود: يستخدم sklearn baseline.
+
+أوامر مهمة للاستخدام لاحقًا
+----------------------------
+
+تفعيل بيئة BERT:
+cd /d "C:\My Projects\Graduation project"
+.venv_bert312\Scripts\activate
+
+تشغيل تدريب BERT:
+python -u ml\training\train_ner_bert.py --epochs 1 --batch-size 2 --max-length 96
+
+اختبار BERT runtime:
+python -c "from backend.app.pipeline.extraction.ner_extractor import NERExtractor; e=NERExtractor(); print(e.backend); print(e.extract_entities('APT28 used X-Agent malware to target government organizations in Ukraine through spear phishing attack.'))"
+
+تشغيل sklearn training:
+python ml\training\train_ner_sklearn.py
+
+اختبار sklearn model بشكل مباشر:
+python -c "import joblib; model=joblib.load('ml/models/dnrti_sklearn_ner/model.joblib'); print('MODEL LOADED OK:', type(model))"
+
+حالة Part 0 النهائية
+---------------------
+DNRTI Dataset موجودة ومقروءة: نعم
+sklearn model مدرب وموجود: نعم
+BERT model تم تحميله وتدريبه: نعم
+BERT metrics تم إنتاجها: نعم
+NERExtractor يستخدم BERT: نعم
+WordPiece output تم إصلاحه: نعم
+sklearn fallback موجود: نعم
+
+ملاحظات GitHub
+---------------
+لا يُفضل رفع مجلد BERT مباشرة إلى GitHub لأنه كبير، خاصة ملف model.safetensors.
+الأفضل لاحقًا استخدام Git LFS أو تجاهل مجلد:
+ml/models/dnrti_bert_ner/
+
+يمكن رفع:
+- كود التدريب
+- كود extractor
+- ملفات التقارير
+- README
+- sklearn model إذا كان حجمه مقبولًا
+
+الخلاصة النهائية
+-----------------
+تم تنفيذ Part 0 بنجاح.
+بدأنا بنموذج sklearn كـ baseline، ثم شغلنا BERT على Python 3.12 بعد حل مشكلة Python 3.14.
+تم تدريب BERT على DNRTI بنجاح، وحقق F1 أعلى من sklearn.
+بعد ذلك تم تعديل NERExtractor لتنظيف مخرجات BERT وإرجاع كيانات واضحة مثل APT28 و X-Agent malware.
+الآن Part 0 جاهز للاستخدام داخل بقية Pipeline للمشروع.
