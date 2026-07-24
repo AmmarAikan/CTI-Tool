@@ -57,7 +57,7 @@ def raw_record(**overrides) -> RawRecord:
 
 
 class ExternalPipelineTests(unittest.TestCase):
-    def test_file_connector_normalizes_prepared_p2_shape(self) -> None:
+    def test_file_connector_normalizes_prepared_external_sample_shape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "vulnerabilities.json"
             path.write_text(

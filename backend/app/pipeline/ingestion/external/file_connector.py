@@ -20,7 +20,7 @@ TRUSTED_CYBER_SOURCES = {
 
 
 class ExternalJsonFileConnector(ExternalConnector):
-    """Load prepared external-source JSON records from files such as p2/*.json."""
+    """Load prepared external-source JSON records from data/external_samples/*.json."""
 
     def __init__(self, paths: Sequence[str | Path], source_name: str = "external_json_file") -> None:
         self.paths = [Path(path) for path in paths]

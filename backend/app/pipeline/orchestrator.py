@@ -215,7 +215,12 @@ def run_external_files(paths: list[Path]) -> list[dict[str, Any]]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the external CTI pipeline over prepared JSON files.")
-    parser.add_argument("paths", nargs="+", type=Path, help="External JSON file(s), such as p2/*.json")
+    parser.add_argument(
+        "paths",
+        nargs="+",
+        type=Path,
+        help="External JSON file(s), such as data/external_samples/*.json",
+    )
     parser.add_argument("--limit", type=int, default=0, help="Optional maximum records to print")
     args = parser.parse_args()
 

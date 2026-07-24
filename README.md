@@ -14,7 +14,7 @@ Internal Data Runtime Pipeline
 
 Part 0 is the offline DNRTI NER pipeline. It trains and evaluates NER models, saves model artifacts, and exposes the runtime `NERExtractor`.
 
-External runtime processing now supports prepared JSON inputs such as `p2/` advisories, NVD/CVE records, security articles, Reddit-style posts, and Telegram feed records.
+External runtime processing now supports prepared JSON inputs such as `data/external_samples/` advisories, NVD/CVE records, security articles, Reddit-style posts, and Telegram feed records.
 
 Internal runtime processing is prepared through an interface only. Structured security logs such as Wazuh, Zeek, Suricata, firewall, and honeypot records should later follow parsing and structured extraction, not ordinary document classification.
 
@@ -73,7 +73,7 @@ ml/models/dnrti_bert_ner/
 Run the external pipeline on a small prepared sample:
 
 ```bash
-python -m backend.app.pipeline.orchestrator p2/vulnerabilities_20260722_184347.json --limit 2
+python -m backend.app.pipeline.orchestrator data/external_samples/vulnerabilities_20260722_184347.json --limit 2
 ```
 
 Run focused tests:

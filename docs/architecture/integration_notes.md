@@ -2,7 +2,7 @@
 
 ## What Was Integrated
 
-The prepared `p2/` JSON files are treated as external source inputs. They are not copied over the project root and they do not create a duplicate backend.
+The prepared external JSON files under `data/external_samples/` are treated as external source inputs. They are not copied over the backend and they do not create a duplicate application.
 
 New backend runtime modules add:
 

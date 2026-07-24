@@ -1,0 +1,3170 @@
+[
+  {
+    "title": "CVE-2026-12484",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12484",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "A vulnerability in keras-team/keras version 3.15.0 allows unsafe deserialization of attacker-controlled PyTorch pickle data through the public `keras.layers.TorchModuleWrapper.from_config` method. This method invokes `torch.load(..., weights_only=False)` without requiring an explicit unsafe opt-in, such as a `safe_mode=False` parameter. When called outside a `SafeModeScope(True)` context, the absence of an ambient safe mode state permits unsafe deserialization by default. This issue can lead to arbitrary code execution if untrusted Keras layer configurations are processed using this method. The vulnerability arises because the method does not enforce safe deserialization practices unless explicitly guarded by Keras safe mode.",
+    "summary": "A vulnerability in keras-team/keras version 3.15.0 allows unsafe deserialization of attacker-controlled PyTorch pickle data through the public `keras.layers.TorchModuleWrapper.from_config` method. This method invokes `torch.load(..., weights_only=False)` without requiring an explicit unsafe opt-in,",
+    "published": "2026-07-19T20:16:28.800",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.450883+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12484",
+      "cvss": {
+        "version": "3.0",
+        "base_score": 7.8,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.0/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Received",
+      "last_modified": "2026-07-20T15:16:34.223",
+      "references": [
+        "https://huntr.com/bounties/ab14df49-13b5-4442-b754-3189430bfa28",
+        "https://huntr.com/bounties/ab14df49-13b5-4442-b754-3189430bfa28"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-42566",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-42566",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.23.b246bcd, a single node advertising a User.long_name that contains a malformed character encoding can render other radios unusable over BLE when managed through the iOS app. The malformed name does not need to be maliciously crafted — it can arise from ordinary buffer truncation and has been observed occurring naturally in the wild. At least one code path could place a null terminator in the middle of a multibyte sequence, leaving a malformed User.long_name in the node database. The problem surfaced downstream: the iOS app enforced encoding validation and therefore cannot parse a node database once it contains a poisoned entry. This caused BLE sync to enter a fail/retry loop, resulting in loss of control over the affected device. For a typical user managing their radio with the iOS app, the device becomes effectively unusable until the poisoned node ages out of the on-device database, or unless they have an alternate management path (e.g., the Python CLI, which can be used to identify and remove the offending entries manually). Because the malformed name propagates through the mesh, the temporary presence of a single affected node can degrade BLE management for iOS users across a wide geographical area for an extended period. Less technical users have no straightforward recovery path. Starting in version 2.7.23.b246bcd, the firmware has added input sanitization and regression tests demonstrating recovery for already-poisoned devices. The apps have also taken steps to ensure more graceful handling of malformed encoding sequences as well.",
+    "summary": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.23.b246bcd, a single node advertising a User.long_name that contains a malformed character encoding can render other radios unusable over BLE when managed through the iOS app. The malformed name does not need to be malicious",
+    "published": "2026-07-20T00:16:58.050",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.450961+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-42566",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.5,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Received",
+      "last_modified": "2026-07-21T16:17:10.653",
+      "references": [
+        "https://github.com/meshtastic/firmware/commit/2cc13a1132d94b66a9505e7f07ee2d3e83bd0c95",
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-7ph5-2mjv-69h8"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-44359",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-44359",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.21.1370b23, the Meshtastic GitHub repository's main_matrix.yml workflow is triggered by pull_request_target  and multiple jobs check out the attacker's fork code and execute it with access to repository secrets and elevated GITHUB_TOKEN permissions. No approval gate exists. Pull requests from external users with author_association: \"NONE\" triggered the CI workflow automatically. The workflow directly executes attacker-controlled files from the fork checkout. This issue could have resulted in supply chain compromise, self-hosted runner compromise, and/or repository takeover for the repo. This issue is separate from GHSA-6mwm-v2vv-pp96, which addressed a command injection via github.head_ref in the setup job of the same workflow. That fix correctly moved to environment variables. However, the more critical fork checkout vulnerability across the check, build, and build-debian-src jobs was not addressed. Version 2.7.21.1370b23 contains a patch for thie issue.",
+    "summary": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.21.1370b23, the Meshtastic GitHub repository's main_matrix.yml workflow is triggered by pull_request_target  and multiple jobs check out the attacker's fork code and execute it with access to repository secrets and elevated",
+    "published": "2026-07-20T00:16:58.210",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451009+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-44359",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 10.0,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N"
+      },
+      "vuln_status": "Received",
+      "last_modified": "2026-07-20T19:17:22.790",
+      "references": [
+        "https://drive.google.com/file/d/1GdHT2s5hMYCiHt4zrWt1q58mvL7WQC0M/view?usp=sharing",
+        "https://github.com/meshtastic/firmware/commit/5716aeba3bc1e1d34fba9567ff88917ede4a78a5",
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-6mwm-v2vv-pp96",
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-mjx5-98jq-q736"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-45138",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-45138",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "CI4MS is a CodeIgniter 4-based content management system skeleton. Prior to version 0.31.9.0, the custom `html_purify` validation rule used to sanitize blog post bodies relies on by-reference mutation (`?string &$str`), but CodeIgniter 4's validator passes a local copy of the value, so the sanitized text is silently discarded. The Blog controller writes `$lanData['content']` directly into `blog_langs.content`, and the public template echoes it without escaping — yielding stored XSS executable in any visitor's browser, including the superadmin when previewing or editing posts. Version 0.31.9.0 patches the issue.",
+    "summary": "CI4MS is a CodeIgniter 4-based content management system skeleton. Prior to version 0.31.9.0, the custom `html_purify` validation rule used to sanitize blog post bodies relies on by-reference mutation (`?string &$str`), but CodeIgniter 4's validator passes a local copy of the value, so the sanitized",
+    "published": "2026-07-20T00:16:58.363",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451038+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-45138",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T20:27:18.523",
+      "references": [
+        "https://github.com/ci4-cms-erp/ci4ms/releases/tag/0.31.9.0",
+        "https://github.com/ci4-cms-erp/ci4ms/security/advisories/GHSA-2m69-jmvh-6chr",
+        "https://github.com/ci4-cms-erp/ci4ms/security/advisories/GHSA-2m69-jmvh-6chr"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-10081",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-10081",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Unlimited Elements For Elementor WordPress plugin before 2.0.11 does not sanitize or escape Google review content fetched from the Serp API before rendering it in the Google Reviews widget output, allowing unauthenticated attackers who submit a malicious review on the targeted business's Google listing to deliver Stored XSS to any visitor (including administrators) of any WP page displaying that Place ID's reviews.",
+    "summary": "The Unlimited Elements For Elementor WordPress plugin before 2.0.11 does not sanitize or escape Google review content fetched from the Serp API before rendering it in the Google Reviews widget output, allowing unauthenticated attackers who submit a malicious review on the targeted business's Google",
+    "published": "2026-07-20T07:16:33.520",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451062+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10081",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.8,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/e5cde405-5b34-4d3d-bfda-325402b0a5bc/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-10724",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-10724",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Reviews Feed  WordPress plugin before 2.6.5 does not neutralize WordPress shortcodes contained in third-party review content before rendering it through its dynamic block, allowing unauthenticated attackers to execute arbitrary shortcodes on pages that display the feed by planting a shortcode in a review on the connected source.",
+    "summary": "The Reviews Feed  WordPress plugin before 2.6.5 does not neutralize WordPress shortcodes contained in third-party review content before rendering it through its dynamic block, allowing unauthenticated attackers to execute arbitrary shortcodes on pages that display the feed by planting a shortcode in",
+    "published": "2026-07-20T07:16:34.340",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451085+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10724",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.8,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/7def5cf4-655d-424b-b1fc-eb333465434e/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-10755",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-10755",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The All in One SEO  WordPress plugin before 4.9.9 does not correctly restrict access to some of its AI integration REST API endpoints, allowing users with low-level privileges such as Contributors to overwrite or reset the site-wide AI integration state.",
+    "summary": "The All in One SEO  WordPress plugin before 4.9.9 does not correctly restrict access to some of its AI integration REST API endpoints, allowing users with low-level privileges such as Contributors to overwrite or reset the site-wide AI integration state.",
+    "published": "2026-07-20T07:16:34.443",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451106+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10755",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 2.7,
+        "base_severity": "LOW",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/cc4e83e3-b581-4f65-ac2c-24fbfb9da4b3/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-11349",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-11349",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Modern Event Calendar Pro WordPress plugin before 7.34.0, Modern Events Calendar Lite WordPress plugin before 7.34.0 do not sanitise and escape a request parameter before using it in a SQL statement, through an AJAX action available to unauthenticated users, leading to an unauthenticated SQL injection vulnerability that allows attackers to extract sensitive data from the database.",
+    "summary": "The Modern Event Calendar Pro WordPress plugin before 7.34.0, Modern Events Calendar Lite WordPress plugin before 7.34.0 do not sanitise and escape a request parameter before using it in a SQL statement, through an AJAX action available to unauthenticated users, leading to an unauthenticated SQL inj",
+    "published": "2026-07-20T07:16:34.547",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451127+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-11349",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.6,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:N/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/572229cb-8a09-406d-8623-7d6b553bfdde/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-11868",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-11868",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The WP Travel  WordPress plugin before 11.7.1 does not perform capability or ownership checks on its booking cancellation action, which is also exposed to unauthenticated users, allowing them to cancel arbitrary bookings on the site.",
+    "summary": "The WP Travel  WordPress plugin before 11.7.1 does not perform capability or ownership checks on its booking cancellation action, which is also exposed to unauthenticated users, allowing them to cancel arbitrary bookings on the site.",
+    "published": "2026-07-20T07:16:34.650",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451147+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-11868",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/a82da13b-ee86-495b-a684-324c1541d7ab/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12592",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12592",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The SlimStat Analytics WordPress plugin before 5.5.0 does not escape a visitor-controlled geolocation value before outputting it in its admin analytics reports, allowing unauthenticated visitors to store a cross-site scripting payload that executes in the browser of an administrator who views the reports. Exploitation requires the SlimStat Analytics WordPress plugin before 5.5.0 to be configured to use the Cloudflare geolocation provider.",
+    "summary": "The SlimStat Analytics WordPress plugin before 5.5.0 does not escape a visitor-controlled geolocation value before outputting it in its admin analytics reports, allowing unauthenticated visitors to store a cross-site scripting payload that executes in the browser of an administrator who views the re",
+    "published": "2026-07-20T07:16:34.757",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451167+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12592",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.5,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/3658cae6-f6ae-4ecc-8d74-bb402e61f5d5/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12723",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12723",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not perform any authorisation check on one of its REST routes, allowing unauthenticated users to overwrite the content of arbitrary existing comments and to create pre-approved comments under a spoofed identity, bypassing comment moderation.",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not perform any authorisation check on one of its REST routes, allowing unauthenticated users to overwrite the content of arbitrary existing comments and to create pre-approved comments under a spoofed identity, bypassing comment moderation.",
+    "published": "2026-07-20T07:16:34.877",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451187+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12723",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/76df2c61-4ba7-4987-9e61-5d02142b3db5/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12724",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12724",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not sanitise or escape the email subject and body values supplied in a request before including them in the password-reset email it sends as HTML, allowing unauthenticated users to inject arbitrary HTML into the message delivered to a registered user, which can be used for phishing.",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not sanitise or escape the email subject and body values supplied in a request before including them in the password-reset email it sends as HTML, allowing unauthenticated users to inject arbitrary HTML into the message delivered to a registered user, w",
+    "published": "2026-07-20T07:16:34.980",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451208+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12724",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/6c2d4489-de82-472d-a5f7-dc01b305fdd0/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12898",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12898",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The All-in-One WP Migration and Backup WordPress plugin before 7.106 does not properly sanitise a user-supplied value before using it to build a file path, allowing unauthenticated attackers to create or append a log file in arbitrary locations outside its intended storage directory.",
+    "summary": "The All-in-One WP Migration and Backup WordPress plugin before 7.106 does not properly sanitise a user-supplied value before using it to build a file path, allowing unauthenticated attackers to create or append a log file in arbitrary locations outside its intended storage directory.",
+    "published": "2026-07-20T07:16:35.087",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451227+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12898",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/c90553e4-8e1a-4c99-a28f-a0de8d635caa/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12970",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12970",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The LearnPress  WordPress plugin before 4.4.1 does not escape a search parameter before reflecting it into an HTML attribute, leading to Reflected Cross-Site Scripting that executes in the browser of a logged-in instructor or administrator who is tricked into opening a crafted link.",
+    "summary": "The LearnPress  WordPress plugin before 4.4.1 does not escape a search parameter before reflecting it into an HTML attribute, leading to Reflected Cross-Site Scripting that executes in the browser of a logged-in instructor or administrator who is tricked into opening a crafted link.",
+    "published": "2026-07-20T07:16:35.190",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451254+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12970",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:L"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/d0a2780f-ab13-4bb8-935d-2aeba1de12d2/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12972",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12972",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to tamper with the payment-related metadata of arbitrary WooCommerce orders.",
+    "summary": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to tamper with the payment-related metadata of arbitrary WooCommerce orders.",
+    "published": "2026-07-20T07:16:35.290",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451274+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12972",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/dcd091d3-f830-4675-a3d5-926f4aa5a7a5/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-12973",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-12973",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to disclose the secret order key of arbitrary WooCommerce orders and, under some configurations, to modify order statuses.",
+    "summary": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to disclose the secret order key of arbitrary WooCommerce orders and, under some configurations, to modi",
+    "published": "2026-07-20T07:16:35.387",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451295+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12973",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/385bee73-f9e5-425e-aa4c-3ff9274f8e00/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-13142",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13142",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Social Login, Passkeys, Magic Link & Email OTP  WordPress plugin before 1.4.1 does not enforce rate limiting or a working attempt lockout on its passwordless email one-time-password verification, and stores the short numeric codes in plaintext, allowing an unauthenticated attacker who knows a registered email address to brute-force the code and log in as that user, including an administrator, leading to full site takeover.",
+    "summary": "The Social Login, Passkeys, Magic Link & Email OTP  WordPress plugin before 1.4.1 does not enforce rate limiting or a working attempt lockout on its passwordless email one-time-password verification, and stores the short numeric codes in plaintext, allowing an unauthenticated attacker who knows a re",
+    "published": "2026-07-20T07:16:35.483",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451315+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13142",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-21T18:51:56.150",
+      "references": [
+        "https://wpscan.com/vulnerability/a34d9be7-c121-4c95-9ebb-a14c763e16bb/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-13147",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13147",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not validate a user-supplied URL before requesting it server-side, allowing unauthenticated attackers to make the site issue HTTP requests to arbitrary hosts (Server-Side Request Forgery).",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not validate a user-supplied URL before requesting it server-side, allowing unauthenticated attackers to make the site issue HTTP requests to arbitrary hosts (Server-Side Request Forgery).",
+    "published": "2026-07-20T07:16:35.580",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451344+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13147",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 9.1,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/f39c3e35-8673-4095-a829-a9ec2624f66c/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-13156",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13156",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The MailerSend  WordPress plugin before 1.0.8 does not perform a nonce check on its configuration-delete action (it verifies the manage_options capability but ignores the nonce), so an attacker can trick a logged-in administrator into visiting a crafted page that wipes the MailerSend  WordPress plugin before 1.0.8's SMTP configuration and deactivates the MailerSend  WordPress plugin before 1.0.8, breaking the site's email delivery.",
+    "summary": "The MailerSend  WordPress plugin before 1.0.8 does not perform a nonce check on its configuration-delete action (it verifies the manage_options capability but ignores the nonce), so an attacker can trick a logged-in administrator into visiting a crafted page that wipes the MailerSend  WordPress plug",
+    "published": "2026-07-20T07:16:35.687",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451365+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13156",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:N/I:L/A:L"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/595e653d-0904-43cf-8e61-d684599de11b/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-13432",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13432",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The ThumbPress  WordPress plugin before 6.2.2 does not perform a capability check on one of its AJAX actions, allowing authenticated users with subscriber-level access or higher to deactivate the ThumbPress  WordPress plugin before 6.2.2, disrupting the site's image-handling functionality.",
+    "summary": "The ThumbPress  WordPress plugin before 6.2.2 does not perform a capability check on one of its AJAX actions, allowing authenticated users with subscriber-level access or higher to deactivate the ThumbPress  WordPress plugin before 6.2.2, disrupting the site's image-handling functionality.",
+    "published": "2026-07-20T07:16:35.783",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:02.451385+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13432",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:L"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/a408e8f9-4de7-4449-8fca-51ea46e4f433/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-16235",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-16235",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "Crypt::Password versions through 0.28 for Perl generate insecure random values for salts.\n\nThese versions use the built-in rand function, which is predictable and unsuitable for cryptography.",
+    "summary": "Crypt::Password versions through 0.28 for Perl generate insecure random values for salts.\n\nThese versions use the built-in rand function, which is predictable and unsuitable for cryptography.",
+    "published": "2026-07-20T07:16:37.320",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971775+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16235",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 9.8,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T19:17:19.980",
+      "references": [
+        "https://metacpan.org/release/DRSTEVE/Crypt-Password-0.28/source/lib/Crypt/Password.pm#L306-309",
+        "http://www.openwall.com/lists/oss-security/2026/07/20/3"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-6656",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-6656",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "Crypt::Password versions through 0.28 for Perl are susceptible to timing attacks.\n\nThe check_password method uses the built-in eq operator. This allows discrepancies in timing to be used to guess the underlying hash.",
+    "summary": "Crypt::Password versions through 0.28 for Perl are susceptible to timing attacks.\n\nThe check_password method uses the built-in eq operator. This allows discrepancies in timing to be used to guess the underlying hash.",
+    "published": "2026-07-20T07:16:42.440",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971835+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-6656",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.5,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T19:17:30.503",
+      "references": [
+        "https://metacpan.org/release/DRSTEVE/Crypt-Password-0.28/source/lib/Crypt/Password.pm#L190-193",
+        "https://rt.cpan.org/Ticket/Display.html?id=180162",
+        "http://www.openwall.com/lists/oss-security/2026/07/20/4"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-8825",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-8825",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Elementor Website Builder  WordPress plugin before 4.1.4 does not properly check user permissions before returning post data through one of its REST endpoints, allowing authenticated users with Contributor-level access and above to retrieve the title, body and metadata of private posts, private pages and drafts authored by other users (including administrators).",
+    "summary": "The Elementor Website Builder  WordPress plugin before 4.1.4 does not properly check user permissions before returning post data through one of its REST endpoints, allowing authenticated users with Contributor-level access and above to retrieve the title, body and metadata of private posts, private",
+    "published": "2026-07-20T07:16:42.553",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971862+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-8825",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.9,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/d0d6b840-790d-45a3-9b0d-8f77a229e8a9/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-9833",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-9833",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The Tag Groups is the Advanced Way to Display Your Taxonomy Terms WordPress plugin before 2.2.0 does not properly escape one of its AJAX parameters before reflecting it in the response body served with an HTML content type, allowing unauthenticated attackers to execute arbitrary JavaScript in the browser of a logged-in user with `edit_pages` capability (Editor or higher) who is tricked into following a crafted link.",
+    "summary": "The Tag Groups is the Advanced Way to Display Your Taxonomy Terms WordPress plugin before 2.2.0 does not properly escape one of its AJAX parameters before reflecting it in the response body served with an HTML content type, allowing unauthenticated attackers to execute arbitrary JavaScript in the br",
+    "published": "2026-07-20T07:16:42.657",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971883+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-9833",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:L"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-20T20:39:31.217",
+      "references": [
+        "https://wpscan.com/vulnerability/75792c33-2d9d-46db-a98c-00ec40951099/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-13577",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-13577",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "Dancer2 versions through 2.1.0 for Perl generate insecure session ids when required CSPRNG modules are unavailable.\n\nDancer2::Core::Role::SessionFactory::generate_id silently falls back to a built-in rand-derived session id unless both Math::Random::ISAAC::XS and Crypt::URandom are available.\n\nThe fallback session id is generated from a SHA-1 hash of a call to the built-in rand function, the absolute path of the Dancer2::Core::Role::SessionFactory module, an internal counter, the process id, the module instance memory address, and a shuffled string of characters (using the List::Util::shuffle function, which also uses the built-in rand function).\n\nThese are all low-entropy and easily guessed sources.\n\nThe built-in rand() function is seeded with 32-bits and considered unsuitable for security applications.\n\nPredictable session ids could allow an attacker to gain access to systems.",
+    "summary": "Dancer2 versions through 2.1.0 for Perl generate insecure session ids when required CSPRNG modules are unavailable.\n\nDancer2::Core::Role::SessionFactory::generate_id silently falls back to a built-in rand-derived session id unless both Math::Random::ISAAC::XS and Crypt::URandom are available.\n\nThe f",
+    "published": "2026-07-20T08:16:28.987",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971911+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13577",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.2,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:H"
+      },
+      "vuln_status": "Deferred",
+      "last_modified": "2026-07-22T12:17:09.823",
+      "references": [
+        "https://github.com/PerlDancer/Dancer2/blob/v2.1.0/lib/Dancer2/Core/Role/SessionFactory.pm#L142",
+        "https://www.cve.org/CVERecord?id=CVE-2026-5080"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-16242",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-16242",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "A flaw was found in the Konnectivity proxy-server configuration for hosted control planes. The agent-facing listener was started without --cluster-ca-cert (and without token-based agent authentication), so client certificates were not validated. A remote attacker who can reach the Konnectivity cluster endpoint could connect as an unauthenticated agent, join the routing pool, and potentially proxy, inspect, modify, or drop control-plane-to-node traffic.",
+    "summary": "A flaw was found in the Konnectivity proxy-server configuration for hosted control planes. The agent-facing listener was started without --cluster-ca-cert (and without token-based agent authentication), so client certificates were not validated. A remote attacker who can reach the Konnectivity clust",
+    "published": "2026-07-20T08:16:29.833",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971932+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16242",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 9.4,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T18:31:51.680",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-16242",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2502690",
+        "https://github.com/openshift/hypershift/pull/9031"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-2445",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-2445",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "The affected product accepts user-supplied input within a URL parameter without enforcing expected sanitization or encoding before rendering it within the response. This condition allows for the injection of malicious JavaScript payloads.\n\nAn attacker can leverage this vulnerability to cause the user's browser to redirect to a malicious website, modify the user interface of the webpage, or retrieve sensitive information from the browser. However, the impact is mitigated for session hijacking as all session-related sensitive cookies are protected by the httpOnly flag.",
+    "summary": "The affected product accepts user-supplied input within a URL parameter without enforcing expected sanitization or encoding before rendering it within the response. This condition allows for the injection of malicious JavaScript payloads.\n\nAn attacker can leverage this vulnerability to cause the use",
+    "published": "2026-07-20T08:16:30.143",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971953+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-2445",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+      },
+      "vuln_status": "Received",
+      "last_modified": "2026-07-20T15:16:36.853",
+      "references": [
+        "https://security.docs.wso2.com/en/latest/security-announcements/security-advisories/2026/WSO2-2026-5059/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-14448",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-14448",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "An high privileged remote attacker can exploit an authenticated OS command injection vulnerability in the system_certificates view due to improper neutralization of special elements in an OS command. This can result in a total loss of confidentiality, availability and integrity.",
+    "summary": "An high privileged remote attacker can exploit an authenticated OS command injection vulnerability in the system_certificates view due to improper neutralization of special elements in an OS command. This can result in a total loss of confidentiality, availability and integrity.",
+    "published": "2026-07-20T12:17:54.707",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971973+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-14448",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.2,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Received",
+      "last_modified": "2026-07-20T15:16:34.503",
+      "references": [
+        "https://www.certvde.com/en/advisories/VDE-2026-044/",
+        "https://www.certvde.com/en/advisories/VDE-2026-058/"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-15588",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-15588",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "A denial-of-service and resource exhaustion vulnerability exists within the `GDBus` component of GLib. The `gdbusauth` authentication mechanism fails to enforce proper length limitations on data lines read from a client. An unauthenticated local or remote attacker can exploit this lack of input validation by sending excessively long streams of data, causing the application to consume massive amounts of system memory and CPU, potentially leading to a crash or system hang.",
+    "summary": "A denial-of-service and resource exhaustion vulnerability exists within the `GDBus` component of GLib. The `gdbusauth` authentication mechanism fails to enforce proper length limitations on data lines read from a client. An unauthenticated local or remote attacker can exploit this lack of input vali",
+    "published": "2026-07-20T12:17:55.220",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.971993+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-15588",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T18:31:51.680",
+      "references": [
+        "https://access.redhat.com/errata/RHSA-2026:39985",
+        "https://access.redhat.com/errata/RHSA-2026:40485",
+        "https://access.redhat.com/errata/RHSA-2026:42329",
+        "https://access.redhat.com/security/cve/CVE-2026-15588",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2499675",
+        "https://gitlab.gnome.org/GNOME/glib/-/issues/3985",
+        "https://gitlab.gnome.org/GNOME/glib/-/issues/3985"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-15813",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-15813",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "A vulnerability was found in the network packet de-fragmentation engine of kronosnet (Version affected <= 1.34). The internal reassembly code does not properly validate sequence numbers of incoming payload fragments. An attacker can exploit this lack of verification by transmitting malformed packets with corrupted sequence parameters. Under specific conditions, this forces the packet processing layer to parse data outside the designated bounds of the internal memory structures, causing an out-of-bounds memory access or heap corruption. This behavior can result in sudden application crashes or system instability.",
+    "summary": "A vulnerability was found in the network packet de-fragmentation engine of kronosnet (Version affected <= 1.34). The internal reassembly code does not properly validate sequence numbers of incoming payload fragments. An attacker can exploit this lack of verification by transmitting malformed packets",
+    "published": "2026-07-20T12:17:55.377",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972010+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-15813",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:H"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T18:31:51.680",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-15813",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2500854"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-16246",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-16246",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "In BRAIN2 versions prior to 3.09, the\napplication LogPathConfig.exe is executed during setup. As a result, the\nWindows group Everyone is granted full control over %ProgramData% instead of\nbeing restricted to %ProgramData%\\Bizerba\\BRAIN2\\.\n\n\n\n\n\nStarting with BRAIN2 3.09, the setup no\nlonger executes this tool.\n\nHowever, the optional component Bizerba ScriptService still executes it.\n\n\n\n\n\nBizerba ScriptService is being\ndeprecated and will no longer be included starting with BRAIN2 version 3.11.",
+    "summary": "In BRAIN2 versions prior to 3.09, the\napplication LogPathConfig.exe is executed during setup. As a result, the\nWindows group Everyone is granted full control over %ProgramData% instead of\nbeing restricted to %ProgramData%\\Bizerba\\BRAIN2\\.\n\n\n\n\n\nStarting with BRAIN2 3.09, the setup no\nlonger executes",
+    "published": "2026-07-20T12:17:56.087",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972028+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16246",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.3,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T20:25:45.920",
+      "references": [
+        "https://www.bizerba.com/downloads/global/information-security/2026/bizerba-sa-2026-0003.pdf"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-16247",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-16247",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "In _connect.BRAIN versions prior to 5.06,\nthe application LogPathConfig.exe is executed during setup. During this\nprocess, existing permissions on %ProgramData% are deleted and replaced,\ngranting the Windows group Everyone full control instead of restricting\naccess to %ProgramData%\\Bizerba\\_connect.BRAIN or %ProgramData%\\Bizerba\\BCT.\n\n\n\n\n\n\n\n\n\nStarting with _connect.BRAIN 5.06,\nthe setup no longer executes this tool.",
+    "summary": "In _connect.BRAIN versions prior to 5.06,\nthe application LogPathConfig.exe is executed during setup. During this\nprocess, existing permissions on %ProgramData% are deleted and replaced,\ngranting the Windows group Everyone full control instead of restricting\naccess to %ProgramData%\\Bizerba\\_connect.",
+    "published": "2026-07-20T12:17:56.230",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972046+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16247",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.3,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T20:25:45.920",
+      "references": [
+        "https://www.bizerba.com/downloads/global/information-security/2026/bizerba-sa-2026-0003.pdf"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-16254",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-16254",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "A flaw was found in claircore's apk package scanner. Malformed package-database data in a container layer can cause an out-of-bounds access that panics the scanner. If that panic is not recovered, the Clair indexer process can crash, leading to a denial of service.",
+    "summary": "A flaw was found in claircore's apk package scanner. Malformed package-database data in a container layer can cause an out-of-bounds access that panics the scanner. If that panic is not recovered, the Clair indexer process can crash, leading to a denial of service.",
+    "published": "2026-07-20T12:17:56.373",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972064+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16254",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L"
+      },
+      "vuln_status": "Awaiting Analysis",
+      "last_modified": "2026-07-21T18:31:51.680",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-16254",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2502701"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63733",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63733",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 contain a permissions bypass vulnerability where data-modifying statements within PERMISSIONS clauses execute with enforcement disabled. Attackers with permission to perform a guarded operation can write to tables they lack permission for by embedding CREATE, UPDATE, DELETE, or UPSERT statements in the PERMISSIONS clause, causing unintended writes and data corruption.",
+    "summary": "SurrealDB versions before 3.2.0 contain a permissions bypass vulnerability where data-modifying statements within PERMISSIONS clauses execute with enforcement disabled. Attackers with permission to perform a guarded operation can write to tables they lack permission for by embedding CREATE, UPDATE,",
+    "published": "2026-07-20T12:19:42.243",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972084+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63733",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:53:24.560",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-66r2-5gwj-gxm2",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permissions-bypass-via-permissions-clause"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63734",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63734",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 contain a denial of service vulnerability in the SurrealML header parser that allows authenticated Owner-role users to crash the server by uploading a malformed .surml file to the /ml/import endpoint. Attackers can supply non-numeric input-dimensions or other malformed header fields that trigger unchecked unwrap calls, causing a panic that aborts the entire server process and denies service to all databases.",
+    "summary": "SurrealDB versions before 3.2.0 contain a denial of service vulnerability in the SurrealML header parser that allows authenticated Owner-role users to crash the server by uploading a malformed .surml file to the /ml/import endpoint. Attackers can supply non-numeric input-dimensions or other malforme",
+    "published": "2026-07-20T12:19:42.413",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972102+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63734",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.9,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:52:42.580",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-jwr6-6444-28xv",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-malformed-surrealml-import"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63735",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63735",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 fail to validate namespace and database scope in custom API routes, allowing authenticated users to invoke endpoints in different namespaces/databases. Attackers with valid credentials for any namespace/database can access custom API endpoints in other tenants by specifying the target scope in the URL path, reading sensitive data or triggering unintended operations.",
+    "summary": "SurrealDB versions before 3.2.0 fail to validate namespace and database scope in custom API routes, allowing authenticated users to invoke endpoints in different namespaces/databases. Attackers with valid credentials for any namespace/database can access custom API endpoints in other tenants by spec",
+    "published": "2026-07-20T12:19:42.563",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972127+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63735",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:52:08.243",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-848m-r628-vrxw",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-custom-api"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63736",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63736",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.2.0 contains a server-side request forgery vulnerability in the JWKS fetcher that validates only the URL hostname string against allow-lists without checking resolved IP addresses. An Owner role attacker can point an access method at an allow-listed hostname resolving to private or loopback addresses, causing the server to issue GET requests to internal addresses that would be blocked by direct URL.",
+    "summary": "SurrealDB before 3.2.0 contains a server-side request forgery vulnerability in the JWKS fetcher that validates only the URL hostname string against allow-lists without checking resolved IP addresses. An Owner role attacker can point an access method at an allow-listed hostname resolving to private o",
+    "published": "2026-07-20T12:19:42.707",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972145+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63736",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:51:26.100",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-5x4x-2946-qr67",
+        "https://www.vulncheck.com/advisories/surrealdb-before-ssrf-via-jwks-url-hostname-resolution"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63737",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63737",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.5 contain a denial of service vulnerability where authenticated users can crash the server with queries containing long chains of operators. Attackers can submit queries with tens of thousands of chained operators that create unbounded expression trees, causing stack overflow during query processing and aborting the entire process.",
+    "summary": "SurrealDB versions before 3.1.5 contain a denial of service vulnerability where authenticated users can crash the server with queries containing long chains of operators. Attackers can submit queries with tens of thousands of chained operators that create unbounded expression trees, causing stack ov",
+    "published": "2026-07-20T12:19:42.857",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972169+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63737",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:50:35.560",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-jv2j-mqmw-xvv5",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-deep-operator-chains"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63738",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63738",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions 3.1.0 before 3.1.5 fail to enforce field-level SELECT permissions when records are accessed through graph-edge or back-reference traversals. Attackers with table-level SELECT access can read field values hidden by field-level permissions by materializing records through graph traversals instead of direct table scans.",
+    "summary": "SurrealDB versions 3.1.0 before 3.1.5 fail to enforce field-level SELECT permissions when records are accessed through graph-edge or back-reference traversals. Attackers with table-level SELECT access can read field values hidden by field-level permissions by materializing records through graph trav",
+    "published": "2026-07-20T12:19:43.000",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972188+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63738",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:49:56.960",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-hv6h-hc26-q48p",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-traversal"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63739",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63739",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.5 contains an arbitrary file read vulnerability in the DEFINE ANALYZER mapper filter that allows database users with EDITOR or OWNER roles to read files accessible to the SurrealDB process. Attackers can specify arbitrary file paths in the mapper filter and retrieve file contents through query error messages when the SURREAL_FILE_ALLOWLIST is empty or not configured.",
+    "summary": "SurrealDB before 3.1.5 contains an arbitrary file read vulnerability in the DEFINE ANALYZER mapper filter that allows database users with EDITOR or OWNER roles to read files accessible to the SurrealDB process. Attackers can specify arbitrary file paths in the mapper filter and retrieve file content",
+    "published": "2026-07-20T12:19:43.143",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:08.972206+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63739",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.7,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:49:10.453",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-cc8f-fcx3-gpjr",
+        "https://www.vulncheck.com/advisories/surrealdb-before-arbitrary-file-read-via-define-analyzer"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63740",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63740",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.4 fail to properly enforce SELECT permissions on array elements (field.*) for record users, leaking denied array elements instead of hiding them. Attackers with record scope access can read array elements that element-level permissions should deny by exploiting incorrect index handling during permission filtering.",
+    "summary": "SurrealDB versions before 3.1.4 fail to properly enforce SELECT permissions on array elements (field.*) for record users, leaking denied array elements instead of hiding them. Attackers with record scope access can read array elements that element-level permissions should deny by exploiting incorrec",
+    "published": "2026-07-20T12:19:43.287",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523065+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63740",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:48:36.197",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-8rw6-p7m8-63jp",
+        "https://www.vulncheck.com/advisories/surrealdb-before-array-element-permission-bypass"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63741",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63741",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to validate DEFINE NAMESPACE or DEFINE DATABASE permissions when processing USE NS and USE DB statements. Unauthenticated attackers can create arbitrary namespaces and databases by issuing USE commands, bypassing authorization checks in the RPC use method and SurrealQL executor.",
+    "summary": "SurrealDB versions before 3.1.0 fail to validate DEFINE NAMESPACE or DEFINE DATABASE permissions when processing USE NS and USE DB statements. Unauthenticated attackers can create arbitrary namespaces and databases by issuing USE commands, bypassing authorization checks in the RPC use method and Sur",
+    "published": "2026-07-20T12:19:43.430",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523132+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63741",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:L/A:L"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:47:46.527",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-wp87-mgvq-5j93",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-use-statement"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63742",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63742",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a field-level SELECT permission bypass vulnerability in indexed COUNT fast paths. Attackers can execute COUNT queries on indexed fields with field-level SELECT restrictions to confirm or recover restricted field values through repeated guesses.",
+    "summary": "SurrealDB versions before 3.1.0 contain a field-level SELECT permission bypass vulnerability in indexed COUNT fast paths. Attackers can execute COUNT queries on indexed fields with field-level SELECT restrictions to confirm or recover restricted field values through repeated guesses.",
+    "published": "2026-07-20T12:19:43.573",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523159+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63742",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:47:01.527",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-c8jx-96c9-8xrp",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-indexed-count"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63743",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63743",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 contains a capability bypass vulnerability in HTTP redirect handling that allows authenticated users to circumvent port-scoped --deny-net rules. Attackers can chain an HTTP redirect from an allowed hostname to a denied host:port combination, and the redirect is followed because the port information is dropped during redirect policy evaluation.",
+    "summary": "SurrealDB before 3.1.0 contains a capability bypass vulnerability in HTTP redirect handling that allows authenticated users to circumvent port-scoped --deny-net rules. Attackers can chain an HTTP redirect from an allowed hostname to a denied host:port combination, and the redirect is followed becaus",
+    "published": "2026-07-20T12:19:43.713",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523179+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63743",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:L/I:L/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:46:28.590",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-97vg-427p-8hx5",
+        "https://www.vulncheck.com/advisories/surrealdb-before-port-specific-deny-rule-bypass-via-http-redirect"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63744",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63744",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.5 contains a server-side request forgery vulnerability in the JWKS fetcher that follows HTTP redirects without re-validating redirect targets against network capabilities. Attackers with Owner role can configure a JWKS URL pointing to an allowlisted host that redirects to blocked internal addresses, bypassing network access controls.",
+    "summary": "SurrealDB before 3.1.5 contains a server-side request forgery vulnerability in the JWKS fetcher that follows HTTP redirects without re-validating redirect targets against network capabilities. Attackers with Owner role can configure a JWKS URL pointing to an allowlisted host that redirects to blocke",
+    "published": "2026-07-20T12:19:43.860",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523199+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63744",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:45:46.840",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-h5rg-8p7f-47g2",
+        "https://www.vulncheck.com/advisories/surrealdb-before-ssrf-via-jwks-url-redirect"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63745",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63745",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability where authenticated users can spoof composite record-id field values by writing to editable body fields. Attackers can bypass permission rules that gate access on id components like tenant isolation by setting same-named body fields to spoofed values that permission checks incorrectly read instead of the immutable id key.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability where authenticated users can spoof composite record-id field values by writing to editable body fields. Attackers can bypass permission rules that gate access on id components like tenant isolation by setting same-named b",
+    "published": "2026-07-20T12:19:44.003",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523218+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63745",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:45:14.860",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6vg3-hgrw-p5gf",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authorization-bypass-via-composite-record-id"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63746",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63746",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to enforce table SELECT permissions when traversing graph edges or back-references. Authenticated users can read records from any table reachable through graph edges regardless of the target table's PERMISSIONS FOR select clause.",
+    "summary": "SurrealDB versions before 3.1.0 fail to enforce table SELECT permissions when traversing graph edges or back-references. Authenticated users can read records from any table reachable through graph edges regardless of the target table's PERMISSIONS FOR select clause.",
+    "published": "2026-07-20T12:19:44.143",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523237+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63746",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:43:42.097",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-vjjx-rfw4-rmfc",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permission-bypass-via-graph-traversal"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63747",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63747",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability in the RPC use handler that panics when db is set without a namespace. Unauthenticated attackers can send a malformed WebSocket message to the /rpc endpoint to crash the server process.",
+    "summary": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability in the RPC use handler that panics when db is set without a namespace. Unauthenticated attackers can send a malformed WebSocket message to the /rpc endpoint to crash the server process.",
+    "published": "2026-07-20T12:19:44.300",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523255+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63747",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.5,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:43:07.650",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-wjjj-24cx-f28g",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-malformed-rpc-use"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63748",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63748",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an information disclosure vulnerability where authenticated users with UPDATE access can read field values hidden by field-level SELECT permissions through error messages. Attackers can trigger arithmetic or extend operations on hidden fields to embed raw operand values in error responses, bypassing field-level access controls.",
+    "summary": "SurrealDB versions before 3.1.0 contain an information disclosure vulnerability where authenticated users with UPDATE access can read field values hidden by field-level SELECT permissions through error messages. Attackers can trigger arithmetic or extend operations on hidden fields to embed raw oper",
+    "published": "2026-07-20T12:19:44.440",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523273+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63748",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:42:28.720",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6g9v-7gq3-p2c6",
+        "https://www.vulncheck.com/advisories/surrealdb-before-information-disclosure-via-error-messages"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63749",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63749",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authentication bypass vulnerability in LIVE SELECT subscriptions where permission expressions referencing $value, $before, $after, or $event are evaluated against attacker-controlled bindings instead of actual documents. Authenticated subscribers can bind chosen values to these parameter names and register LIVE SELECT queries to receive notifications for records that SELECT permission expressions should have hidden.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authentication bypass vulnerability in LIVE SELECT subscriptions where permission expressions referencing $value, $before, $after, or $event are evaluated against attacker-controlled bindings instead of actual documents. Authenticated subscribers can bind c",
+    "published": "2026-07-20T12:19:44.590",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523291+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63749",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:42:06.667",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6wqw-vhfr-9999",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-live-select"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63750",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63750",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to apply the SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE limit to anonymous /sql WebSocket connections, allowing attackers to buffer unbounded frames in the per-connection read buffer. Attackers can stream WebSocket frames larger than the configured limit across multiple concurrent connections to consume excessive memory and degrade /sql availability.",
+    "summary": "SurrealDB versions before 3.1.0 fail to apply the SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE limit to anonymous /sql WebSocket connections, allowing attackers to buffer unbounded frames in the per-connection read buffer. Attackers can stream WebSocket frames larger than the configured limit across multiple",
+    "published": "2026-07-20T12:19:44.730",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523310+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63750",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:41:31.027",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-65rj-r9fh-jp2v",
+        "https://www.vulncheck.com/advisories/surrealdb-before-memory-amplification-via-sql-websocket"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63751",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63751",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a field-level permission bypass vulnerability in JSON Patch operations that allows authenticated users to read protected fields. Attackers can use UPDATE PATCH with an empty from pointer in copy or move operations to duplicate all record fields, including those restricted by field-level SELECT permissions, into attacker-chosen destination fields.",
+    "summary": "SurrealDB versions before 3.1.0 contain a field-level permission bypass vulnerability in JSON Patch operations that allows authenticated users to read protected fields. Attackers can use UPDATE PATCH with an empty from pointer in copy or move operations to duplicate all record fields, including thos",
+    "published": "2026-07-20T12:19:44.873",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523328+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63751",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:39:37.620",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-fpxg-5xmv-922m",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-json-patch"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63752",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63752",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 contains an authorization bypass vulnerability in the RELATE statement that allows authenticated users with CREATE permission to overwrite existing edge records without UPDATE permission. Attackers can issue a RELATE statement with a SET id clause pointing to an existing edge id, causing the storage layer to silently overwrite the target record instead of rejecting the operation.",
+    "summary": "SurrealDB before 3.1.0 contains an authorization bypass vulnerability in the RELATE statement that allows authenticated users with CREATE permission to overwrite existing edge records without UPDATE permission. Attackers can issue a RELATE statement with a SET id clause pointing to an existing edge",
+    "published": "2026-07-20T12:19:45.007",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523352+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63752",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:39:07.867",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-f82j-v89j-mf86",
+        "https://www.vulncheck.com/advisories/surrealdb-before-relate-statement-record-overwrite"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63753",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63753",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 fails to refresh authentication state in LIVE SELECT subscriptions when session state changes. Attackers can continue receiving real-time notifications under revoked or expired session credentials until the connection closes.",
+    "summary": "SurrealDB before 3.1.0 fails to refresh authentication state in LIVE SELECT subscriptions when session state changes. Attackers can continue receiving real-time notifications under revoked or expired session credentials until the connection closes.",
+    "published": "2026-07-20T12:19:45.150",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523443+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63753",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:27:00.460",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4m82-p8cx-f94j",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-live-query"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63754",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63754",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability where malicious LIVE queries with WHERE clauses that evaluate to errors cause all CREATE, UPDATE, and DELETE operations on the watched table to fail. An authenticated user with only select permission can prevent write operations on a table for any user, including root, by registering a LIVE query that triggers evaluation errors until the query is killed or the session ends.",
+    "summary": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability where malicious LIVE queries with WHERE clauses that evaluate to errors cause all CREATE, UPDATE, and DELETE operations on the watched table to fail. An authenticated user with only select permission can prevent write operatio",
+    "published": "2026-07-20T12:19:45.293",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523468+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63754",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:20:06.707",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4v76-cw68-4vc9",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-live-query"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63755",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63755",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 evaluates user-supplied WHERE clauses in SELECT statements (and SET/MERGE/CONTENT/PATCH clauses in UPDATE, UPSERT, INSERT ON DUPLICATE KEY UPDATE, and RELATE update-variant statements) against full record data before enforcing PERMISSIONS FOR SELECT WHERE restrictions. An authenticated user — including Record and Scope users — can exploit this ordering flaw to read the full contents of any table in the database they are authenticated against, bypassing table-level permission checks. Exfiltration is most direct when scripting functions are enabled (--allow-scripting), but is also possible via SurrealQL's THROW statement and timing-based side channels without scripting. The vulnerability is confined to the attacker's current database and does not cross namespace or database isolation boundaries.",
+    "summary": "SurrealDB before 3.1.0 evaluates user-supplied WHERE clauses in SELECT statements (and SET/MERGE/CONTENT/PATCH clauses in UPDATE, UPSERT, INSERT ON DUPLICATE KEY UPDATE, and RELATE update-variant statements) against full record data before enforcing PERMISSIONS FOR SELECT WHERE restrictions. An auth",
+    "published": "2026-07-20T12:19:45.433",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523487+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63755",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:19:27.620",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-98fx-66cf-fc7c",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permission-bypass-via-where-clause"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63756",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63756",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a time-of-check/time-of-use race condition in the HTTP /rpc endpoint that allows unauthenticated requests to inherit authenticated session state. Unauthenticated attackers can send concurrent requests to the /rpc endpoint while legitimate authenticated traffic is active to execute operations with hijacked user privileges.",
+    "summary": "SurrealDB versions before 3.1.0 contain a time-of-check/time-of-use race condition in the HTTP /rpc endpoint that allows unauthenticated requests to inherit authenticated session state. Unauthenticated attackers can send concurrent requests to the /rpc endpoint while legitimate authenticated traffic",
+    "published": "2026-07-20T12:19:45.590",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523505+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63756",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:18:35.643",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4vgr-h27g-cf9p",
+        "https://www.vulncheck.com/advisories/surrealdb-before-privilege-escalation-via-rpc-session-race-condition"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63757",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63757",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a session hijacking vulnerability where the HTTP /rpc sessions method returns attached session UUIDs without authentication and accepts arbitrary session fields with no ownership verification. Unauthenticated attackers can enumerate session UUIDs and impersonate authenticated sessions to read, write, delete data and escalate privileges.",
+    "summary": "SurrealDB versions before 3.1.0 contain a session hijacking vulnerability where the HTTP /rpc sessions method returns attached session UUIDs without authentication and accepts arbitrary session fields with no ownership verification. Unauthenticated attackers can enumerate session UUIDs and impersona",
+    "published": "2026-07-20T12:19:45.747",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523529+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63757",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 8.8,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:17:47.373",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-5qfp-32cf-69jh",
+        "https://www.vulncheck.com/advisories/surrealdb-before-session-hijacking-via-rpc-sessions"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63758",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63758",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability in the KILL statement that allows authenticated database users to terminate other users' LIVE SELECT subscriptions. Attackers can issue KILL statements with target live query UUIDs to disrupt real-time data subscriptions of other users without ownership verification.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability in the KILL statement that allows authenticated database users to terminate other users' LIVE SELECT subscriptions. Attackers can issue KILL statements with target live query UUIDs to disrupt real-time data subscriptions o",
+    "published": "2026-07-20T12:19:45.900",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523548+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63758",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:L"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:10:45.730",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-gcwr-5mrf-fvch",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authorization-bypass-via-kill-statement"
+      ]
+    }
+  },
+  {
+    "title": "CVE-2026-63759",
+    "link": "https://nvd.nist.gov/vuln/detail/CVE-2026-63759",
+    "source": "NVD",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 fails to enforce recursion depth limits in the type/kind parser when processing nested type annotations. Authenticated attackers can send queries with deeply nested type annotations to exhaust server memory and crash the process.",
+    "summary": "SurrealDB before 3.1.0 fails to enforce recursion depth limits in the type/kind parser when processing nested type annotations. Authenticated attackers can send queries with deeply nested type annotations to exhaust server memory and crash the process.",
+    "published": "2026-07-20T12:19:46.047",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:15.523565+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63759",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "vuln_status": "Analyzed",
+      "last_modified": "2026-07-22T15:09:00.570",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-q8qp-67f9-wr3f",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-nested-type-annotations"
+      ]
+    }
+  },
+  {
+    "title": "Unsafe Deserialization in keras.layers.TorchModuleWrapper.from_config",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12484",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "A vulnerability in keras-team/keras version 3.15.0 allows unsafe deserialization of attacker-controlled PyTorch pickle data through the public `keras.layers.TorchModuleWrapper.from_config` method. This method invokes `torch.load(..., weights_only=False)` without requiring an explicit unsafe opt-in, such as a `safe_mode=False` parameter. When called outside a `SafeModeScope(True)` context, the absence of an ambient safe mode state permits unsafe deserialization by default. This issue can lead to arbitrary code execution if untrusted Keras layer configurations are processed using this method. The vulnerability arises because the method does not enforce safe deserialization practices unless explicitly guarded by Keras safe mode.",
+    "summary": "A vulnerability in keras-team/keras version 3.15.0 allows unsafe deserialization of attacker-controlled PyTorch pickle data through the public `keras.layers.TorchModuleWrapper.from_config` method. This method invokes `torch.load(..., weights_only=False)` without requiring an explicit unsafe opt-in,",
+    "published": "2026-07-19T19:47:27.743Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:23.599205+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12484",
+      "cvss": {
+        "version": "3.0",
+        "base_score": 7.8,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.0/AV:L/AC:L/PR:N/UI:R/S:U/C:H/I:H/A:H"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://huntr.com/bounties/ab14df49-13b5-4442-b754-3189430bfa28"
+      ]
+    }
+  },
+  {
+    "title": "Meshtastic: Malformed UTF-8 in User.long_name broadcast over LoRa causes mesh-wide client decode failure",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-42566",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.23.b246bcd, a single node advertising a User.long_name that contains a malformed character encoding can render other radios unusable over BLE when managed through the iOS app. The malformed name does not need to be maliciously crafted — it can arise from ordinary buffer truncation and has been observed occurring naturally in the wild. At least one code path could place a null terminator in the middle of a multibyte sequence, leaving a malformed User.long_name in the node database. The problem surfaced downstream: the iOS app enforced encoding validation and therefore cannot parse a node database once it contains a poisoned entry. This caused BLE sync to enter a fail/retry loop, resulting in loss of control over the affected device. For a typical user managing their radio with the iOS app, the device becomes effectively unusable until the poisoned node ages out of the on-device database, or unless they have an alternate management path (e.g., the Python CLI, which can be used to identify and remove the offending entries manually). Because the malformed name propagates through the mesh, the temporary presence of a single affected node can degrade BLE management for iOS users across a wide geographical area for an extended period. Less technical users have no straightforward recovery path. Starting in version 2.7.23.b246bcd, the firmware has added input sanitization and regression tests demonstrating recovery for already-poisoned devices. The apps have also taken steps to ensure more graceful handling of malformed encoding sequences as well.",
+    "summary": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.23.b246bcd, a single node advertising a User.long_name that contains a malformed character encoding can render other radios unusable over BLE when managed through the iOS app. The malformed name does not need to be malicious",
+    "published": "2026-07-19T23:16:04.835Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:24.068448+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-42566",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.5,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-7ph5-2mjv-69h8",
+        "https://github.com/meshtastic/firmware/commit/2cc13a1132d94b66a9505e7f07ee2d3e83bd0c95"
+      ]
+    }
+  },
+  {
+    "title": "Meshtastic GitHub repo vulnerable to Arbitrary Code Execution via pull_request_target Fork Checkout in CI Workflow",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-44359",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.21.1370b23, the Meshtastic GitHub repository's main_matrix.yml workflow is triggered by pull_request_target  and multiple jobs check out the attacker's fork code and execute it with access to repository secrets and elevated GITHUB_TOKEN permissions. No approval gate exists. Pull requests from external users with author_association: \"NONE\" triggered the CI workflow automatically. The workflow directly executes attacker-controlled files from the fork checkout. This issue could have resulted in supply chain compromise, self-hosted runner compromise, and/or repository takeover for the repo. This issue is separate from GHSA-6mwm-v2vv-pp96, which addressed a command injection via github.head_ref in the setup job of the same workflow. That fix correctly moved to environment variables. However, the more critical fork checkout vulnerability across the check, build, and build-debian-src jobs was not addressed. Version 2.7.21.1370b23 contains a patch for thie issue.",
+    "summary": "Meshtastic is an open source mesh networking solution. Prior to version 2.7.21.1370b23, the Meshtastic GitHub repository's main_matrix.yml workflow is triggered by pull_request_target  and multiple jobs check out the attacker's fork code and execute it with access to repository secrets and elevated",
+    "published": "2026-07-19T23:06:32.005Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:24.379608+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-44359",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 10,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-mjx5-98jq-q736",
+        "https://github.com/meshtastic/firmware/security/advisories/GHSA-6mwm-v2vv-pp96",
+        "https://github.com/meshtastic/firmware/commit/5716aeba3bc1e1d34fba9567ff88917ede4a78a5",
+        "https://drive.google.com/file/d/1GdHT2s5hMYCiHt4zrWt1q58mvL7WQC0M/view?usp=sharing"
+      ]
+    }
+  },
+  {
+    "title": "CI4MS: Stored XSS in Blog Content via Broken `html_purify` Validation Rule",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-45138",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "CI4MS is a CodeIgniter 4-based content management system skeleton. Prior to version 0.31.9.0, the custom `html_purify` validation rule used to sanitize blog post bodies relies on by-reference mutation (`?string &$str`), but CodeIgniter 4's validator passes a local copy of the value, so the sanitized text is silently discarded. The Blog controller writes `$lanData['content']` directly into `blog_langs.content`, and the public template echoes it without escaping — yielding stored XSS executable in any visitor's browser, including the superadmin when previewing or editing posts. Version 0.31.9.0 patches the issue.",
+    "summary": "CI4MS is a CodeIgniter 4-based content management system skeleton. Prior to version 0.31.9.0, the custom `html_purify` validation rule used to sanitize blog post bodies relies on by-reference mutation (`?string &$str`), but CodeIgniter 4's validator passes a local copy of the value, so the sanitized",
+    "published": "2026-07-19T23:18:51.312Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:24.708520+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-45138",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.4,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:R/S:C/C:L/I:L/A:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/ci4-cms-erp/ci4ms/security/advisories/GHSA-2m69-jmvh-6chr",
+        "https://github.com/ci4-cms-erp/ci4ms/releases/tag/0.31.9.0"
+      ]
+    }
+  },
+  {
+    "title": "Unlimited Elements for Elementor < 2.0.11 - Unauthenticated Stored XSS via Google Reviews Widget",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-10081",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Unlimited Elements For Elementor WordPress plugin before 2.0.11 does not sanitize or escape Google review content fetched from the Serp API before rendering it in the Google Reviews widget output, allowing unauthenticated attackers who submit a malicious review on the targeted business's Google listing to deliver Stored XSS to any visitor (including administrators) of any WP page displaying that Place ID's reviews.",
+    "summary": "The Unlimited Elements For Elementor WordPress plugin before 2.0.11 does not sanitize or escape Google review content fetched from the Serp API before rendering it in the Google Reviews widget output, allowing unauthenticated attackers who submit a malicious review on the targeted business's Google",
+    "published": "2026-07-20T06:00:01.606Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:25.007809+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10081",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/e5cde405-5b34-4d3d-bfda-325402b0a5bc/"
+      ]
+    }
+  },
+  {
+    "title": "Reviews Feed < 2.6.5 - Unauthenticated Stored Arbitrary Shortcode Execution via Google Reviews",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-10724",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Reviews Feed  WordPress plugin before 2.6.5 does not neutralize WordPress shortcodes contained in third-party review content before rendering it through its dynamic block, allowing unauthenticated attackers to execute arbitrary shortcodes on pages that display the feed by planting a shortcode in a review on the connected source.",
+    "summary": "The Reviews Feed  WordPress plugin before 2.6.5 does not neutralize WordPress shortcodes contained in third-party review content before rendering it through its dynamic block, allowing unauthenticated attackers to execute arbitrary shortcodes on pages that display the feed by planting a shortcode in",
+    "published": "2026-07-20T06:00:01.979Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:25.319562+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10724",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/7def5cf4-655d-424b-b1fc-eb333465434e/"
+      ]
+    }
+  },
+  {
+    "title": "All in One SEO < 4.9.9 – Contributor+ Incorrect Authorization via AI Integration",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-10755",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The All in One SEO  WordPress plugin before 4.9.9 does not correctly restrict access to some of its AI integration REST API endpoints, allowing users with low-level privileges such as Contributors to overwrite or reset the site-wide AI integration state.",
+    "summary": "The All in One SEO  WordPress plugin before 4.9.9 does not correctly restrict access to some of its AI integration REST API endpoints, allowing users with low-level privileges such as Contributors to overwrite or reset the site-wide AI integration state.",
+    "published": "2026-07-20T06:00:02.224Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:25.619646+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-10755",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/cc4e83e3-b581-4f65-ac2c-24fbfb9da4b3/"
+      ]
+    }
+  },
+  {
+    "title": "Modern Events Calendar (Lite & Pro) < 7.34.0 - Unauthenticated SQL Injection via mec_list_load_more",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-11349",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Modern Event Calendar Pro WordPress plugin before 7.34.0, Modern Events Calendar Lite WordPress plugin before 7.34.0 do not sanitise and escape a request parameter before using it in a SQL statement, through an AJAX action available to unauthenticated users, leading to an unauthenticated SQL injection vulnerability that allows attackers to extract sensitive data from the database.",
+    "summary": "The Modern Event Calendar Pro WordPress plugin before 7.34.0, Modern Events Calendar Lite WordPress plugin before 7.34.0 do not sanitise and escape a request parameter before using it in a SQL statement, through an AJAX action available to unauthenticated users, leading to an unauthenticated SQL inj",
+    "published": "2026-07-20T06:00:02.457Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:25.929184+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-11349",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/572229cb-8a09-406d-8623-7d6b553bfdde/"
+      ]
+    }
+  },
+  {
+    "title": "WP Travel < 11.7.1 - Unauthenticated Arbitrary Booking Cancellation",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-11868",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The WP Travel  WordPress plugin before 11.7.1 does not perform capability or ownership checks on its booking cancellation action, which is also exposed to unauthenticated users, allowing them to cancel arbitrary bookings on the site.",
+    "summary": "The WP Travel  WordPress plugin before 11.7.1 does not perform capability or ownership checks on its booking cancellation action, which is also exposed to unauthenticated users, allowing them to cancel arbitrary bookings on the site.",
+    "published": "2026-07-20T06:00:02.635Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:26.239642+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-11868",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/a82da13b-ee86-495b-a684-324c1541d7ab/"
+      ]
+    }
+  },
+  {
+    "title": "SlimStat Analytics < 5.5.0 - Unauthenticated Stored XSS via CF-IPCountry Header",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12592",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The SlimStat Analytics WordPress plugin before 5.5.0 does not escape a visitor-controlled geolocation value before outputting it in its admin analytics reports, allowing unauthenticated visitors to store a cross-site scripting payload that executes in the browser of an administrator who views the reports. Exploitation requires the SlimStat Analytics WordPress plugin before 5.5.0 to be configured to use the Cloudflare geolocation provider.",
+    "summary": "The SlimStat Analytics WordPress plugin before 5.5.0 does not escape a visitor-controlled geolocation value before outputting it in its admin analytics reports, allowing unauthenticated visitors to store a cross-site scripting payload that executes in the browser of an administrator who views the re",
+    "published": "2026-07-20T06:00:03.104Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:26.548806+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12592",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/3658cae6-f6ae-4ecc-8d74-bb402e61f5d5/"
+      ]
+    }
+  },
+  {
+    "title": "Kirki < 6.0.12 - Unauthenticated Arbitrary Comment Modification and Moderation Bypass via Component Library",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12723",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not perform any authorisation check on one of its REST routes, allowing unauthenticated users to overwrite the content of arbitrary existing comments and to create pre-approved comments under a spoofed identity, bypassing comment moderation.",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not perform any authorisation check on one of its REST routes, allowing unauthenticated users to overwrite the content of arbitrary existing comments and to create pre-approved comments under a spoofed identity, bypassing comment moderation.",
+    "published": "2026-07-20T06:00:03.332Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:26.859565+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12723",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/76df2c61-4ba7-4987-9e61-5d02142b3db5/"
+      ]
+    }
+  },
+  {
+    "title": "Kirki < 6.0.12 - Unauthenticated HTML Injection in Password Reset Email via kirki-forgot-password",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12724",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not sanitise or escape the email subject and body values supplied in a request before including them in the password-reset email it sends as HTML, allowing unauthenticated users to inject arbitrary HTML into the message delivered to a registered user, which can be used for phishing.",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not sanitise or escape the email subject and body values supplied in a request before including them in the password-reset email it sends as HTML, allowing unauthenticated users to inject arbitrary HTML into the message delivered to a registered user, w",
+    "published": "2026-07-20T06:00:03.572Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:27.179632+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12724",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/6c2d4489-de82-472d-a5f7-dc01b305fdd0/"
+      ]
+    }
+  },
+  {
+    "title": "All-in-One WP Migration and Backup < 7.106 - Unauthenticated Arbitrary-Location Log File Write via Path Traversal",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12898",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The All-in-One WP Migration and Backup WordPress plugin before 7.106 does not properly sanitise a user-supplied value before using it to build a file path, allowing unauthenticated attackers to create or append a log file in arbitrary locations outside its intended storage directory.",
+    "summary": "The All-in-One WP Migration and Backup WordPress plugin before 7.106 does not properly sanitise a user-supplied value before using it to build a file path, allowing unauthenticated attackers to create or append a log file in arbitrary locations outside its intended storage directory.",
+    "published": "2026-07-20T06:00:03.782Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:27.479314+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12898",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/c90553e4-8e1a-4c99-a28f-a0de8d635caa/"
+      ]
+    }
+  },
+  {
+    "title": "LearnPress < 4.4.1 - Reflected XSS via c_search",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12970",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The LearnPress  WordPress plugin before 4.4.1 does not escape a search parameter before reflecting it into an HTML attribute, leading to Reflected Cross-Site Scripting that executes in the browser of a logged-in instructor or administrator who is tricked into opening a crafted link.",
+    "summary": "The LearnPress  WordPress plugin before 4.4.1 does not escape a search parameter before reflecting it into an HTML attribute, leading to Reflected Cross-Site Scripting that executes in the browser of a logged-in instructor or administrator who is tricked into opening a crafted link.",
+    "published": "2026-07-20T06:00:03.955Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:27.777656+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12970",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/d0a2780f-ab13-4bb8-935d-2aeba1de12d2/"
+      ]
+    }
+  },
+  {
+    "title": "PayPlus Payment Gateway < 8.2.2 - Unauthenticated Order Payment Metadata Tampering",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12972",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to tamper with the payment-related metadata of arbitrary WooCommerce orders.",
+    "summary": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to tamper with the payment-related metadata of arbitrary WooCommerce orders.",
+    "published": "2026-07-20T06:00:04.142Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:28.089553+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12972",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/dcd091d3-f830-4675-a3d5-926f4aa5a7a5/"
+      ]
+    }
+  },
+  {
+    "title": "PayPlus Payment Gateway < 8.2.2 - Unauthenticated Order Key Disclosure and Order Status Modification",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-12973",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to disclose the secret order key of arbitrary WooCommerce orders and, under some configurations, to modify order statuses.",
+    "summary": "The PayPlus Payment Gateway WordPress plugin before 8.2.2 does not perform authorization or order-ownership validation in one of its AJAX actions available to unauthenticated users, allowing them to disclose the secret order key of arbitrary WooCommerce orders and, under some configurations, to modi",
+    "published": "2026-07-20T06:00:04.376Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:28.569160+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-12973",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/385bee73-f9e5-425e-aa4c-3ff9274f8e00/"
+      ]
+    }
+  },
+  {
+    "title": "Passwordless Login by VentraConnect < 1.4.1 - Unauthenticated Account Takeover via Email OTP Brute Force",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-13142",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Social Login, Passkeys, Magic Link & Email OTP  WordPress plugin before 1.4.1 does not enforce rate limiting or a working attempt lockout on its passwordless email one-time-password verification, and stores the short numeric codes in plaintext, allowing an unauthenticated attacker who knows a registered email address to brute-force the code and log in as that user, including an administrator, leading to full site takeover.",
+    "summary": "The Social Login, Passkeys, Magic Link & Email OTP  WordPress plugin before 1.4.1 does not enforce rate limiting or a working attempt lockout on its passwordless email one-time-password verification, and stores the short numeric codes in plaintext, allowing an unauthenticated attacker who knows a re",
+    "published": "2026-07-20T06:00:04.577Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:28.869290+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13142",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/a34d9be7-c121-4c95-9ebb-a14c763e16bb/"
+      ]
+    }
+  },
+  {
+    "title": "Kirki < 6.0.12 - Unauthenticated Server-Side Request Forgery via kirki_get_apis",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-13147",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Kirki  WordPress plugin before 6.0.12 does not validate a user-supplied URL before requesting it server-side, allowing unauthenticated attackers to make the site issue HTTP requests to arbitrary hosts (Server-Side Request Forgery).",
+    "summary": "The Kirki  WordPress plugin before 6.0.12 does not validate a user-supplied URL before requesting it server-side, allowing unauthenticated attackers to make the site issue HTTP requests to arbitrary hosts (Server-Side Request Forgery).",
+    "published": "2026-07-20T06:00:04.766Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:29.359599+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13147",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/f39c3e35-8673-4095-a829-a9ec2624f66c/"
+      ]
+    }
+  },
+  {
+    "title": "MailerSend - Official SMTP Integration < 1.0.8 - Settings Deletion and Plugin Deactivation via CSRF",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-13156",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The MailerSend  WordPress plugin before 1.0.8 does not perform a nonce check on its configuration-delete action (it verifies the manage_options capability but ignores the nonce), so an attacker can trick a logged-in administrator into visiting a crafted page that wipes the MailerSend  WordPress plugin before 1.0.8's SMTP configuration and deactivates the MailerSend  WordPress plugin before 1.0.8, breaking the site's email delivery.",
+    "summary": "The MailerSend  WordPress plugin before 1.0.8 does not perform a nonce check on its configuration-delete action (it verifies the manage_options capability but ignores the nonce), so an attacker can trick a logged-in administrator into visiting a crafted page that wipes the MailerSend  WordPress plug",
+    "published": "2026-07-20T06:00:04.943Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:29.758086+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13156",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/595e653d-0904-43cf-8e61-d684599de11b/"
+      ]
+    }
+  },
+  {
+    "title": "ThumbPress < 6.2.2 - Subscriber+ Plugin Deactivation",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-13432",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The ThumbPress  WordPress plugin before 6.2.2 does not perform a capability check on one of its AJAX actions, allowing authenticated users with subscriber-level access or higher to deactivate the ThumbPress  WordPress plugin before 6.2.2, disrupting the site's image-handling functionality.",
+    "summary": "The ThumbPress  WordPress plugin before 6.2.2 does not perform a capability check on one of its AJAX actions, allowing authenticated users with subscriber-level access or higher to deactivate the ThumbPress  WordPress plugin before 6.2.2, disrupting the site's image-handling functionality.",
+    "published": "2026-07-20T06:00:05.118Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:30.159237+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13432",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/a408e8f9-4de7-4449-8fca-51ea46e4f433/"
+      ]
+    }
+  },
+  {
+    "title": "Crypt::Password versions through 0.28 for Perl generate insecure random values for salts",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-16235",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "Crypt::Password versions through 0.28 for Perl generate insecure random values for salts.\n\nThese versions use the built-in rand function, which is predictable and unsuitable for cryptography.",
+    "summary": "Crypt::Password versions through 0.28 for Perl generate insecure random values for salts.\n\nThese versions use the built-in rand function, which is predictable and unsuitable for cryptography.",
+    "published": "2026-07-20T07:02:11.216Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:30.542278+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16235",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://metacpan.org/release/DRSTEVE/Crypt-Password-0.28/source/lib/Crypt/Password.pm#L306-309"
+      ]
+    }
+  },
+  {
+    "title": "Crypt::Password versions through 0.28 for Perl are susceptible to timing attacks",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-6656",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "Crypt::Password versions through 0.28 for Perl are susceptible to timing attacks.\n\nThe check_password method uses the built-in eq operator. This allows discrepancies in timing to be used to guess the underlying hash.",
+    "summary": "Crypt::Password versions through 0.28 for Perl are susceptible to timing attacks.\n\nThe check_password method uses the built-in eq operator. This allows discrepancies in timing to be used to guess the underlying hash.",
+    "published": "2026-07-20T07:01:45.818Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:30.919448+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-6656",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://metacpan.org/release/DRSTEVE/Crypt-Password-0.28/source/lib/Crypt/Password.pm#L190-193",
+        "https://rt.cpan.org/Ticket/Display.html?id=180162"
+      ]
+    }
+  },
+  {
+    "title": "Elementor < 4.1.4 - Contributor+ Sensitive Information Disclosure via REST API",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-8825",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Elementor Website Builder  WordPress plugin before 4.1.4 does not properly check user permissions before returning post data through one of its REST endpoints, allowing authenticated users with Contributor-level access and above to retrieve the title, body and metadata of private posts, private pages and drafts authored by other users (including administrators).",
+    "summary": "The Elementor Website Builder  WordPress plugin before 4.1.4 does not properly check user permissions before returning post data through one of its REST endpoints, allowing authenticated users with Contributor-level access and above to retrieve the title, body and metadata of private posts, private",
+    "published": "2026-07-20T06:00:05.303Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:31.297548+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-8825",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/d0d6b840-790d-45a3-9b0d-8f77a229e8a9/"
+      ]
+    }
+  },
+  {
+    "title": "Tag Groups < 2.2.0 - Reflected XSS via 'tag_groups_task' Parameter",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-9833",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The Tag Groups is the Advanced Way to Display Your Taxonomy Terms WordPress plugin before 2.2.0 does not properly escape one of its AJAX parameters before reflecting it in the response body served with an HTML content type, allowing unauthenticated attackers to execute arbitrary JavaScript in the browser of a logged-in user with `edit_pages` capability (Editor or higher) who is tricked into following a crafted link.",
+    "summary": "The Tag Groups is the Advanced Way to Display Your Taxonomy Terms WordPress plugin before 2.2.0 does not properly escape one of its AJAX parameters before reflecting it in the response body served with an HTML content type, allowing unauthenticated attackers to execute arbitrary JavaScript in the br",
+    "published": "2026-07-20T06:00:05.477Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:31.687551+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-9833",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://wpscan.com/vulnerability/75792c33-2d9d-46db-a98c-00ec40951099/"
+      ]
+    }
+  },
+  {
+    "title": "Dancer2 versions through 2.1.0 for Perl generate insecure session ids when required CSPRNG modules are unavailable",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-13577",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "Dancer2 versions through 2.1.0 for Perl generate insecure session ids when required CSPRNG modules are unavailable.\n\nDancer2::Core::Role::SessionFactory::generate_id silently falls back to a built-in rand-derived session id unless both Math::Random::ISAAC::XS and Crypt::URandom are available.\n\nThe fallback session id is generated from a SHA-1 hash of a call to the built-in rand function, the absolute path of the Dancer2::Core::Role::SessionFactory module, an internal counter, the process id, the module instance memory address, and a shuffled string of characters (using the List::Util::shuffle function, which also uses the built-in rand function).\n\nThese are all low-entropy and easily guessed sources.\n\nThe built-in rand() function is seeded with 32-bits and considered unsuitable for security applications.\n\nPredictable session ids could allow an attacker to gain access to systems.",
+    "summary": "Dancer2 versions through 2.1.0 for Perl generate insecure session ids when required CSPRNG modules are unavailable.\n\nDancer2::Core::Role::SessionFactory::generate_id silently falls back to a built-in rand-derived session id unless both Math::Random::ISAAC::XS and Crypt::URandom are available.\n\nThe f",
+    "published": "2026-07-20T07:11:10.403Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:32.129413+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-13577",
+      "cvss": {},
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/PerlDancer/Dancer2/blob/v2.1.0/lib/Dancer2/Core/Role/SessionFactory.pm#L142",
+        "https://www.cve.org/CVERecord?id=CVE-2026-5080"
+      ]
+    }
+  },
+  {
+    "title": "Hypershift: konnectivity proxy-server accepts agent connections without validating client certificates",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-16242",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "A flaw was found in the Konnectivity proxy-server configuration for hosted control planes. The agent-facing listener was started without --cluster-ca-cert (and without token-based agent authentication), so client certificates were not validated. A remote attacker who can reach the Konnectivity cluster endpoint could connect as an unauthenticated agent, join the routing pool, and potentially proxy, inspect, modify, or drop control-plane-to-node traffic.",
+    "summary": "A flaw was found in the Konnectivity proxy-server configuration for hosted control planes. The agent-facing listener was started without --cluster-ca-cert (and without token-based agent authentication), so client certificates were not validated. A remote attacker who can reach the Konnectivity clust",
+    "published": "2026-07-20T07:33:16.712Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:32.909520+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16242",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 9.4,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:L"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-16242",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2502690",
+        "https://github.com/openshift/hypershift/pull/9031"
+      ]
+    }
+  },
+  {
+    "title": "Reflected Cross-Site Scripting via URL Parameter in Multiple WSO2 Products Enables UI Redirection and Modification",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-2445",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "The affected product accepts user-supplied input within a URL parameter without enforcing expected sanitization or encoding before rendering it within the response. This condition allows for the injection of malicious JavaScript payloads.\n\nAn attacker can leverage this vulnerability to cause the user's browser to redirect to a malicious website, modify the user interface of the webpage, or retrieve sensitive information from the browser. However, the impact is mitigated for session hijacking as all session-related sensitive cookies are protected by the httpOnly flag.",
+    "summary": "The affected product accepts user-supplied input within a URL parameter without enforcing expected sanitization or encoding before rendering it within the response. This condition allows for the injection of malicious JavaScript payloads.\n\nAn attacker can leverage this vulnerability to cause the use",
+    "published": "2026-07-20T08:06:39.095Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:33.459081+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-2445",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://security.docs.wso2.com/en/latest/security-announcements/security-advisories/2026/WSO2-2026-5059/"
+      ]
+    }
+  },
+  {
+    "title": "Authenticated RCE in system_certificates view",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-14448",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "An high privileged remote attacker can exploit an authenticated OS command injection vulnerability in the system_certificates view due to improper neutralization of special elements in an OS command. This can result in a total loss of confidentiality, availability and integrity.",
+    "summary": "An high privileged remote attacker can exploit an authenticated OS command injection vulnerability in the system_certificates view due to improper neutralization of special elements in an OS command. This can result in a total loss of confidentiality, availability and integrity.",
+    "published": "2026-07-20T11:40:50.055Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:33.971063+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-14448",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 8.6,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://www.certvde.com/en/advisories/VDE-2026-044/",
+        "https://www.certvde.com/en/advisories/VDE-2026-058/"
+      ]
+    }
+  },
+  {
+    "title": "Gdbusserver: glib2: gdbusserver pre-authentication dos via unbounded sasl line buffering",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-15588",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "A denial-of-service and resource exhaustion vulnerability exists within the `GDBus` component of GLib. The `gdbusauth` authentication mechanism fails to enforce proper length limitations on data lines read from a client. An unauthenticated local or remote attacker can exploit this lack of input validation by sending excessively long streams of data, causing the application to consume massive amounts of system memory and CPU, potentially leading to a crash or system hang.",
+    "summary": "A denial-of-service and resource exhaustion vulnerability exists within the `GDBus` component of GLib. The `gdbusauth` authentication mechanism fails to enforce proper length limitations on data lines read from a client. An unauthenticated local or remote attacker can exploit this lack of input vali",
+    "published": "2026-07-20T12:12:06.844Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:34.520354+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-15588",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://access.redhat.com/errata/RHSA-2026:39985",
+        "https://access.redhat.com/errata/RHSA-2026:40485",
+        "https://access.redhat.com/errata/RHSA-2026:42329",
+        "https://access.redhat.com/security/cve/CVE-2026-15588",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2499675",
+        "https://gitlab.gnome.org/GNOME/glib/-/issues/3985"
+      ]
+    }
+  },
+  {
+    "title": "Kronosnet: kronosnet: memory corruption and out-of-bounds access via malformed network packet defragmentation",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-15813",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "A vulnerability was found in the network packet de-fragmentation engine of kronosnet (Version affected <= 1.34). The internal reassembly code does not properly validate sequence numbers of incoming payload fragments. An attacker can exploit this lack of verification by transmitting malformed packets with corrupted sequence parameters. Under specific conditions, this forces the packet processing layer to parse data outside the designated bounds of the internal memory structures, causing an out-of-bounds memory access or heap corruption. This behavior can result in sudden application crashes or system instability.",
+    "summary": "A vulnerability was found in the network packet de-fragmentation engine of kronosnet (Version affected <= 1.34). The internal reassembly code does not properly validate sequence numbers of incoming payload fragments. An attacker can exploit this lack of verification by transmitting malformed packets",
+    "published": "2026-07-20T10:36:03.641Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:35.258916+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-15813",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 6.5,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:H"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-15813",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2500854"
+      ]
+    }
+  },
+  {
+    "title": "Insecure permission assignment due to execution of LogPathConfig.exe during setup",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-16246",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "In BRAIN2 versions prior to 3.09, the\napplication LogPathConfig.exe is executed during setup. As a result, the\nWindows group Everyone is granted full control over %ProgramData% instead of\nbeing restricted to %ProgramData%\\Bizerba\\BRAIN2\\.\n\n\n\n\n\nStarting with BRAIN2 3.09, the setup no\nlonger executes this tool.\n\nHowever, the optional component Bizerba ScriptService still executes it.\n\n\n\n\n\nBizerba ScriptService is being\ndeprecated and will no longer be included starting with BRAIN2 version 3.11.",
+    "summary": "In BRAIN2 versions prior to 3.09, the\napplication LogPathConfig.exe is executed during setup. As a result, the\nWindows group Everyone is granted full control over %ProgramData% instead of\nbeing restricted to %ProgramData%\\Bizerba\\BRAIN2\\.\n\n\n\n\n\nStarting with BRAIN2 3.09, the setup no\nlonger executes",
+    "published": "2026-07-20T11:51:40.416Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:35.767820+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16246",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.3,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:L/I:H/A:L"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://www.bizerba.com/downloads/global/information-security/2026/bizerba-sa-2026-0003.pdf"
+      ]
+    }
+  },
+  {
+    "title": "Insecure permission overwrite due to execution of LogPathConfig.exe while installing _connect.BRAIN",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-16247",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "In _connect.BRAIN versions prior to 5.06,\nthe application LogPathConfig.exe is executed during setup. During this\nprocess, existing permissions on %ProgramData% are deleted and replaced,\ngranting the Windows group Everyone full control instead of restricting\naccess to %ProgramData%\\Bizerba\\_connect.BRAIN or %ProgramData%\\Bizerba\\BCT.\n\n\n\n\n\n\n\n\n\nStarting with _connect.BRAIN 5.06,\nthe setup no longer executes this tool.",
+    "summary": "In _connect.BRAIN versions prior to 5.06,\nthe application LogPathConfig.exe is executed during setup. During this\nprocess, existing permissions on %ProgramData% are deleted and replaced,\ngranting the Windows group Everyone full control instead of restricting\naccess to %ProgramData%\\Bizerba\\_connect.",
+    "published": "2026-07-20T11:54:37.566Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:36.239314+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16247",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 7.3,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:L"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://www.bizerba.com/downloads/global/information-security/2026/bizerba-sa-2026-0003.pdf"
+      ]
+    }
+  },
+  {
+    "title": "Claircore: claircore: denial of service via out-of-bounds slice in claircore's apk installed-database parser",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-16254",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "A flaw was found in claircore's apk package scanner. Malformed package-database data in a container layer can cause an out-of-bounds access that panics the scanner. If that panic is not recovered, the Clair indexer process can crash, leading to a denial of service.",
+    "summary": "A flaw was found in claircore's apk package scanner. Malformed package-database data in a container layer can cause an out-of-bounds access that panics the scanner. If that panic is not recovered, the Clair indexer process can crash, leading to a denial of service.",
+    "published": "2026-07-20T10:42:02.327Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:36.757233+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-16254",
+      "cvss": {
+        "version": "3.1",
+        "base_score": 4.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://access.redhat.com/security/cve/CVE-2026-16254",
+        "https://bugzilla.redhat.com/show_bug.cgi?id=2502701"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.2.0 Permissions Bypass via PERMISSIONS Clause",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63733",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 contain a permissions bypass vulnerability where data-modifying statements within PERMISSIONS clauses execute with enforcement disabled. Attackers with permission to perform a guarded operation can write to tables they lack permission for by embedding CREATE, UPDATE, DELETE, or UPSERT statements in the PERMISSIONS clause, causing unintended writes and data corruption.",
+    "summary": "SurrealDB versions before 3.2.0 contain a permissions bypass vulnerability where data-modifying statements within PERMISSIONS clauses execute with enforcement disabled. Attackers with permission to perform a guarded operation can write to tables they lack permission for by embedding CREATE, UPDATE,",
+    "published": "2026-07-20T12:04:30.055Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:37.177609+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63733",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-66r2-5gwj-gxm2",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permissions-bypass-via-permissions-clause"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.2.0 Denial of Service via malformed SurrealML import",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63734",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 contain a denial of service vulnerability in the SurrealML header parser that allows authenticated Owner-role users to crash the server by uploading a malformed .surml file to the /ml/import endpoint. Attackers can supply non-numeric input-dimensions or other malformed header fields that trigger unchecked unwrap calls, causing a panic that aborts the entire server process and denies service to all databases.",
+    "summary": "SurrealDB versions before 3.2.0 contain a denial of service vulnerability in the SurrealML header parser that allows authenticated Owner-role users to crash the server by uploading a malformed .surml file to the /ml/import endpoint. Attackers can supply non-numeric input-dimensions or other malforme",
+    "published": "2026-07-20T12:04:30.773Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:37.598955+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63734",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 6.9,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-jwr6-6444-28xv",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-malformed-surrealml-import"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.2.0 Authentication Bypass via Custom API",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63735",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.2.0 fail to validate namespace and database scope in custom API routes, allowing authenticated users to invoke endpoints in different namespaces/databases. Attackers with valid credentials for any namespace/database can access custom API endpoints in other tenants by specifying the target scope in the URL path, reading sensitive data or triggering unintended operations.",
+    "summary": "SurrealDB versions before 3.2.0 fail to validate namespace and database scope in custom API routes, allowing authenticated users to invoke endpoints in different namespaces/databases. Attackers with valid credentials for any namespace/database can access custom API endpoints in other tenants by spec",
+    "published": "2026-07-20T12:04:31.479Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:38.028704+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63735",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 8.6,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-848m-r628-vrxw",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-custom-api"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.2.0 SSRF via JWKS URL hostname resolution",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63736",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.2.0 contains a server-side request forgery vulnerability in the JWKS fetcher that validates only the URL hostname string against allow-lists without checking resolved IP addresses. An Owner role attacker can point an access method at an allow-listed hostname resolving to private or loopback addresses, causing the server to issue GET requests to internal addresses that would be blocked by direct URL.",
+    "summary": "SurrealDB before 3.2.0 contains a server-side request forgery vulnerability in the JWKS fetcher that validates only the URL hostname string against allow-lists without checking resolved IP addresses. An Owner role attacker can point an access method at an allow-listed hostname resolving to private o",
+    "published": "2026-07-20T12:04:32.124Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:38.449302+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63736",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:L/VI:N/VA:N/SC:L/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-5x4x-2946-qr67",
+        "https://www.vulncheck.com/advisories/surrealdb-before-ssrf-via-jwks-url-hostname-resolution"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.5 Denial of Service via deep operator chains",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63737",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.5 contain a denial of service vulnerability where authenticated users can crash the server with queries containing long chains of operators. Attackers can submit queries with tens of thousands of chained operators that create unbounded expression trees, causing stack overflow during query processing and aborting the entire process.",
+    "summary": "SurrealDB versions before 3.1.5 contain a denial of service vulnerability where authenticated users can crash the server with queries containing long chains of operators. Attackers can submit queries with tens of thousands of chained operators that create unbounded expression trees, causing stack ov",
+    "published": "2026-07-20T12:04:32.829Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:38.859336+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63737",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-jv2j-mqmw-xvv5",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-deep-operator-chains"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB 3.1.0 before 3.1.5 Field Permission Bypass via Traversal",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63738",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions 3.1.0 before 3.1.5 fail to enforce field-level SELECT permissions when records are accessed through graph-edge or back-reference traversals. Attackers with table-level SELECT access can read field values hidden by field-level permissions by materializing records through graph traversals instead of direct table scans.",
+    "summary": "SurrealDB versions 3.1.0 before 3.1.5 fail to enforce field-level SELECT permissions when records are accessed through graph-edge or back-reference traversals. Attackers with table-level SELECT access can read field values hidden by field-level permissions by materializing records through graph trav",
+    "published": "2026-07-20T12:04:33.530Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:39.288494+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63738",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-hv6h-hc26-q48p",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-traversal"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.5 Arbitrary File Read via DEFINE ANALYZER",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63739",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.5 contains an arbitrary file read vulnerability in the DEFINE ANALYZER mapper filter that allows database users with EDITOR or OWNER roles to read files accessible to the SurrealDB process. Attackers can specify arbitrary file paths in the mapper filter and retrieve file contents through query error messages when the SURREAL_FILE_ALLOWLIST is empty or not configured.",
+    "summary": "SurrealDB before 3.1.5 contains an arbitrary file read vulnerability in the DEFINE ANALYZER mapper filter that allows database users with EDITOR or OWNER roles to read files accessible to the SurrealDB process. Attackers can specify arbitrary file paths in the mapper filter and retrieve file content",
+    "published": "2026-07-20T12:04:34.209Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:39.729125+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63739",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 8.3,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:H/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-cc8f-fcx3-gpjr",
+        "https://www.vulncheck.com/advisories/surrealdb-before-arbitrary-file-read-via-define-analyzer"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.4 Array Element Permission Bypass",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63740",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.4 fail to properly enforce SELECT permissions on array elements (field.*) for record users, leaking denied array elements instead of hiding them. Attackers with record scope access can read array elements that element-level permissions should deny by exploiting incorrect index handling during permission filtering.",
+    "summary": "SurrealDB versions before 3.1.4 fail to properly enforce SELECT permissions on array elements (field.*) for record users, leaking denied array elements instead of hiding them. Attackers with record scope access can read array elements that element-level permissions should deny by exploiting incorrec",
+    "published": "2026-07-20T12:04:34.904Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:40.148920+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63740",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-8rw6-p7m8-63jp",
+        "https://www.vulncheck.com/advisories/surrealdb-before-array-element-permission-bypass"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Authentication Bypass via USE statement",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63741",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to validate DEFINE NAMESPACE or DEFINE DATABASE permissions when processing USE NS and USE DB statements. Unauthenticated attackers can create arbitrary namespaces and databases by issuing USE commands, bypassing authorization checks in the RPC use method and SurrealQL executor.",
+    "summary": "SurrealDB versions before 3.1.0 fail to validate DEFINE NAMESPACE or DEFINE DATABASE permissions when processing USE NS and USE DB statements. Unauthenticated attackers can create arbitrary namespaces and databases by issuing USE commands, bypassing authorization checks in the RPC use method and Sur",
+    "published": "2026-07-20T12:04:35.585Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:40.521283+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63741",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 6.9,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:L/VA:L/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-wp87-mgvq-5j93",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-use-statement"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Field Permission Bypass via Indexed COUNT",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63742",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a field-level SELECT permission bypass vulnerability in indexed COUNT fast paths. Attackers can execute COUNT queries on indexed fields with field-level SELECT restrictions to confirm or recover restricted field values through repeated guesses.",
+    "summary": "SurrealDB versions before 3.1.0 contain a field-level SELECT permission bypass vulnerability in indexed COUNT fast paths. Attackers can execute COUNT queries on indexed fields with field-level SELECT restrictions to confirm or recover restricted field values through repeated guesses.",
+    "published": "2026-07-20T12:04:36.415Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:40.937327+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63742",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-c8jx-96c9-8xrp",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-indexed-count"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Port-Specific Deny Rule Bypass via HTTP Redirect",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63743",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 contains a capability bypass vulnerability in HTTP redirect handling that allows authenticated users to circumvent port-scoped --deny-net rules. Attackers can chain an HTTP redirect from an allowed hostname to a denied host:port combination, and the redirect is followed because the port information is dropped during redirect policy evaluation.",
+    "summary": "SurrealDB before 3.1.0 contains a capability bypass vulnerability in HTTP redirect handling that allows authenticated users to circumvent port-scoped --deny-net rules. Attackers can chain an HTTP redirect from an allowed hostname to a denied host:port combination, and the redirect is followed becaus",
+    "published": "2026-07-20T12:04:37.125Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:41.368619+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63743",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:N/SC:L/SI:L/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-97vg-427p-8hx5",
+        "https://www.vulncheck.com/advisories/surrealdb-before-port-specific-deny-rule-bypass-via-http-redirect"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.5 SSRF via JWKS URL Redirect",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63744",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.5 contains a server-side request forgery vulnerability in the JWKS fetcher that follows HTTP redirects without re-validating redirect targets against network capabilities. Attackers with Owner role can configure a JWKS URL pointing to an allowlisted host that redirects to blocked internal addresses, bypassing network access controls.",
+    "summary": "SurrealDB before 3.1.5 contains a server-side request forgery vulnerability in the JWKS fetcher that follows HTTP redirects without re-validating redirect targets against network capabilities. Attackers with Owner role can configure a JWKS URL pointing to an allowlisted host that redirects to blocke",
+    "published": "2026-07-20T12:04:37.892Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:41.797672+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63744",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.1,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:L/VI:N/VA:N/SC:L/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-h5rg-8p7f-47g2",
+        "https://www.vulncheck.com/advisories/surrealdb-before-ssrf-via-jwks-url-redirect"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Authorization Bypass via Composite Record-id",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63745",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability where authenticated users can spoof composite record-id field values by writing to editable body fields. Attackers can bypass permission rules that gate access on id components like tenant isolation by setting same-named body fields to spoofed values that permission checks incorrectly read instead of the immutable id key.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability where authenticated users can spoof composite record-id field values by writing to editable body fields. Attackers can bypass permission rules that gate access on id components like tenant isolation by setting same-named b",
+    "published": "2026-07-20T12:04:38.681Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:42.227912+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63745",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6vg3-hgrw-p5gf",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authorization-bypass-via-composite-record-id"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Permission Bypass via Graph Traversal",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63746",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to enforce table SELECT permissions when traversing graph edges or back-references. Authenticated users can read records from any table reachable through graph edges regardless of the target table's PERMISSIONS FOR select clause.",
+    "summary": "SurrealDB versions before 3.1.0 fail to enforce table SELECT permissions when traversing graph edges or back-references. Authenticated users can read records from any table reachable through graph edges regardless of the target table's PERMISSIONS FOR select clause.",
+    "published": "2026-07-20T12:04:39.370Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:42.639115+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63746",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-vjjx-rfw4-rmfc",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permission-bypass-via-graph-traversal"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Denial of Service via malformed RPC use",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63747",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability in the RPC use handler that panics when db is set without a namespace. Unauthenticated attackers can send a malformed WebSocket message to the /rpc endpoint to crash the server process.",
+    "summary": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability in the RPC use handler that panics when db is set without a namespace. Unauthenticated attackers can send a malformed WebSocket message to the /rpc endpoint to crash the server process.",
+    "published": "2026-07-20T12:04:40.140Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:43.027829+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63747",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 8.7,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-wjjj-24cx-f28g",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-malformed-rpc-use"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Information Disclosure via Error Messages",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63748",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an information disclosure vulnerability where authenticated users with UPDATE access can read field values hidden by field-level SELECT permissions through error messages. Attackers can trigger arithmetic or extend operations on hidden fields to embed raw operand values in error responses, bypassing field-level access controls.",
+    "summary": "SurrealDB versions before 3.1.0 contain an information disclosure vulnerability where authenticated users with UPDATE access can read field values hidden by field-level SELECT permissions through error messages. Attackers can trigger arithmetic or extend operations on hidden fields to embed raw oper",
+    "published": "2026-07-20T12:04:40.925Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:43.448759+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63748",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6g9v-7gq3-p2c6",
+        "https://www.vulncheck.com/advisories/surrealdb-before-information-disclosure-via-error-messages"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Authentication Bypass via LIVE SELECT",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63749",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authentication bypass vulnerability in LIVE SELECT subscriptions where permission expressions referencing $value, $before, $after, or $event are evaluated against attacker-controlled bindings instead of actual documents. Authenticated subscribers can bind chosen values to these parameter names and register LIVE SELECT queries to receive notifications for records that SELECT permission expressions should have hidden.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authentication bypass vulnerability in LIVE SELECT subscriptions where permission expressions referencing $value, $before, $after, or $event are evaluated against attacker-controlled bindings instead of actual documents. Authenticated subscribers can bind c",
+    "published": "2026-07-20T12:04:41.628Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:43.869111+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63749",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-6wqw-vhfr-9999",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-live-select"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Memory Amplification via /sql WebSocket",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63750",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 fail to apply the SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE limit to anonymous /sql WebSocket connections, allowing attackers to buffer unbounded frames in the per-connection read buffer. Attackers can stream WebSocket frames larger than the configured limit across multiple concurrent connections to consume excessive memory and degrade /sql availability.",
+    "summary": "SurrealDB versions before 3.1.0 fail to apply the SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE limit to anonymous /sql WebSocket connections, allowing attackers to buffer unbounded frames in the per-connection read buffer. Attackers can stream WebSocket frames larger than the configured limit across multiple",
+    "published": "2026-07-20T12:04:42.403Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:44.278883+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63750",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 6.9,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:N/VI:N/VA:L/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-65rj-r9fh-jp2v",
+        "https://www.vulncheck.com/advisories/surrealdb-before-memory-amplification-via-sql-websocket"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Field Permission Bypass via JSON Patch",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63751",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a field-level permission bypass vulnerability in JSON Patch operations that allows authenticated users to read protected fields. Attackers can use UPDATE PATCH with an empty from pointer in copy or move operations to duplicate all record fields, including those restricted by field-level SELECT permissions, into attacker-chosen destination fields.",
+    "summary": "SurrealDB versions before 3.1.0 contain a field-level permission bypass vulnerability in JSON Patch operations that allows authenticated users to read protected fields. Attackers can use UPDATE PATCH with an empty from pointer in copy or move operations to duplicate all record fields, including thos",
+    "published": "2026-07-20T12:04:43.103Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:44.699045+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63751",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-fpxg-5xmv-922m",
+        "https://www.vulncheck.com/advisories/surrealdb-before-field-permission-bypass-via-json-patch"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 RELATE Statement Record Overwrite",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63752",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 contains an authorization bypass vulnerability in the RELATE statement that allows authenticated users with CREATE permission to overwrite existing edge records without UPDATE permission. Attackers can issue a RELATE statement with a SET id clause pointing to an existing edge id, causing the storage layer to silently overwrite the target record instead of rejecting the operation.",
+    "summary": "SurrealDB before 3.1.0 contains an authorization bypass vulnerability in the RELATE statement that allows authenticated users with CREATE permission to overwrite existing edge records without UPDATE permission. Attackers can issue a RELATE statement with a SET id clause pointing to an existing edge",
+    "published": "2026-07-20T12:04:43.796Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:45.109194+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63752",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-f82j-v89j-mf86",
+        "https://www.vulncheck.com/advisories/surrealdb-before-relate-statement-record-overwrite"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Authentication Bypass via LIVE Query",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63753",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 fails to refresh authentication state in LIVE SELECT subscriptions when session state changes. Attackers can continue receiving real-time notifications under revoked or expired session credentials until the connection closes.",
+    "summary": "SurrealDB before 3.1.0 fails to refresh authentication state in LIVE SELECT subscriptions when session state changes. Attackers can continue receiving real-time notifications under revoked or expired session credentials until the connection closes.",
+    "published": "2026-07-20T12:04:44.546Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:45.488673+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63753",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4m82-p8cx-f94j",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authentication-bypass-via-live-query"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Denial of Service via LIVE Query",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63754",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability where malicious LIVE queries with WHERE clauses that evaluate to errors cause all CREATE, UPDATE, and DELETE operations on the watched table to fail. An authenticated user with only select permission can prevent write operations on a table for any user, including root, by registering a LIVE query that triggers evaluation errors until the query is killed or the session ends.",
+    "summary": "SurrealDB versions before 3.1.0 contain a denial of service vulnerability where malicious LIVE queries with WHERE clauses that evaluate to errors cause all CREATE, UPDATE, and DELETE operations on the watched table to fail. An authenticated user with only select permission can prevent write operatio",
+    "published": "2026-07-20T12:04:45.256Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:45.908401+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63754",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4v76-cw68-4vc9",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-via-live-query"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Permission Bypass via WHERE Clause",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63755",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 evaluates user-supplied WHERE clauses in SELECT statements (and SET/MERGE/CONTENT/PATCH clauses in UPDATE, UPSERT, INSERT ON DUPLICATE KEY UPDATE, and RELATE update-variant statements) against full record data before enforcing PERMISSIONS FOR SELECT WHERE restrictions. An authenticated user — including Record and Scope users — can exploit this ordering flaw to read the full contents of any table in the database they are authenticated against, bypassing table-level permission checks. Exfiltration is most direct when scripting functions are enabled (--allow-scripting), but is also possible via SurrealQL's THROW statement and timing-based side channels without scripting. The vulnerability is confined to the attacker's current database and does not cross namespace or database isolation boundaries.",
+    "summary": "SurrealDB before 3.1.0 evaluates user-supplied WHERE clauses in SELECT statements (and SET/MERGE/CONTENT/PATCH clauses in UPDATE, UPSERT, INSERT ON DUPLICATE KEY UPDATE, and RELATE update-variant statements) against full record data before enforcing PERMISSIONS FOR SELECT WHERE restrictions. An auth",
+    "published": "2026-07-20T12:04:46.096Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:46.328728+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63755",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-98fx-66cf-fc7c",
+        "https://www.vulncheck.com/advisories/surrealdb-before-permission-bypass-via-where-clause"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Privilege Escalation via RPC Session Race Condition",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63756",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a time-of-check/time-of-use race condition in the HTTP /rpc endpoint that allows unauthenticated requests to inherit authenticated session state. Unauthenticated attackers can send concurrent requests to the /rpc endpoint while legitimate authenticated traffic is active to execute operations with hijacked user privileges.",
+    "summary": "SurrealDB versions before 3.1.0 contain a time-of-check/time-of-use race condition in the HTTP /rpc endpoint that allows unauthenticated requests to inherit authenticated session state. Unauthenticated attackers can send concurrent requests to the /rpc endpoint while legitimate authenticated traffic",
+    "published": "2026-07-20T12:04:46.863Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:46.760203+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63756",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 9.2,
+        "base_severity": "CRITICAL",
+        "vector_string": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-4vgr-h27g-cf9p",
+        "https://www.vulncheck.com/advisories/surrealdb-before-privilege-escalation-via-rpc-session-race-condition"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Session Hijacking via /rpc sessions",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63757",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain a session hijacking vulnerability where the HTTP /rpc sessions method returns attached session UUIDs without authentication and accepts arbitrary session fields with no ownership verification. Unauthenticated attackers can enumerate session UUIDs and impersonate authenticated sessions to read, write, delete data and escalate privileges.",
+    "summary": "SurrealDB versions before 3.1.0 contain a session hijacking vulnerability where the HTTP /rpc sessions method returns attached session UUIDs without authentication and accepts arbitrary session fields with no ownership verification. Unauthenticated attackers can enumerate session UUIDs and impersona",
+    "published": "2026-07-20T12:04:47.616Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:47.198427+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63757",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 8.7,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:P/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-5qfp-32cf-69jh",
+        "https://www.vulncheck.com/advisories/surrealdb-before-session-hijacking-via-rpc-sessions"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Authorization Bypass via KILL Statement",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63758",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability in the KILL statement that allows authenticated database users to terminate other users' LIVE SELECT subscriptions. Attackers can issue KILL statements with target live query UUIDs to disrupt real-time data subscriptions of other users without ownership verification.",
+    "summary": "SurrealDB versions before 3.1.0 contain an authorization bypass vulnerability in the KILL statement that allows authenticated database users to terminate other users' LIVE SELECT subscriptions. Attackers can issue KILL statements with target live query UUIDs to disrupt real-time data subscriptions o",
+    "published": "2026-07-20T12:04:48.367Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:47.618898+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63758",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 5.3,
+        "base_severity": "MEDIUM",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:L/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-gcwr-5mrf-fvch",
+        "https://www.vulncheck.com/advisories/surrealdb-before-authorization-bypass-via-kill-statement"
+      ]
+    }
+  },
+  {
+    "title": "SurrealDB before 3.1.0 Denial of Service nested type annotations",
+    "link": "https://www.cve.org/CVERecord?id=CVE-2026-63759",
+    "source": "MITRE CVE",
+    "category": "vulnerability",
+    "content": "SurrealDB before 3.1.0 fails to enforce recursion depth limits in the type/kind parser when processing nested type annotations. Authenticated attackers can send queries with deeply nested type annotations to exhaust server memory and crash the process.",
+    "summary": "SurrealDB before 3.1.0 fails to enforce recursion depth limits in the type/kind parser when processing nested type annotations. Authenticated attackers can send queries with deeply nested type annotations to exhaust server memory and crash the process.",
+    "published": "2026-07-20T12:04:49.105Z",
+    "author": null,
+    "tags": [],
+    "collected_at": "2026-07-22T18:43:47.998669+00:00",
+    "metadata": {
+      "collection_method": "api",
+      "cve_id": "CVE-2026-63759",
+      "cvss": {
+        "version": "4.0",
+        "base_score": 7.1,
+        "base_severity": "HIGH",
+        "vector_string": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N"
+      },
+      "state": "PUBLISHED",
+      "references": [
+        "https://github.com/surrealdb/surrealdb/security/advisories/GHSA-q8qp-67f9-wr3f",
+        "https://www.vulncheck.com/advisories/surrealdb-before-denial-of-service-nested-type-annotations"
+      ]
+    }
+  }
+]
