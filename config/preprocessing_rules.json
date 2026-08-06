@@ -1,0 +1,23 @@
+{
+  "boilerplate_patterns": [
+    "(?i)^advertisement$",
+    "(?i)^sponsored content$",
+    "(?i)share this article.*$",
+    "(?i)share on (twitter|facebook|linkedin|reddit)( \\| share on (twitter|facebook|linkedin|reddit))*",
+    "(?i)subscribe to our newsletter.*$",
+    "(?i)sign up for our newsletter.*$",
+    "(?i)follow us on (twitter|facebook|linkedin|instagram).*$",
+    "(?i)^comments? \\(\\d+\\)$",
+    "(?i)^\\d+ comments?$",
+    "(?i)this (site|website) uses cookies.*$",
+    "(?i)accept (all )?cookies.*$",
+    "(?i)^related (articles?|posts?):?$",
+    "(?i)^read more:?$",
+    "(?i)^continue reading:?$",
+    "(?i)all rights reserved\\.?$",
+    "(?i)^copyright \\d{4}.*$",
+    "(?i)^tags?:\\s*.*$",
+    "(?i)^categories?:\\s*.*$",
+    "(?i)^\\s*\\|\\s*$"
+  ]
+}

@@ -1,0 +1,124 @@
+{
+  "rss_sources": [
+    {
+      "name": "The Hacker News",
+      "url": "https://feeds.feedburner.com/TheHackersNews",
+      "category": "news"
+    },
+    {
+      "name": "BleepingComputer",
+      "url": "https://www.bleepingcomputer.com/feed/",
+      "category": "news"
+    },
+    {
+      "name": "Cisco Talos",
+      "url": "https://blog.talosintelligence.com/rss/",
+      "category": "research"
+    },
+    {
+      "name": "SANS Internet Storm Center",
+      "url": "https://isc.sans.edu/rssfeed_full.xml",
+      "category": "advisory"
+    },
+    {
+      "name": "Krebs on Security",
+      "url": "https://krebsonsecurity.com/feed/",
+      "category": "news"
+    }
+  ],
+  "cert_sources": [
+    {
+      "name": "CISA",
+      "url": "https://www.cisa.gov/news-events/cybersecurity-advisories",
+      "category": "advisory",
+      "method": "scrape"
+    },
+    {
+      "name": "CERT-EU",
+      "url": "https://cert.europa.eu/publications/security-advisories-rss",
+      "category": "advisory",
+      "method": "rss"
+    },
+    {
+      "name": "CERT-AT",
+      "url": "https://www.cert.at/cert-at.de.warnings.rss_2.0.xml",
+      "category": "advisory",
+      "method": "rss"
+    }
+  ],
+  "vulnerability_sources": [
+    {
+      "name": "NVD",
+      "type": "nvd",
+      "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+      "days_back": 3,
+      "results_per_page": 20,
+      "max_pages": 3
+    },
+    {
+      "name": "MITRE CVE",
+      "type": "mitre",
+      "base_url": "https://cveawg.mitre.org/api/cve"
+    }
+  ],
+  "social_media_sources": [
+    {
+      "name": "Reddit - r/netsec",
+      "platform": "reddit",
+      "url": "https://www.reddit.com/r/netsec/",
+      "category": "social",
+      "max_scrolls": 6,
+      "target_count": 30
+    },
+    {
+      "name": "Reddit - r/cybersecurity",
+      "platform": "reddit",
+      "url": "https://www.reddit.com/r/cybersecurity/",
+      "category": "social",
+      "max_scrolls": 6,
+      "target_count": 30
+    },
+    {
+      "name": "Reddit - r/blueteamsec",
+      "platform": "reddit",
+      "url": "https://www.reddit.com/r/blueteamsec/",
+      "category": "social",
+      "max_scrolls": 6,
+      "target_count": 30
+    },
+    {
+      "name": "Reddit - r/AskNetsec",
+      "platform": "reddit",
+      "url": "https://www.reddit.com/r/AskNetsec/",
+      "category": "social",
+      "max_scrolls": 6,
+      "target_count": 30
+    }
+  ],
+  "hackernews_sources": [
+  { "name": "Hacker News - CVE", "query": "CVE", "category": "social", "limit": 30 },
+  { "name": "Hacker News - vulnerability", "query": "vulnerability", "category": "social", "limit": 30 },
+  { "name": "Hacker News - data breach", "query": "data breach", "category": "social", "limit": 30 }
+],
+  "github_sources": [
+    {
+      "name": "GitHub Security Advisories",
+      "category": "vulnerability",
+      "per_page": 20
+    }
+  ],
+  "telegram_sources": [
+    {
+      "name": "Telegram - The Hacker News",
+      "channel": "thehackernews",
+      "category": "social",
+      "max_pages": 3
+    },
+    {
+      "name": "Telegram - CVEFeed",
+      "channel": "cvefeed",
+      "category": "vulnerability",
+      "max_pages": 3
+    }
+  ]
+}
