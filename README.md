@@ -2,6 +2,8 @@
 
 AI-based Cyber Threat Intelligence platform for a graduation project. The project keeps the offline DNRTI model-training work separate from runtime CTI data processing.
 
+The complete source repository is private for team collaboration. Public architecture, methodology, sanitized demonstrations, and evaluation evidence are available in [CTI-Tool-Showcase](https://github.com/AmmarAikan/CTI-Tool-Showcase).
+
 ## Architecture Summary
 
 The platform is organized as three connected pipelines:
@@ -96,10 +98,12 @@ python -c "from backend.app.pipeline.extraction.ner_extractor import NERExtracto
 
 ## Branch Workflow
 
-Do not work directly on `main`. Use:
+Do not work directly on `main`. Start a new branch from the current remote `main`:
 
 ```bash
-git checkout ammar-part0-external-integration
+git switch main
+git pull --ff-only origin main
+git switch -c your-feature-branch
 ```
 
 Review changes before committing:
@@ -108,3 +112,11 @@ Review changes before committing:
 git status --short
 git diff
 ```
+
+Open a pull request from the contributor branch into `main`. Do not add commits to another contributor's branch unless the team explicitly coordinates that work.
+
+## Team and rights
+
+CTI-Tool is a collaborative graduation project maintained by its project contributors.
+
+© 2026 CTI-Tool Project Contributors. All Rights Reserved. Copyright in each contribution remains with its respective contributor. See [COPYRIGHT.md](COPYRIGHT.md).
