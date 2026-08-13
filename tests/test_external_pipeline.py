@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.app.pipeline.classification.relevance_classifier import RelevanceClassifier
 from backend.app.pipeline.common.cti_schema import RawRecord
@@ -57,6 +58,17 @@ def raw_record(**overrides) -> RawRecord:
 
 
 class ExternalPipelineTests(unittest.TestCase):
+    def test_dnrti_bert_is_primary_and_sklearn_is_secondary(self) -> None:
+        with patch.object(NERExtractor, "_load_transformer", return_value=True) as load_bert, patch.object(
+            NERExtractor,
+            "_load_sklearn",
+            return_value=True,
+        ) as load_sklearn:
+            NERExtractor(transformer_model_path="primary", sklearn_model_path="secondary")
+
+        load_bert.assert_called_once()
+        load_sklearn.assert_not_called()
+
     def test_file_connector_normalizes_prepared_external_sample_shape(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "vulnerabilities.json"

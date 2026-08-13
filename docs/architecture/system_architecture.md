@@ -31,7 +31,7 @@ ml/reports/
 backend/app/pipeline/extraction/ner_extractor.py
 ```
 
-The runtime extractor prefers the local transformer model when present and falls back to the sklearn model. If neither model is available, it returns an empty entity list instead of crashing.
+The runtime extractor uses `ml/models/dnrti_bert_ner` as the primary NER model and falls back to `ml/models/dnrti_sklearn_ner` only when BERT cannot load. If neither model is available, it returns an empty entity list instead of crashing.
 
 ## Pipeline B: External Runtime
 
@@ -55,7 +55,7 @@ For unstructured external text, classification happens before NER. Trusted struc
 
 ## Pipeline C: Internal Runtime
 
-Internal sources are future work. They should not be forced through ordinary document classification when records are structured security telemetry.
+Internal sources are implemented for Wazuh `alerts.json` and direct Dionaea `log_json` JSONL. Structured security telemetry is not forced through ordinary document classification.
 
 Expected flow:
 
@@ -71,7 +71,7 @@ Internal Connector
 -> Internal CTI Objects
 ```
 
-The current repository includes the internal connector interface only.
+The current implementation stores all raw Wazuh and Dionaea records, groups them into 30-minute source/type sessions, extracts measurable features, uses Isolation Forest for suitable batches, stores every session, and promotes outlier sessions to internal CTI objects. Credential values remain in protected raw storage when retention is needed, but sensitive values are redacted from CTI event copies.
 
 ## Merge Layer
 
@@ -91,3 +91,11 @@ The current schema is defined in:
 ```text
 backend/app/pipeline/common/cti_schema.py
 ```
+
+The central repository is implemented with SQLAlchemy and PostgreSQL. SQLite is supported for lightweight local tests. Exact indicator matching provides simple correlation, TF-IDF/cosine similarity provides prototype advanced textual correlation, NVD provides CVE enrichment, STIX 2.1 provides portable export, and MISP is an optional external sharing target. TAXII and the frontend dashboard remain future work; dashboard data is already available through the API.
+
+Heavy infrastructure boundaries, including MongoDB, a hosted MISP platform, and live Wazuh services, are defined in `future_bound_work.md`. They are deliberate extensions rather than missing runtime dependencies.
+
+## Backend API and security
+
+FastAPI exposes versioned routes under `/api/v1`. Authentication uses short-lived signed bearer tokens, scrypt password hashing, and admin/analyst/viewer roles. Material operations such as uploads, correlation runs, enrichment, MISP submission, source creation, and user creation are written to `audit_logs`.

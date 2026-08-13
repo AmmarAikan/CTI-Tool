@@ -1,0 +1,86 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - cti_postgres_data:/var/lib/postgresql/data
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      CTI_APP_ENV: development
+      POSTGRES_HOST: db
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      BOOTSTRAP_ADMIN_USERNAME: ${BOOTSTRAP_ADMIN_USERNAME:-admin}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      MISP_URL: ${MISP_URL:-}
+      MISP_API_KEY: ${MISP_API_KEY:-}
+      MISP_VERIFY_TLS: ${MISP_VERIFY_TLS:-true}
+      DIONAEA_JSON_LOG_PATH: /data/dionaea/dionaea.json
+      DIONAEA_MAX_LOG_BYTES: ${DIONAEA_MAX_LOG_BYTES:-52428800}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - default
+      - honeypot_lab
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - cti_uploads:/app/data/uploads
+      - ./ml/models/dnrti_bert_ner:/app/ml/models/dnrti_bert_ner:ro
+      - dionaea_data:/data/dionaea:ro
+
+  adminer:
+    profiles: ["database-ui"]
+    image: adminer:5.4.1-standalone@sha256:dc99eedc418df241629e5ec80e3289553605788e6aca04f5f4b039f61d2dac91
+    restart: unless-stopped
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    security_opt:
+      - no-new-privileges:true
+
+  dionaea:
+    profiles: ["honeypot"]
+    build:
+      context: ./infra/dionaea
+    image: cti-dionaea:0.11.0
+    restart: unless-stopped
+    init: true
+    environment:
+      DIONAEA_FORCE_INIT_DATA: "1"
+    networks:
+      - honeypot_lab
+    volumes:
+      - dionaea_data:/opt/dionaea/var/lib/dionaea
+      - dionaea_logs:/opt/dionaea/var/log/dionaea
+
+networks:
+  default:
+  honeypot_lab:
+    internal: true
+
+volumes:
+  cti_postgres_data:
+  cti_uploads:
+  dionaea_data:
+  dionaea_logs:

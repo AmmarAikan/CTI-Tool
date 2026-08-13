@@ -24,8 +24,8 @@ from ml.common.token_features import sentence_to_feature_dicts, simple_word_toke
 class NERExtractor:
     """Runtime NER extractor for the CTI pipeline.
 
-    It prefers a fine-tuned transformer model when available. If the transformer
-    stack or model is missing, it falls back to the local scikit-learn baseline.
+    The fine-tuned DNRTI BERT model is the primary runtime model. The local
+    scikit-learn DNRTI model is only a secondary fallback when BERT cannot load.
     """
 
     def __init__(

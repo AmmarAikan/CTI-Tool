@@ -30,10 +30,11 @@ ml/reports/label_distribution.tsv
 
 ## Train Transformer Model
 
-Install the training dependencies first:
+Use the repository's single Python 3.12 environment and install the complete project requirements:
 
-```bash
-pip install -r ml/requirements-part0.txt
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
 Then fine-tune BERT:

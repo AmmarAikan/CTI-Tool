@@ -1,4 +1,48 @@
-# CTI Tool — External Sources Module
+# AI-Based Cyber Threat Intelligence Platform
+
+This repository now contains the backend foundation of the graduation-project CTI platform as well as the external-source collectors. The backend joins external CTI with internal Wazuh and Dionaea telemetry in one source-independent schema, persists the results, exposes an analyst API, correlates events, detects outlier sessions, and supports STIX export and optional MISP sharing.
+
+## Backend status
+
+- [x] FastAPI application and OpenAPI documentation
+- [x] PostgreSQL persistence with SQLite support for local tests
+- [x] Sources, raw items, threat events, indicators, entities, enrichments, correlations, outlier sessions, pipeline runs, users, and audit logs
+- [x] Wazuh `alerts.json` ingestion in JSON, JSONL, and NDJSON forms
+- [x] Dionaea `log_json` ingestion and a reproducible local-only isolated honeypot profile
+- [x] 30-minute source-IP sessionization and session feature extraction
+- [x] Isolation Forest outlier detection with a clearly labeled small-sample fallback
+- [x] DNRTI BERT as the primary runtime NER model; DNRTI sklearn as the secondary fallback
+- [x] Explainable risk scoring, exact-indicator correlation, and TF-IDF similarity correlation
+- [x] NVD CVE enrichment, STIX 2.1 bundle export, and optional MISP event submission
+- [x] Bearer authentication, admin/analyst/viewer roles, and audit logging
+
+The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. MISP is an optional sharing/integration target and does not have to be running for ingestion, analysis, storage, API, or STIX export to work.
+
+## Quick start — backend
+
+Docker Desktop must be running for this path:
+
+```powershell
+Copy-Item .env.example .env
+# Edit .env and replace every CHANGE_ME value.
+docker compose up --build
+```
+
+Compose mounts the local `ml/models/dnrti_bert_ner` directory read-only as the primary model. If it is unavailable, the container safely falls back to the sklearn model included in the image.
+
+Then open `http://localhost:8000/docs`. The first administrator is created from the `BOOTSTRAP_ADMIN_*` values in `.env`.
+
+Local development without PostgreSQL uses SQLite automatically:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn backend.app.main:app --reload
+```
+
+Use `data/internal_samples/wazuh_alerts_sample.json` and `data/internal_samples/dionaea_events_sample.jsonl` to demonstrate internal ingestion. Full operational instructions are in `docs/operations/backend_setup.md`, and the implemented architecture is documented under `docs/architecture/`. Heavy optional infrastructure is explicitly bounded in `docs/architecture/future_bound_work.md`.
+
+## External Sources Module
 
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
@@ -45,10 +89,10 @@ CTI-Tool/
 
 ## Setup
 
-```bash
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ```
 
 ## Usage — Phase 1 (RSS Collection)

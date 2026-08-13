@@ -1,6 +1,7 @@
-torch
-transformers
-scikit-learn
-numpy
-pandas
-joblib
+torch>=2.5,<3.0
+transformers>=4.45,<6.0
+accelerate>=1.0,<2.0
+scikit-learn>=1.5,<2.0
+numpy>=2.0,<3.0
+pandas>=2.2,<4.0
+joblib>=1.4,<2.0

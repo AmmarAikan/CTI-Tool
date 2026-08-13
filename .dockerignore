@@ -1,0 +1,27 @@
+.git
+.idea
+.codex
+.codex_old
+.venv*
+venv
+env
+__pycache__
+*.py[cod]
+*.log
+*.zip
+*.rar
+*.7z
+data
+docs
+Parts Report
+src
+tests
+AI-Based_Holistic_Framework_for_Cyber_Threat_Intelligence_Management.pdf
+Explain Project.docx
+Explain Part 0 Project.docx
+ml/datasets
+ml/evaluation
+ml/preprocessing
+ml/reports
+ml/training
+ml/models/dnrti_bert_ner

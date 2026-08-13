@@ -6,9 +6,6 @@ __pycache__/
 
 # Virtual environments
 .venv/
-.venv_bert312/
-venv/
-env/
 
 # Codex local files
 .codex/
@@ -23,6 +20,10 @@ Thumbs.db
 # Logs and temporary files
 *.log
 *.tmp
+.env
+data/cti_platform.db
+data/uploads/
+data/dionaea/
 
 # Archives
 *.zip
