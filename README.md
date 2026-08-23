@@ -4,6 +4,8 @@
 
 The canonical backend now also includes the Phase 1 reusable `WebCrawler` and explainable `PageTypeDetector` under `backend/app/pipeline/ingestion/external/crawler/`. They are importable backend components, not end-user commands, and all default tests use sanitized local fixtures rather than live sites.
 
+Phase 2 adds versioned, hash-aware External text preprocessing under `backend/app/pipeline/ingestion/external/preprocessing/` and a separate deterministic privacy review/redaction step under `backend/app/pipeline/ingestion/external/privacy/`. The implementation preserves CTI indicators, redacts only configured high-confidence personal data and secrets, and routes ambiguous values to review without storing detected secret values in metadata.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /

@@ -1,4 +1,8 @@
 {
+  "schema_version": "1.0",
+  "rules_version": "1.0",
+  "unicode_normalization": "NFC",
+  "preserve_fenced_code_blocks": true,
   "boilerplate_patterns": [
     "(?i)^advertisement$",
     "(?i)^sponsored content$",
