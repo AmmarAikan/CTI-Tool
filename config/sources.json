@@ -82,17 +82,48 @@
   ],
   "vulnerability_sources": [
     {
+      "source_id": "nvd-cve-api",
       "name": "NVD",
       "type": "nvd",
       "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
-      "days_back": 3,
-      "results_per_page": 20,
-      "max_pages": 3
+      "enabled": true,
+      "lookback_days": 7,
+      "results_per_page": 2000,
+      "max_pages": 5,
+      "delay_seconds": 6
     },
     {
+      "source_id": "cve-program-records",
       "name": "MITRE CVE",
-      "type": "mitre",
-      "base_url": "https://cveawg.mitre.org/api/cve"
+      "type": "cve",
+      "base_url": "https://cveawg.mitre.org/api/cve",
+      "enabled": true,
+      "results_per_page": 100,
+      "max_pages": 5,
+      "lookback_days": 7,
+      "delay_seconds": 0.2
+    },
+    {
+      "source_id": "github-global-advisories",
+      "name": "GitHub Global Security Advisories",
+      "type": "github_advisories",
+      "base_url": "https://api.github.com/advisories",
+      "enabled": true,
+      "lookback_days": 7,
+      "results_per_page": 100,
+      "max_pages": 5,
+      "delay_seconds": 1
+    },
+    {
+      "source_id": "cisa-kev",
+      "name": "CISA Known Exploited Vulnerabilities",
+      "type": "cisa_kev",
+      "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+      "enabled": true,
+      "lookback_days": 120,
+      "results_per_page": 2000,
+      "max_pages": 1,
+      "delay_seconds": 0
     }
   ],
   "social_media_sources": [

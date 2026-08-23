@@ -10,6 +10,8 @@ Phase 3 upgrades the existing canonical `backend/app/pipeline/ingestion/external
 
 Phase 4 adds the canonical `backend/app/pipeline/ingestion/external/cert_connector.py`. CERT-EU and CERT.at reuse the Phase 3 RSS implementation; CISA uses a bounded official-listing adapter and the shared crawler for advisory detail text. The preserved `src/cert/` module remains prototype code and is not a second final runtime.
 
+Phase 5 replaces the narrow canonical NVD normalizer with the single `backend/app/pipeline/ingestion/external/vulnerability_connector.py`. It integrates the official NVD, CVE Program, GitHub Global Security Advisories, and CISA KEV structured interfaces, with incremental windows, bounded pagination, checkpoints, hashing, trusted-source bypass, and provenance-preserving CVE/GHSA deduplication. The vulnerability and GitHub collectors under `src/` remain preserved prototypes only.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
@@ -236,7 +238,12 @@ Or via the main orchestrator (now runs Phases 1 → 2 → 3 → 4 → 5):
 python -m src.main
 ```
 
-This produces `src/data/vulnerabilities_<timestamp>.json`, with **CVE
+> **Prototype-only documentation:** This command and output describe preserved
+> `src/` code. The final Phase 5 component is
+> `backend.app.pipeline.ingestion.external.vulnerability_connector`; see
+> `docs/architecture/external_sources_vulnerability_delivery.md`.
+
+This prototype produces `src/data/vulnerabilities_<timestamp>.json`, with **CVE
 ID, CVSS (score/severity/vector), description, published date, and
 references** for each item, collected exclusively via official REST
 APIs — no scraping, per the spec.
