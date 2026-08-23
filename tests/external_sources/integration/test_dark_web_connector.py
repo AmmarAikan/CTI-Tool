@@ -112,6 +112,8 @@ class DarkWebConnectorTests(unittest.TestCase):
         self.assertEqual(len(state["urls"]), 3)
         self.assertEqual(len(state["items"]), 2)
         self.assertIn("privacy_output_hash", next(iter(state["items"].values())))
+        self.assertEqual(set(next(iter(state["items"].values()))["stages"]), {"extraction", "cleaning", "privacy", "classification"})
+        self.assertEqual(next(iter(state["items"].values()))["stages"]["privacy"]["status"], "reviewed")
         self.assertEqual(result.accepted_items[0].classification.status, "not_required")
         schema = json.loads((Path(__file__).resolve().parents[3] / "contracts" / "external_cti_item.schema.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(result.accepted_items[0].to_dict())

@@ -268,10 +268,17 @@ class DarkWebConnector(ExternalConnector):
         item_state = self.state["items"].setdefault(record_id, {})
         stable = classified.to_dict(); stable.pop("collected_at", None)
         record_hash = sha256_json(stable)
+        checked_at = self._now()
+        stages = {
+            "extraction": {"input_hash": sha256_text(html), "output_hash": sha256_text(extracted), "status": "completed", "timestamp": checked_at, "version": "dark_web_html_extraction_v1"},
+            "cleaning": {"input_hash": processed.preprocessing.input_hash, "output_hash": processed.preprocessing.output_hash, "status": "completed", "timestamp": checked_at, "version": processed.preprocessing.implementation_version},
+            "privacy": {"input_hash": processed.privacy.input_hash, "output_hash": processed.privacy.output_hash, "status": processed.privacy.status, "timestamp": checked_at, "version": processed.privacy.implementation_version},
+            "classification": {"input_hash": classified.content_hash, "output_hash": classified.metadata.get("classification_stage", {}).get("output_hash"), "status": classified.classification.status, "timestamp": checked_at, "version": classified.classification.model_version},
+        }
         item_state.update({"raw_content_hash": sha256_text(html), "extracted_content_hash": sha256_text(extracted),
                            "clean_content_hash": processed.preprocessing.output_hash, "privacy_output_hash": processed.privacy.output_hash,
                            "classification_output_hash": classified.metadata.get("classification_stage", {}).get("output_hash"),
-                           "record_hash": record_hash, "last_checked": self._now()})
+                           "record_hash": record_hash, "last_checked": checked_at, "stages": stages})
         if processed.review_required or not processed.export_content or classified_result.disposition == "review": result.review_items.append(classified)
         elif classified_result.disposition == "rejected": result.rejected_items.append(classified)
         else: result.accepted_items.append(classified)

@@ -18,6 +18,8 @@ Phase 7 adds independent canonical Reddit, Hacker News, and Telegram collectors 
 
 Phase 8 adds the sole canonical curated dark-web collector at `backend/app/pipeline/ingestion/external/dark_web_connector.py`. It performs bounded GET-only requests through an explicitly configured `socks5h` Tor proxy, manually validates redirects, accepts only configured onion hosts and paths, and reuses canonical page detection, cleaning, privacy, classification, hashing, and state contracts. Copy the disabled fake `config/dark_web_sources.example.json` to the Git-ignored `config/dark_web_sources.local.json` and supply only operator-verified sources locally. No proxy port is assumed, no discovery or recursive crawling exists, and the collector never starts or stops Tor processes. The older `src/dark_web/` implementation and its tests remain preserved prototype code.
 
+Phase 9 implements the framework-independent `CanonicalManualSourceService` application boundary for the future dashboard. It canonicalizes and DNS-validates URLs before state lookup, routes structured GitHub advisory, GitHub public, vulnerability, RSS, and approved onion URLs to configured adapters, and sends only ordinary public web pages through an SSRF-protected shared crawler. Listing traversal is same-host, deduplicated, limited to 20 links, and one level deep. This phase adds no dashboard UI, public API, or transport adapter.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
