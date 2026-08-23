@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Sanitized Security Feed</title>
+    <link>https://example.test/</link>
+    <description>Deterministic RSS fixture</description>
+    <item>
+      <guid isPermaLink="false">advisory-001</guid>
+      <title>Sanitized vulnerability advisory</title>
+      <link>https://example.test/articles/advisory-001?utm_source=feed</link>
+      <description><![CDATA[<p>Short advisory summary.</p>]]></description>
+      <author>researcher@example.test</author>
+      <category>vulnerability</category>
+      <pubDate>Sat, 22 Aug 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <guid isPermaLink="false">advisory-002</guid>
+      <title>Summary-only security notice</title>
+      <link>https://example.test/articles/advisory-002</link>
+      <description><![CDATA[<p>A security notice whose linked article is unavailable.</p>]]></description>
+      <pubDate>Sat, 22 Aug 2026 09:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <guid isPermaLink="false">old-advisory</guid>
+      <title>Old advisory outside lookback</title>
+      <link>https://example.test/articles/old</link>
+      <description>Old summary.</description>
+      <pubDate>Wed, 01 Jul 2026 09:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

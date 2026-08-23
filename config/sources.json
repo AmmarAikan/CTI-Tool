@@ -1,29 +1,50 @@
 {
+  "schema_version": "1.0",
   "rss_sources": [
     {
+      "source_id": "the-hacker-news",
       "name": "The Hacker News",
       "url": "https://feeds.feedburner.com/TheHackersNews",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "bleepingcomputer",
       "name": "BleepingComputer",
       "url": "https://www.bleepingcomputer.com/feed/",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "cisco-talos",
       "name": "Cisco Talos",
       "url": "https://blog.talosintelligence.com/rss/",
-      "category": "research"
+      "category": "research",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 14
     },
     {
+      "source_id": "sans-isc",
       "name": "SANS Internet Storm Center",
       "url": "https://isc.sans.edu/rssfeed_full.xml",
-      "category": "advisory"
+      "category": "advisory",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "krebs-on-security",
       "name": "Krebs on Security",
       "url": "https://krebsonsecurity.com/feed/",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 14
     }
   ],
   "cert_sources": [

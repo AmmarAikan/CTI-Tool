@@ -6,6 +6,8 @@ The canonical backend now also includes the Phase 1 reusable `WebCrawler` and ex
 
 Phase 2 adds versioned, hash-aware External text preprocessing under `backend/app/pipeline/ingestion/external/preprocessing/` and a separate deterministic privacy review/redaction step under `backend/app/pipeline/ingestion/external/privacy/`. The implementation preserves CTI indicators, redacts only configured high-confidence personal data and secrets, and routes ambiguous values to review without storing detected secret values in metadata.
 
+Phase 3 upgrades the existing canonical `backend/app/pipeline/ingestion/external/rss_connector.py` into the single RSS implementation. It supports configured bounds, conditional requests, per-feed/item state, full-article enrichment through the canonical crawler, cleaning followed by privacy review, trusted-source classification bypass, and explicit review handling for summary-only content. Default tests use sanitized local fixtures and make no claim about live feed availability.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
