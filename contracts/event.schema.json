@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/event.schema.json",
+  "title": "External Sources Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_id", "event_type", "occurred_at", "job_id", "payload"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "event_id": {"type": "string", "minLength": 10},
+    "event_type": {"enum": ["job_queued", "job_started", "job_progress", "job_completed", "job_partial", "job_failed", "job_cancelled", "export_ready"]},
+    "occurred_at": {"type": "string", "pattern": "Z$"},
+    "job_id": {"type": ["string", "null"]},
+    "payload": {"type": "object"}
+  }
+}

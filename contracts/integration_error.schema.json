@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/integration_error.schema.json",
+  "title": "External Sources Integration Error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "code", "message", "retryable", "details"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "code": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+    "message": {"type": "string", "minLength": 1},
+    "retryable": {"type": "boolean"},
+    "details": {"type": "object"}
+  }
+}

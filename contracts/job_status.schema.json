@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/job_status.schema.json",
+  "title": "External Sources Job Status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "job_id", "command_id", "state", "created_at", "updated_at", "progress", "result", "error"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "job_id": {"type": "string", "minLength": 10},
+    "command_id": {"type": "string", "minLength": 10},
+    "state": {"enum": ["queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"]},
+    "created_at": {"type": "string", "pattern": "Z$"},
+    "updated_at": {"type": "string", "pattern": "Z$"},
+    "progress": {"type": "object"},
+    "result": {"type": ["object", "null"]},
+    "error": {"type": ["object", "null"]}
+  }
+}

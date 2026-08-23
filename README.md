@@ -1,5 +1,7 @@
 # CTI Tool — External Sources Module
 
+> **Shared-repository migration status:** The sole final External Sources implementation is under `backend/app/pipeline/ingestion/external/`. The existing `src/` implementation documented below is a preserved prototype and must not be extended into a parallel final runtime. Phase 0 foundations and contracts live in the canonical backend package, `contracts/`, `config/`, `data/external/`, and `tests/external_sources/`. The dashboard is the sole production end-user interface; direct module/CLI usage is restricted to development, testing, and authorized maintenance.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /

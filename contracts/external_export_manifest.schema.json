@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/external_export_manifest.schema.json",
+  "title": "External Export Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "producer", "run_id", "started_at", "completed_at", "status", "dataset_file", "dataset_sha256", "total_records", "accepted_records", "review_records", "duplicates_removed", "sources", "failed_sources", "classifier_model_version"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "producer": {"const": "external-sources-team"},
+    "run_id": {"type": "string", "minLength": 10},
+    "started_at": {"type": "string", "pattern": "Z$"},
+    "completed_at": {"type": ["string", "null"], "pattern": "Z$"},
+    "status": {"enum": ["running", "completed", "partial", "failed", "cancelled"]},
+    "dataset_file": {"type": ["string", "null"]},
+    "dataset_sha256": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"},
+    "total_records": {"type": "integer", "minimum": 0},
+    "accepted_records": {"type": "integer", "minimum": 0},
+    "review_records": {"type": "integer", "minimum": 0},
+    "duplicates_removed": {"type": "integer", "minimum": 0},
+    "sources": {"type": "object"},
+    "failed_sources": {"type": "array", "items": {"type": "object"}},
+    "classifier_model_version": {"type": ["string", "null"]}
+  }
+}

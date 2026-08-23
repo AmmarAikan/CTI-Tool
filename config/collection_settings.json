@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "http": {
+    "connect_timeout_seconds": 5,
+    "read_timeout_seconds": 20,
+    "max_response_bytes": 5242880,
+    "max_redirects": 5,
+    "retry_total": 3,
+    "backoff_factor": 0.5,
+    "user_agent": "CTI-Tool-External-Sources/1.0"
+  },
+  "collection": {
+    "max_items_per_source": 100,
+    "default_request_delay_seconds": 1.0
+  }
+}
