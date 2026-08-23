@@ -14,6 +14,8 @@ Phase 5 replaces the narrow canonical NVD normalizer with the single `backend/ap
 
 Phase 6 adds the canonical External-only classification adapter under `backend/app/pipeline/ingestion/external/classification/`. It loads the approved model lazily, verifies its SHA-256, reproduces training-time CVE/IP substitution and lowercasing, returns typed results, bypasses trusted structured sources, and routes unavailable or failed inference to review. It does not import or modify the preserved `src/classification/` prototype.
 
+Phase 7 adds independent canonical Reddit, Hacker News, and Telegram collectors under `backend/app/pipeline/ingestion/external/`, composed through shared social processing. Reddit uses approved application-only OAuth and is disabled until credentials are configured; Hacker News uses Algolia's public JSON API; Telegram reads configured public web previews without login. The `src/social_media/` implementations remain preserved prototypes.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /

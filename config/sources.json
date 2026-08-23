@@ -128,42 +128,54 @@
   ],
   "social_media_sources": [
     {
+      "source_id": "reddit-netsec",
       "name": "Reddit - r/netsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/netsec/",
+      "subreddit": "netsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-cybersecurity",
       "name": "Reddit - r/cybersecurity",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/cybersecurity/",
+      "subreddit": "cybersecurity",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-blueteamsec",
       "name": "Reddit - r/blueteamsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/blueteamsec/",
+      "subreddit": "blueteamsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-asknetsec",
       "name": "Reddit - r/AskNetsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/AskNetsec/",
+      "subreddit": "AskNetsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     }
   ],
   "hackernews_sources": [
-  { "name": "Hacker News - CVE", "query": "CVE", "category": "social", "limit": 30 },
-  { "name": "Hacker News - vulnerability", "query": "vulnerability", "category": "social", "limit": 30 },
-  { "name": "Hacker News - data breach", "query": "data breach", "category": "social", "limit": 30 }
+  { "source_id": "hackernews-cve", "name": "Hacker News - CVE", "query": "CVE", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 },
+  { "source_id": "hackernews-vulnerability", "name": "Hacker News - vulnerability", "query": "vulnerability", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 },
+  { "source_id": "hackernews-data-breach", "name": "Hacker News - data breach", "query": "data breach", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 }
 ],
   "github_sources": [
     {
@@ -174,14 +186,20 @@
   ],
   "telegram_sources": [
     {
+      "source_id": "telegram-thehackernews",
       "name": "Telegram - The Hacker News",
       "channel": "thehackernews",
+      "method": "public_preview",
+      "enabled": true,
       "category": "social",
       "max_pages": 3
     },
     {
+      "source_id": "telegram-cvefeed",
       "name": "Telegram - CVEFeed",
       "channel": "cvefeed",
+      "method": "public_preview",
+      "enabled": true,
       "category": "vulnerability",
       "max_pages": 3
     }

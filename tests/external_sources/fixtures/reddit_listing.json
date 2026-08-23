@@ -1,0 +1,10 @@
+{
+  "kind": "Listing",
+  "data": {
+    "after": "t3_nextpage",
+    "children": [
+      {"kind": "t3", "data": {"name": "t3_example1", "title": "Sanitized incident analysis", "permalink": "/r/netsec/comments/example1/sanitized_incident/", "selftext": "Researchers published a detailed technical analysis of a sanitized malware campaign, including detection guidance and defensive remediation steps for affected administrators.", "author": "public_researcher", "subreddit": "netsec", "score": 42, "num_comments": 7, "created_utc": 1787472000}},
+      {"kind": "t3", "data": {"name": "t3_example2", "title": "External security research", "permalink": "/r/netsec/comments/example2/external_research/", "selftext": "", "url_overridden_by_dest": "https://example.test/security/article?utm_source=reddit", "author": "link_submitter", "subreddit": "netsec", "score": 20, "num_comments": 3, "created_utc": 1787471000}}
+    ]
+  }
+}

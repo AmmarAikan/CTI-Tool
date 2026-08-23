@@ -26,3 +26,11 @@ failures, unknown labels, and prediction failures are routed to review with
 Classification applies only to general-purpose sources. RSS, CERT, NVD/CVE,
 GitHub Global Security Advisories, CISA KEV, and merged official vulnerability
 records use the trusted-source bypass.
+
+## Tested compatibility
+
+Phase 6 was verified with Python 3.14.3, scikit-learn 1.9.0, joblib 1.5.3,
+and NumPy 2.5.1. Loading the approved artifact currently emits a joblib/NumPy
+2.5 deprecation warning about assigning an array's `shape`. This is tracked as
+a compatibility item; the approved model must not be modified or retrained
+solely to suppress the warning.
