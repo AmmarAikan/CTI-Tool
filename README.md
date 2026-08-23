@@ -12,6 +12,8 @@ Phase 4 adds the canonical `backend/app/pipeline/ingestion/external/cert_connect
 
 Phase 5 replaces the narrow canonical NVD normalizer with the single `backend/app/pipeline/ingestion/external/vulnerability_connector.py`. It integrates the official NVD, CVE Program, GitHub Global Security Advisories, and CISA KEV structured interfaces, with incremental windows, bounded pagination, checkpoints, hashing, trusted-source bypass, and provenance-preserving CVE/GHSA deduplication. The vulnerability and GitHub collectors under `src/` remain preserved prototypes only.
 
+Phase 6 adds the canonical External-only classification adapter under `backend/app/pipeline/ingestion/external/classification/`. It loads the approved model lazily, verifies its SHA-256, reproduces training-time CVE/IP substitution and lowercasing, returns typed results, bypasses trusted structured sources, and routes unavailable or failed inference to review. It does not import or modify the preserved `src/classification/` prototype.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
