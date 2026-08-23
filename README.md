@@ -8,6 +8,8 @@ Phase 2 adds versioned, hash-aware External text preprocessing under `backend/ap
 
 Phase 3 upgrades the existing canonical `backend/app/pipeline/ingestion/external/rss_connector.py` into the single RSS implementation. It supports configured bounds, conditional requests, per-feed/item state, full-article enrichment through the canonical crawler, cleaning followed by privacy review, trusted-source classification bypass, and explicit review handling for summary-only content. Default tests use sanitized local fixtures and make no claim about live feed availability.
 
+Phase 4 adds the canonical `backend/app/pipeline/ingestion/external/cert_connector.py`. CERT-EU and CERT.at reuse the Phase 3 RSS implementation; CISA uses a bounded official-listing adapter and the shared crawler for advisory detail text. The preserved `src/cert/` module remains prototype code and is not a second final runtime.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
@@ -150,7 +152,16 @@ rather than causing an error.
 
 ## Usage — Phase 4 (CERT Security Advisories)
 
-Run independently:
+> **Prototype-only documentation:** Everything in this Phase 4 subsection below
+> describes the preserved `src/cert/` prototype. It is not the final backend
+> runtime. The canonical implementation is
+> `backend/app/pipeline/ingestion/external/cert_connector.py`; its configured
+> methods are `rss` and `official_listing`, and RSS handling reuses the canonical
+> RSS connector. See `docs/architecture/external_sources_cert_delivery.md` for
+> the verified source mapping. Do not extend or wire the prototype into the
+> final runtime.
+
+Prototype development command:
 
 ```bash
 python -m src.cert.cert_collector

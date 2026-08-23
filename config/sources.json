@@ -49,22 +49,35 @@
   ],
   "cert_sources": [
     {
+      "source_id": "cisa-advisories",
       "name": "CISA",
       "url": "https://www.cisa.gov/news-events/cybersecurity-advisories",
       "category": "advisory",
-      "method": "scrape"
+      "method": "official_listing",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30,
+      "detail_path_pattern": "^/news-events/cybersecurity-advisories/[a-z0-9][a-z0-9-]+$"
     },
     {
+      "source_id": "cert-eu-advisories",
       "name": "CERT-EU",
       "url": "https://cert.europa.eu/publications/security-advisories-rss",
       "category": "advisory",
-      "method": "rss"
+      "method": "rss",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30
     },
     {
+      "source_id": "cert-at-warnings",
       "name": "CERT-AT",
       "url": "https://www.cert.at/cert-at.de.warnings.rss_2.0.xml",
       "category": "advisory",
-      "method": "rss"
+      "method": "rss",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30
     }
   ],
   "vulnerability_sources": [
