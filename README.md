@@ -16,6 +16,8 @@ Phase 6 adds the canonical External-only classification adapter under `backend/a
 
 Phase 7 adds independent canonical Reddit, Hacker News, and Telegram collectors under `backend/app/pipeline/ingestion/external/`, composed through shared social processing. Reddit uses approved application-only OAuth and is disabled until credentials are configured; Hacker News uses Algolia's public JSON API; Telegram reads configured public web previews without login. The `src/social_media/` implementations remain preserved prototypes.
 
+Phase 8 adds the sole canonical curated dark-web collector at `backend/app/pipeline/ingestion/external/dark_web_connector.py`. It performs bounded GET-only requests through an explicitly configured `socks5h` Tor proxy, manually validates redirects, accepts only configured onion hosts and paths, and reuses canonical page detection, cleaning, privacy, classification, hashing, and state contracts. Copy the disabled fake `config/dark_web_sources.example.json` to the Git-ignored `config/dark_web_sources.local.json` and supply only operator-verified sources locally. No proxy port is assumed, no discovery or recursive crawling exists, and the collector never starts or stops Tor processes. The older `src/dark_web/` implementation and its tests remain preserved prototype code.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
