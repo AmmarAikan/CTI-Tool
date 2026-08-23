@@ -17,9 +17,11 @@
     "total_records": {"type": "integer", "minimum": 0},
     "accepted_records": {"type": "integer", "minimum": 0},
     "review_records": {"type": "integer", "minimum": 0},
+    "invalid_records": {"type": "integer", "minimum": 0},
     "duplicates_removed": {"type": "integer", "minimum": 0},
     "sources": {"type": "object"},
     "failed_sources": {"type": "array", "items": {"type": "object"}},
-    "classifier_model_version": {"type": ["string", "null"]}
+    "classifier_model_version": {"type": ["string", "null"]},
+    "classifier_model_sha256": {"type": ["string", "null"], "pattern": "^sha256:[a-f0-9]{64}$"}
   }
 }

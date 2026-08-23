@@ -26,10 +26,12 @@ class RunManifest:
     total_records: int = 0
     accepted_records: int = 0
     review_records: int = 0
+    invalid_records: int = 0
     duplicates_removed: int = 0
     dataset_file: str | None = None
     dataset_sha256: str | None = None
     classifier_model_version: str | None = None
+    classifier_model_sha256: str | None = None
     schema_version: str = "1.0"
     producer: str = "external-sources-team"
 

@@ -20,6 +20,8 @@ Phase 8 adds the sole canonical curated dark-web collector at `backend/app/pipel
 
 Phase 9 implements the framework-independent `CanonicalManualSourceService` application boundary for the future dashboard. It canonicalizes and DNS-validates URLs before state lookup, routes structured GitHub advisory, GitHub public, vulnerability, RSS, and approved onion URLs to configured adapters, and sends only ordinary public web pages through an SSRF-protected shared crawler. Listing traversal is same-host, deduplicated, limited to 20 links, and one level deep. This phase adds no dashboard UI, public API, or transport adapter.
 
+Phase 10 adds the single canonical `ExternalDatasetExporter` under `backend/app/pipeline/ingestion/external/export/`. It accepts only run-tagged source outputs matching one `RunManifest`, validates accepted records, routes excluded records to a run-scoped review artifact, deduplicates External observations while preserving provenance, assigns deterministic SHA-256 IDs, and atomically writes the dataset, manifest, review output, and run state. It never scans unrelated “latest” prototype files.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /
