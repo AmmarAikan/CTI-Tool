@@ -14,7 +14,9 @@ Responses remove URL/path/credential-like source metadata. Latest-export respons
 
 ## Local development adapter
 
-`integration/local.py` provides a static bearer-token authenticator, in-memory idempotency, a thread-based job runner, and read-only source summaries for local adapter testing. These components are not durable, distributed, multi-process safe, or cloud-ready. The local collection placeholder deliberately fails jobs safely until deployment supplies the real collection-service composition; it does not pretend that a collector run occurred.
+`integration/local.py` provides a static bearer-token authenticator, in-memory idempotency, a thread-based job runner, read-only source summaries, and an application-service composition for enabled canonical RSS source jobs. RSS jobs resolve sources from `config/sources.json`, reuse the canonical connector, save per-source state under `data/external/state/`, and write accepted/review output under the corresponding `data/external/` directories. These components are intended only for authorized local testing and maintenance; they are not durable, distributed, multi-process safe, or cloud-ready.
+
+The canonical logger writes internal job failures to `logs/cti_tool.log`. Entries include only `job_id`, `command_id`, safe `source_id`, and exception type. API job errors remain category-only and never expose exception text, credentials, content, source URLs, or filesystem paths.
 
 Required local environment:
 

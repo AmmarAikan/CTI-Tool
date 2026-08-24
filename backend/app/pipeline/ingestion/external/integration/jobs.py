@@ -7,6 +7,11 @@ from dataclasses import asdict, dataclass, field, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
+from backend.app.pipeline.ingestion.external.common.logging import get_logger
+
+
+LOGGER = get_logger(__name__)
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
@@ -29,7 +34,7 @@ class IntegrationJob:
 
 
 class JobRunner(Protocol):
-    def submit(self, command_id: str, operation: Callable[[], Any]) -> IntegrationJob: ...
+    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None) -> IntegrationJob: ...
     def get(self, job_id: str) -> IntegrationJob | None: ...
     def cancel(self, job_id: str) -> IntegrationJob | None: ...
 
@@ -42,10 +47,10 @@ class InProcessJobRunner:
         self._jobs: dict[str, IntegrationJob] = {}
         self._lock = threading.Lock()
 
-    def submit(self, command_id: str, operation: Callable[[], Any]) -> IntegrationJob:
+    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None) -> IntegrationJob:
         job = IntegrationJob(f"job-{secrets.token_hex(12)}", command_id)
         with self._lock: self._jobs[job.job_id] = job
-        self._executor.submit(self._run, job.job_id, operation)
+        self._executor.submit(self._run, job.job_id, operation, dict(safe_context or {}))
         return job
 
     def get(self, job_id: str) -> IntegrationJob | None:
@@ -60,7 +65,10 @@ class InProcessJobRunner:
             job.updated_at = utc_now()
             return job
 
-    def _run(self, job_id: str, operation: Callable[[], Any]) -> None:
+    def shutdown(self, *, wait: bool = True) -> None:
+        self._executor.shutdown(wait=wait)
+
+    def _run(self, job_id: str, operation: Callable[[], Any], safe_context: dict[str, str]) -> None:
         with self._lock:
             job = self._jobs[job_id]
             if job.state == "cancelled": return
@@ -73,7 +81,12 @@ class InProcessJobRunner:
                 if job.cancellation_requested: job.state = "cancelled"
                 else: job.state, job.result = "completed", result
                 job.updated_at = utc_now()
-        except Exception:
+        except Exception as exc:
+            source_id = safe_context.get("source_id", "not_applicable")
+            LOGGER.error(
+                "external job failed job_id=%s command_id=%s source_id=%s exception_type=%s",
+                job_id, job.command_id, source_id, type(exc).__name__,
+            )
             with self._lock:
                 job = self._jobs[job_id]
                 job.state = "cancelled" if job.cancellation_requested else "failed"

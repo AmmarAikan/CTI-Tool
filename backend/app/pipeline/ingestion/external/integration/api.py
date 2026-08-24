@@ -83,7 +83,7 @@ def create_app(services: AdapterServices) -> FastAPI:
         command_id = _id("cmd")
         try: accepted = services.collection_service.start_collection(CollectionRequest(tuple(body.source_ids), body.force, current.subject, body.options))
         except Exception: raise APIError(503, "collection_unavailable", "collection command could not be accepted", retryable=True) from None
-        response = _queued(accepted.job_id, command_id)
+        response = _queued(accepted.job_id, accepted.command_id or command_id)
         _remember(services, current, "start_collection", idempotency_key, response.model_dump())
         return response
 
@@ -96,7 +96,7 @@ def create_app(services: AdapterServices) -> FastAPI:
         command_id = _id("cmd")
         try: accepted = services.collection_service.collect_source(source_id, requested_by=current.subject)
         except Exception: raise APIError(503, "collection_unavailable", "source collection could not be accepted", retryable=True) from None
-        response = _queued(accepted.job_id, command_id)
+        response = _queued(accepted.job_id, accepted.command_id or command_id)
         _remember(services, current, f"collect_source:{source_id}", idempotency_key, response.model_dump())
         return response
 

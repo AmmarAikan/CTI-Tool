@@ -17,6 +17,7 @@ class CollectionRequest:
 class JobAccepted:
     job_id: str
     state: str = "queued"
+    command_id: str | None = None
 
 
 class CollectionService(ABC):

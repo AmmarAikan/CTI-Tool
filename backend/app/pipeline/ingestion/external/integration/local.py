@@ -1,35 +1,88 @@
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from backend.app.pipeline.ingestion.external.application.collection_service import CollectionRequest, CollectionService, JobAccepted
 from backend.app.pipeline.ingestion.external.application.job_service import JobService, JobView
 from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceResult, ManualSourceService
 from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
 from backend.app.pipeline.ingestion.external.common.json_storage import latest_file, load_json
+from backend.app.pipeline.ingestion.external.common.json_storage import save_json
+from backend.app.pipeline.ingestion.external.common.logging import configure_file_logging
+from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
 from backend.app.pipeline.ingestion.external.integration.api import AdapterServices, create_app
 from backend.app.pipeline.ingestion.external.integration.auth import RoleAuthorizer, StaticTokenAuthenticator
 from backend.app.pipeline.ingestion.external.integration.idempotency import InMemoryIdempotencyStore
 from backend.app.pipeline.ingestion.external.integration.jobs import InProcessJobRunner
+from backend.app.pipeline.ingestion.external.rss_connector import RSSConnector, RSSSource
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[6]
+ACTIVE_LOG_PATH = PROJECT_ROOT / "logs" / "cti_tool.log"
+RSSConnectorFactory = Callable[[RSSSource, dict[str, Any]], RSSConnector]
 
 
 class DevelopmentCollectionService(CollectionService):
-    def __init__(self, runner: InProcessJobRunner) -> None: self.runner = runner
+    """Local application-service composition for approved canonical RSS jobs."""
+
+    def __init__(self, runner: InProcessJobRunner, *, sources_path: Path = PROJECT_ROOT / "config" / "sources.json",
+                 connector_factory: RSSConnectorFactory | None = None,
+                 state_directory: Path = PROJECT_ROOT / "data" / "external" / "state",
+                 processed_directory: Path = PROJECT_ROOT / "data" / "external" / "processed",
+                 review_directory: Path = PROJECT_ROOT / "data" / "external" / "review") -> None:
+        self.runner = runner
+        self.connector_factory = connector_factory or (lambda source, state: RSSConnector.from_source(source, state=state))
+        self.state_directory, self.processed_directory, self.review_directory = state_directory, processed_directory, review_directory
+        config = load_json(sources_path, default={})
+        entries = config.get("rss_sources", []) if isinstance(config, dict) else []
+        self.rss_sources = {source.source_id: source for source in (RSSSource.from_mapping(raw) for raw in entries if isinstance(raw, dict))}
+
     def start_collection(self, request: CollectionRequest) -> JobAccepted:
-        job = self.runner.submit("cmd-local-collection", lambda: self._unavailable())
-        return JobAccepted(job.job_id)
+        source_ids = request.source_ids or tuple(source_id for source_id, source in self.rss_sources.items() if source.enabled)
+        for source_id in source_ids:
+            self._require_enabled_rss(source_id)
+        command_id = f"cmd-{secrets.token_hex(12)}"
+        job = self.runner.submit(command_id, lambda: self._collect_many(source_ids), safe_context={"source_id": "multiple"})
+        return JobAccepted(job.job_id, command_id=command_id)
+
     def collect_source(self, source_id: str, *, requested_by: str) -> JobAccepted:
-        del source_id, requested_by
-        job = self.runner.submit("cmd-local-source", lambda: self._unavailable())
-        return JobAccepted(job.job_id)
-    @staticmethod
-    def _unavailable() -> dict[str, Any]:
-        raise RuntimeError("collector orchestration must be supplied by the deployment composition")
+        del requested_by
+        self._require_enabled_rss(source_id)
+        command_id = f"cmd-{secrets.token_hex(12)}"
+        job = self.runner.submit(command_id, lambda: self._collect_rss(source_id, command_id), safe_context={"source_id": source_id})
+        return JobAccepted(job.job_id, command_id=command_id)
+
+    def _require_enabled_rss(self, source_id: str) -> RSSSource:
+        source = self.rss_sources.get(source_id)
+        if source is None:
+            raise KeyError("source is not an RSS source in the local registry")
+        if not source.enabled:
+            raise ValueError("source is disabled")
+        return source
+
+    def _collect_many(self, source_ids: tuple[str, ...]) -> dict[str, Any]:
+        results = [self._collect_rss(source_id, f"batch-{index:04d}") for index, source_id in enumerate(source_ids)]
+        return {"status": "completed", "source_count": len(results), "accepted_records": sum(value["accepted_records"] for value in results),
+                "review_records": sum(value["review_records"] for value in results)}
+
+    def _collect_rss(self, source_id: str, output_id: str) -> dict[str, Any]:
+        source = self._require_enabled_rss(source_id)
+        state_manager = JsonStateManager(self.state_directory / f"rss_{source_id}.json")
+        state = state_manager.load()
+        result = self.connector_factory(source, state).collect_result()
+        state_manager.save(state)
+        safe_output_id = output_id.replace("cmd-", "")
+        if result.accepted_items:
+            save_json([item.to_dict() for item in result.accepted_items], self.processed_directory / f"rss_{source_id}_{safe_output_id}.json")
+        if result.review_items:
+            save_json([item.to_dict() for item in result.review_items], self.review_directory / f"rss_{source_id}_{safe_output_id}.json")
+        if result.status == "failed":
+            raise RuntimeError("canonical RSS source collection failed")
+        return {"status": result.status, "source_id": source_id, "accepted_records": len(result.accepted_items),
+                "review_records": len(result.review_items), "skipped_records": result.skipped_items, "error_count": len(result.errors)}
 
 
 class DevelopmentManualService(ManualSourceService):
@@ -79,12 +132,19 @@ class DevelopmentJobService(JobService):
         return {key: value.get(key) for key in ("run_id", "status", "dataset_sha256", "accepted_records", "review_records", "completed_at")}
 
 
-def build_local_app():
+def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
+                    state_directory: Path = PROJECT_ROOT / "data" / "external" / "state",
+                    processed_directory: Path = PROJECT_ROOT / "data" / "external" / "processed",
+                    review_directory: Path = PROJECT_ROOT / "data" / "external" / "review",
+                    log_path: Path = ACTIVE_LOG_PATH):
     token = os.environ.get("EXTERNAL_API_TOKEN", "")
     if not token: raise RuntimeError("EXTERNAL_API_TOKEN must be set before starting the local internal API")
     roles = frozenset(value.strip() for value in os.environ.get("EXTERNAL_API_ROLES", "operator").split(",") if value.strip())
+    configure_file_logging(log_path)
     runner = InProcessJobRunner(max_workers=int(os.environ.get("EXTERNAL_API_DEV_WORKERS", "2")))
-    return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), DevelopmentCollectionService(runner),
+    collection = DevelopmentCollectionService(runner, connector_factory=connector_factory, state_directory=state_directory,
+                                              processed_directory=processed_directory, review_directory=review_directory)
+    return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
         DevelopmentManualService(), DevelopmentSourceService(), DevelopmentJobService(runner), runner, InMemoryIdempotencyStore()))
 
 

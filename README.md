@@ -63,7 +63,7 @@ Health endpoint:
 GET http://127.0.0.1:8000/api/v1/external-sources/health
 ```
 
-The bundled static-token authentication, in-memory idempotency store, and thread runner are development adapters only. The local composition does not provide durable production orchestration or a cloud-ready queue. Do not expose it publicly.
+The bundled static-token authentication, in-memory idempotency store, and thread runner are development adapters only. The local composition can execute enabled canonical RSS source jobs for authorized testing and maintenance, but it does not provide durable production orchestration or a cloud-ready queue. Internal job failures are recorded safely in `logs/cti_tool.log`; public responses never include exception details. Do not expose it publicly.
 
 ## Authorized maintenance and testing
 
