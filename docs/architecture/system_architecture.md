@@ -31,7 +31,7 @@ ml/reports/
 backend/app/pipeline/extraction/ner_extractor.py
 ```
 
-The runtime extractor uses `ml/models/dnrti_bert_ner` as the primary NER model and falls back to `ml/models/dnrti_sklearn_ner` only when BERT cannot load. If neither model is available, it returns an empty entity list instead of crashing.
+The runtime extractor uses `ml/models/dnrti_bert_ner` as the primary NER model and falls back to `ml/models/dnrti_sklearn_ner` only when BERT cannot load. The large model is cached once per backend process, long reports are processed as overlapping chunks, and low-confidence entities are filtered by configuration. If neither model is available, it returns an empty entity list instead of crashing. `/api/v1/ml/status` exposes runtime selection and saved held-out evaluation evidence.
 
 ## Pipeline B: External Runtime
 
@@ -53,9 +53,11 @@ External Connector
 
 For unstructured external text, classification happens before NER. Trusted structured sources such as NVD can bypass the document classifier with explicit metadata.
 
+External input may arrive by file or through the collaborator's authenticated HTTPS JSON feed. The remote path validates versioned schema, stable IDs, size/page limits, pagination, ETag, and optional HMAC before persistence.
+
 ## Pipeline C: Internal Runtime
 
-Internal sources are implemented for Wazuh `alerts.json` and direct Dionaea `log_json` JSONL. Structured security telemetry is not forced through ordinary document classification.
+Internal sources are implemented for Wazuh `alerts.json`, authenticated Wazuh Indexer pulls, direct Dionaea `log_json` JSONL, and a checkpointed Dionaea sensor API. Structured security telemetry is not forced through ordinary document classification.
 
 Expected flow:
 
@@ -92,9 +94,9 @@ The current schema is defined in:
 backend/app/pipeline/common/cti_schema.py
 ```
 
-The central repository is implemented with SQLAlchemy and PostgreSQL. SQLite is supported for lightweight local tests. Exact indicator matching provides simple correlation, TF-IDF/cosine similarity provides prototype advanced textual correlation, NVD provides CVE enrichment, STIX 2.1 provides portable export, and MISP is an optional external sharing target. TAXII and the frontend dashboard remain future work; dashboard data is already available through the API.
+The central repository is implemented with SQLAlchemy and PostgreSQL. SQLite is supported for lightweight local tests. Exact indicator matching provides simple correlation, TF-IDF/cosine similarity provides prototype advanced textual correlation, NVD provides CVE enrichment, STIX 2.1 provides portable export, and MISP is an optional external sharing target. NVD and correlation changes re-run the same explainable risk formula with source-diversity and correlation evidence; repeated recalculation does not compound already-derived severity. TAXII and the frontend dashboard remain future work; dashboard data is already available through the API.
 
-Heavy infrastructure boundaries, including MongoDB, a hosted MISP platform, and live Wazuh services, are defined in `future_bound_work.md`. They are deliberate extensions rather than missing runtime dependencies.
+The planned hybrid VPS layout and its trust boundaries are defined in `cloud_distributed_architecture.md`. MongoDB, background workers, TAXII, and other nonessential heavy extensions remain in `future_bound_work.md`.
 
 ## Backend API and security
 

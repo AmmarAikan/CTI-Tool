@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from backend.app.core.config import get_settings
 
 
 def project_root() -> Path:
@@ -18,7 +21,10 @@ ROOT = project_root()
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ml.common.token_features import sentence_to_feature_dicts, simple_word_tokenize  # noqa: E402
+from ml.common.token_features import (
+    sentence_to_feature_dicts,
+    simple_word_tokenize,
+)
 
 
 class NERExtractor:
@@ -32,29 +38,72 @@ class NERExtractor:
         self,
         transformer_model_path: str | Path | None = None,
         sklearn_model_path: str | Path | None = None,
+        min_confidence: float | None = None,
+        chunk_chars: int | None = None,
+        chunk_overlap_chars: int | None = None,
     ) -> None:
+        settings = get_settings()
         self.backend = "none"
         self.ner_pipeline: Any | None = None
         self.sklearn_model: Any | None = None
+        self.metadata: dict[str, Any] = {}
+        self.load_error: str | None = None
+        self.last_chunk_count = 0
+        self.min_confidence = max(
+            0.0,
+            min(1.0, settings.ner_min_confidence if min_confidence is None else min_confidence),
+        )
+        self.chunk_chars = max(100, chunk_chars or settings.ner_chunk_chars)
+        configured_overlap = (
+            settings.ner_chunk_overlap_chars
+            if chunk_overlap_chars is None
+            else chunk_overlap_chars
+        )
+        self.chunk_overlap_chars = max(0, min(configured_overlap, self.chunk_chars - 1))
 
-        transformer_path = Path(transformer_model_path or ROOT / "ml/models/dnrti_bert_ner")
-        sklearn_path = Path(sklearn_model_path or ROOT / "ml/models/dnrti_sklearn_ner/model.joblib")
+        self.transformer_path = Path(transformer_model_path or ROOT / "ml/models/dnrti_bert_ner")
+        self.sklearn_path = Path(
+            sklearn_model_path or ROOT / "ml/models/dnrti_sklearn_ner/model.joblib"
+        )
 
-        if self._load_transformer(transformer_path):
+        if self._load_transformer(self.transformer_path):
             return
-        self._load_sklearn(sklearn_path)
+        self._load_sklearn(self.sklearn_path)
 
     def extract_entities(self, text: str) -> list[dict[str, object]]:
         if not text:
+            self.last_chunk_count = 0
             return []
 
         if self.backend == "transformer" and self.ner_pipeline is not None:
-            return self._extract_with_transformer(text)
+            chunks = self._split_text(text)
+            self.last_chunk_count = len(chunks)
+            entities = [
+                entity
+                for chunk in chunks
+                for entity in self._extract_with_transformer(chunk)
+            ]
+            return self._filter_and_deduplicate(entities)
 
         if self.backend == "sklearn" and self.sklearn_model is not None:
-            return self._extract_with_sklearn(text)
+            self.last_chunk_count = 1
+            return self._filter_and_deduplicate(self._extract_with_sklearn(text))
 
+        self.last_chunk_count = 0
         return []
+
+    def diagnostics(self) -> dict[str, object]:
+        """Return non-secret runtime evidence for health and examiner checks."""
+        return {
+            "backend": self.backend,
+            "primary_model_loaded": self.backend == "transformer",
+            "secondary_fallback_loaded": self.backend == "sklearn",
+            "minimum_confidence": self.min_confidence,
+            "chunk_chars": self.chunk_chars,
+            "chunk_overlap_chars": self.chunk_overlap_chars,
+            "last_chunk_count": self.last_chunk_count,
+            "load_error": self.load_error,
+        }
 
     def _load_transformer(self, model_path: Path) -> bool:
         if not (model_path / "config.json").exists():
@@ -70,8 +119,11 @@ class NERExtractor:
             )
             self.backend = "transformer"
             return True
-        except Exception:
+        # Model/tokenizer loaders can raise backend-specific exceptions. Any
+        # load failure deliberately falls through to the secondary model.
+        except Exception as exc:  # noqa: BLE001
             self.ner_pipeline = None
+            self.load_error = type(exc).__name__
             return False
 
     def _load_sklearn(self, model_path: Path) -> bool:
@@ -89,9 +141,35 @@ class NERExtractor:
                 self.metadata = {}
             self.backend = "sklearn"
             return True
-        except Exception:
+        # joblib may surface estimator/import errors from optional dependencies.
+        except Exception as exc:  # noqa: BLE001
             self.sklearn_model = None
+            self.load_error = type(exc).__name__
             return False
+
+    def _split_text(self, text: str) -> list[str]:
+        if len(text) <= self.chunk_chars:
+            return [text]
+
+        chunks: list[str] = []
+        start = 0
+        while start < len(text):
+            target_end = min(len(text), start + self.chunk_chars)
+            end = target_end
+            if target_end < len(text):
+                whitespace = text.rfind(" ", start + self.chunk_chars // 2, target_end)
+                if whitespace > start:
+                    end = whitespace
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            if end >= len(text):
+                break
+            next_start = max(start + 1, end - self.chunk_overlap_chars)
+            while next_start < end and not text[next_start].isspace():
+                next_start += 1
+            start = min(next_start + 1, end) if next_start < end else next_start
+        return chunks
 
     def _extract_with_transformer(self, text: str) -> list[dict[str, object]]:
         results = self.ner_pipeline(text)
@@ -318,12 +396,34 @@ class NERExtractor:
         return value.strip().rstrip(".,;:")
 
     def _deduplicate_entities(self, entities: list[dict[str, object]]) -> list[dict[str, object]]:
-        seen = set()
-        unique_entities = []
+        key_to_index: dict[tuple[object, str], int] = {}
+        unique_entities: list[dict[str, object]] = []
         for entity in entities:
             key = (entity["type"], str(entity["value"]).lower())
-            if key in seen:
+            existing_index = key_to_index.get(key)
+            if existing_index is not None:
+                existing_confidence = float(unique_entities[existing_index].get("confidence", 0.0))
+                if float(entity.get("confidence", 0.0)) > existing_confidence:
+                    unique_entities[existing_index] = entity
                 continue
-            seen.add(key)
+            key_to_index[key] = len(unique_entities)
             unique_entities.append(entity)
         return unique_entities
+
+    def _filter_and_deduplicate(
+        self,
+        entities: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
+        minimum_percent = self.min_confidence * 100.0
+        filtered = [
+            entity
+            for entity in entities
+            if float(entity.get("confidence", 0.0)) >= minimum_percent
+        ]
+        return self._deduplicate_entities(filtered)
+
+
+@lru_cache(maxsize=1)
+def get_runtime_ner_extractor() -> NERExtractor:
+    """Load the large primary model once per backend process."""
+    return NERExtractor()

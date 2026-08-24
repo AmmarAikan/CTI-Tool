@@ -41,9 +41,9 @@ class DionaeaFileConnector(InternalConnector):
                 wrapper_keys=("events", "items", "data", "results"),
                 format_name="Dionaea",
             ):
-                yield self._normalize_item(item)
+                yield self.normalize_item(item)
 
-    def _normalize_item(self, item: dict[str, Any]) -> RawRecord:
+    def normalize_item(self, item: dict[str, Any], _path: Path | None = None) -> RawRecord:
         timestamp = nested_value(item, "timestamp", "@timestamp")
         protocol = str(nested_value(item, "connection.protocol", "protocol") or "unknown")
         transport = str(nested_value(item, "connection.transport", "transport") or "unknown")

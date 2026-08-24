@@ -3,8 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
-from backend.app.pipeline.common.cti_schema import CTIObject
-
 
 @dataclass(slots=True)
 class RiskResult:
@@ -25,7 +23,7 @@ class RiskScorer:
 
     def score(
         self,
-        cti_object: CTIObject,
+        cti_object: Any,
         enrichments: list[dict[str, Any]] | None = None,
         source_count: int = 1,
         correlation_count: int = 0,
@@ -36,7 +34,9 @@ class RiskScorer:
             for item in enrichments
             if item.get("cvss_score") is not None
         ]
-        severity_base = self.SEVERITY_BASE.get((cti_object.severity or "").lower(), 5.0)
+        raw_reference = getattr(cti_object, "raw_reference", {}) or {}
+        source_severity = raw_reference.get("source_severity") or cti_object.severity
+        severity_base = self.SEVERITY_BASE.get(str(source_severity or "").lower(), 5.0)
         cvss_factor = max(cvss_scores, default=0.0) * 4.0
         indicator_factor = min(20.0, len(cti_object.indicators) * 3.0)
         confidence_factor = min(10.0, max(0.0, cti_object.confidence) * 10.0)

@@ -10,19 +10,23 @@ from typing import Any
 
 from backend.app.pipeline.classification.relevance_classifier import RelevanceClassifier
 from backend.app.pipeline.common.cti_schema import (
-    CTIObject,
     ClassificationResult,
+    CTIObject,
     Entity,
     ProcessingError,
     RawRecord,
 )
 from backend.app.pipeline.extraction.ioc_extractor import IoCExtractor
-from backend.app.pipeline.extraction.ner_extractor import NERExtractor
+from backend.app.pipeline.extraction.ner_extractor import (
+    NERExtractor,
+    get_runtime_ner_extractor,
+)
 from backend.app.pipeline.extraction.relation_extractor import RelationExtractor
-from backend.app.pipeline.ingestion.external.file_connector import ExternalJsonFileConnector
+from backend.app.pipeline.ingestion.external.file_connector import (
+    ExternalJsonFileConnector,
+)
 from backend.app.pipeline.preprocessing.deduplicator import RecordDeduplicator
 from backend.app.pipeline.preprocessing.normalizer import RecordNormalizer
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,7 +46,7 @@ class ExternalCTIPipeline:
         self.normalizer = normalizer or RecordNormalizer()
         self.deduplicator = deduplicator or RecordDeduplicator()
         self.classifier = classifier or RelevanceClassifier()
-        self.ner_extractor = ner_extractor or NERExtractor()
+        self.ner_extractor = ner_extractor or get_runtime_ner_extractor()
         self.ioc_extractor = ioc_extractor or IoCExtractor()
         self.relation_extractor = relation_extractor or RelationExtractor()
 
@@ -170,7 +174,7 @@ class ExternalCTIPipeline:
         cti_object.processing_status = "classified"
 
     def _object_id(self, record: RawRecord) -> str:
-        digest = hashlib.sha256(f"{record.source_pipeline}:{record.external_id}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{record.source_pipeline}:{record.external_id}".encode()).hexdigest()
         return f"cti-{digest[:24]}"
 
     def _object_confidence(

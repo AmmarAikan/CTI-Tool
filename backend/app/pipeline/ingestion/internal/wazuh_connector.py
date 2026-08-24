@@ -35,7 +35,7 @@ class WazuhFileConnector(InternalConnector):
     def collect(self) -> Iterable[RawRecord]:
         for path in self.paths:
             for item in self._read_items(path):
-                yield self._normalize_item(item, path)
+                yield self.normalize_item(item, path)
 
     def _read_items(self, path: Path) -> Iterable[dict[str, Any]]:
         yield from read_json_records(
@@ -44,7 +44,7 @@ class WazuhFileConnector(InternalConnector):
             format_name="Wazuh",
         )
 
-    def _normalize_item(self, item: dict[str, Any], path: Path) -> RawRecord:
+    def normalize_item(self, item: dict[str, Any], path: Path) -> RawRecord:
         timestamp = nested_value(item, "timestamp", "@timestamp", "data.timestamp")
         rule_description = nested_value(item, "rule.description", "description", "decoder.name")
         full_log = nested_value(item, "full_log", "data.message", "message", "predecoder.program_name")

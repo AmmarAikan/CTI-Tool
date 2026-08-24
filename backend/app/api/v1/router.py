@@ -40,6 +40,7 @@ from backend.app.schemas.api import (
     SourceCreate,
     UserCreate,
 )
+from backend.app.services.model_evidence_service import ModelEvidenceService
 from backend.app.services.pipeline_service import PipelineService
 
 router = APIRouter()
@@ -307,6 +308,78 @@ async def upload_dionaea(
     path = await save_upload(file)
     result = PipelineService(db).run_dionaea_files([path])
     audit(db, user, "run_dionaea_pipeline", "pipeline_run", result["run_id"], filename=file.filename)
+    db.commit()
+    return result
+
+
+@router.get("/integrations/status", tags=["integrations"])
+def integration_status(_: CurrentUser) -> dict[str, Any]:
+    """Report configuration state without returning URLs, usernames, or secrets."""
+    return PipelineService.integration_status()
+
+
+@router.get("/ml/status", tags=["ml"])
+def ml_status(_: CurrentUser) -> dict[str, Any]:
+    """Return runtime selection and saved held-out evaluation evidence."""
+    return ModelEvidenceService.status()
+
+
+@router.get("/integrations/external-feed/health", tags=["integrations"])
+def external_feed_health(_: CurrentUser) -> dict[str, Any]:
+    return PipelineService.external_feed_health()
+
+
+@router.post("/integrations/external-feed/pull", tags=["integrations"])
+def pull_external_feed(
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    try:
+        result = PipelineService(db).run_external_feed()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"External feed pull failed: {type(exc).__name__}") from exc
+    audit(db, user, "pull_external_feed", "pipeline_run", result["run_id"], details=result["details"])
+    db.commit()
+    return result
+
+
+@router.get("/integrations/wazuh/health", tags=["integrations"])
+def wazuh_indexer_health(_: CurrentUser) -> dict[str, Any]:
+    return PipelineService.wazuh_indexer_health()
+
+
+@router.post("/integrations/wazuh/pull", tags=["integrations"])
+def pull_wazuh_indexer(
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    try:
+        result = PipelineService(db).run_wazuh_indexer()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Wazuh indexer pull failed: {type(exc).__name__}") from exc
+    audit(db, user, "pull_wazuh_indexer", "pipeline_run", result["run_id"], details=result["details"])
+    db.commit()
+    return result
+
+
+@router.get("/integrations/dionaea/health", tags=["integrations"])
+def dionaea_api_health(_: CurrentUser) -> dict[str, Any]:
+    return PipelineService.dionaea_api_health()
+
+
+@router.post("/integrations/dionaea/pull", tags=["integrations"])
+def pull_dionaea_api(
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    try:
+        result = PipelineService(db).run_dionaea_api()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Dionaea API pull failed: {type(exc).__name__}",
+        ) from exc
+    audit(db, user, "pull_dionaea_api", "pipeline_run", result["run_id"], details=result["details"])
     db.commit()
     return result
 

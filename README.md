@@ -8,15 +8,19 @@ This repository now contains the backend foundation of the graduation-project CT
 - [x] PostgreSQL persistence with SQLite support for local tests
 - [x] Sources, raw items, threat events, indicators, entities, enrichments, correlations, outlier sessions, pipeline runs, users, and audit logs
 - [x] Wazuh `alerts.json` ingestion in JSON, JSONL, and NDJSON forms
+- [x] Authenticated Wazuh Indexer pull with bounded checkpointed pagination
 - [x] Dionaea `log_json` ingestion and a reproducible local-only isolated honeypot profile
+- [x] Authenticated raw Dionaea sensor API client for the planned VPS honeypot
+- [x] Authenticated/HMAC external feed API contract for the collaborator hand-off
 - [x] 30-minute source-IP sessionization and session feature extraction
 - [x] Isolation Forest outlier detection with a clearly labeled small-sample fallback
 - [x] DNRTI BERT as the primary runtime NER model; DNRTI sklearn as the secondary fallback
 - [x] Explainable risk scoring, exact-indicator correlation, and TF-IDF similarity correlation
 - [x] NVD CVE enrichment, STIX 2.1 bundle export, and optional MISP event submission
+- [x] Cached/chunked BERT runtime and `/ml/status` held-out quality evidence
 - [x] Bearer authentication, admin/analyst/viewer roles, and audit logging
 
-The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. MISP is an optional sharing/integration target and does not have to be running for ingestion, analysis, storage, API, or STIX export to work.
+The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. MISP is an optional sharing/integration target and does not have to be running for ingestion, analysis, storage, API, or STIX export to work. Wazuh, MISP, and the public honeypot are planned VPS services; their local clients are implemented, while real deployment remains pending SSH access and recorded acceptance tests.
 
 ## Quick start — backend
 

@@ -48,10 +48,18 @@ class BackendAPITests(unittest.TestCase):
         health = self.client.get("/api/v1/health")
         unauthorized = self.client.get("/api/v1/events")
         current = self.client.get("/api/v1/auth/me", headers=self.headers)
+        integrations = self.client.get("/api/v1/integrations/status", headers=self.headers)
+        model = self.client.get("/api/v1/ml/status", headers=self.headers)
 
         self.assertEqual(health.status_code, 200)
         self.assertEqual(unauthorized.status_code, 401)
         self.assertEqual(current.json()["role"], "admin")
+        self.assertEqual(integrations.status_code, 200)
+        self.assertIn("wazuh_indexer", integrations.json())
+        self.assertIn("dionaea_sensor_api", integrations.json())
+        self.assertEqual(model.status_code, 200)
+        self.assertEqual(model.json()["model_priority"]["primary"], "dnrti_bert_ner")
+        self.assertGreater(model.json()["held_out_test"]["bert"]["f1"], 0.75)
 
     def test_dionaea_upload_persists_sessions_and_outlier_event(self) -> None:
         with DIONAEA_SAMPLE_PATH.open("rb") as handle:

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "feed_id": "external-team-feed",
+  "generated_at": "2026-08-24T00:00:00Z",
+  "items": [
+    {
+      "external_id": "demo:CVE-2026-12345",
+      "source": "Graduation Project Demo Feed",
+      "source_type": "nvd",
+      "title": "Demonstration vulnerability record CVE-2026-12345",
+      "content": "A demonstration report says APT28 used X-Agent against a test organization through CVE-2026-12345 and contacted 203.0.113.25.",
+      "summary": "Synthetic CTI record for contract and pipeline testing.",
+      "url": "https://example.invalid/advisory/CVE-2026-12345",
+      "published_at": "2026-08-23T18:30:00Z",
+      "collected_at": "2026-08-24T00:00:00Z",
+      "category": "vulnerability",
+      "tags": [
+        "demo",
+        "cve"
+      ],
+      "metadata": {
+        "cve_id": "CVE-2026-12345",
+        "collector": "contract_sample",
+        "synthetic": true
+      }
+    }
+  ],
+  "has_more": false,
+  "next_cursor": null,
+  "checkpoint": "demo-checkpoint-20260824-0000"
+}

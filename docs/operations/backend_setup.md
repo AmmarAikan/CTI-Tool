@@ -66,6 +66,20 @@ The default file is `data/cti_platform.db` and is ignored by Git.
 5. Export an event with `/events/{event_id}/stix`.
 6. Preview its MISP mapping with `/events/{event_id}/misp` and `dry_run=true`.
 
+## Remote integration clients
+
+The backend can pull three remote services without changing the unified CTI schema:
+
+- collaborator external feed: `/integrations/external-feed/health` and `/pull`;
+- Wazuh Indexer: `/integrations/wazuh/health` and `/pull`;
+- Dionaea raw sensor API: `/integrations/dionaea/health` and `/pull`.
+
+`GET /integrations/status` reports configuration state without returning URLs, usernames, tokens, or keys. Configure values in local `.env` from `.env.example`; keep TLS verification enabled and HTTP overrides disabled. Exact provider contracts are in `docs/api/`.
+
+Wazuh pagination stores the last `search_after` sort tuple in non-secret source state, preventing same-timestamp alert loss. `WAZUH_INITIAL_SINCE` can limit the first historical import. `WAZUH_INDEX_PATTERN` defaults to `wazuh-alerts*`; keep the officially documented `timestamp` field unless the live mapping proves otherwise. `WAZUH_TIEBREAKER_FIELD` defaults to the stable alert `id` field and must be verified as sortable during live acceptance.
+
+Remote pulls are analyst/admin operations and are audit logged. Run them manually during this synchronous phase; automatic scheduling is intentionally deferred.
+
 ## Local isolated Dionaea lab
 
 Dionaea uses the official `dinotools/dionaea:0.11.0` image pinned by digest. The repository enables the official `log_json` incident handler and stores its JSONL output in a named volume shared read-only with the backend.
@@ -112,12 +126,12 @@ Runtime NER uses:
 2. Secondary fallback: `ml/models/dnrti_sklearn_ner/model.joblib`
 3. Safe degradation: no NER entities when neither loads
 
-The Docker image includes the secondary sklearn model. Compose mounts the local primary BERT directory read-only at runtime because its large files are intentionally excluded from Git. If that directory is absent or incomplete, the extractor falls back to sklearn and reports its active backend accordingly. BERT increases runtime memory requirements but no longer inflates the application image.
+The Docker image includes the secondary sklearn model. Compose mounts the local primary BERT directory read-only at runtime because its large files are intentionally excluded from Git. If that directory is absent or incomplete, the extractor falls back to sklearn and reports its active backend accordingly. The primary model loads once per backend process, long documents use overlapping chunks, and `NER_MIN_CONFIDENCE` filters weak entity predictions. Inspect runtime and held-out evidence at `GET /api/v1/ml/status`.
 
 ## Current boundaries
 
 - The API runs work synchronously; Redis/Celery is deferred until job volume requires it.
-- Live Wazuh streaming is deferred; the current interface processes real exports and samples.
+- Live Wazuh/Dionaea/MISP server deployment awaits VPS SSH access; local clients and contracts are implemented.
 - MISP is a sharing target, not a hard runtime dependency.
 - No automatic NVD enrichment occurs during ingestion, avoiding rate-limit surprises. Analysts trigger it per event.
 - No automatic Isolation Forest retraining occurs.

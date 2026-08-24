@@ -41,6 +41,45 @@ class Settings:
     misp_api_key: str | None = os.getenv("MISP_API_KEY")
     misp_verify_tls: bool = _as_bool(os.getenv("MISP_VERIFY_TLS"), True)
     misp_timeout_seconds: int = int(os.getenv("MISP_TIMEOUT_SECONDS", "30"))
+    external_feed_url: str | None = os.getenv("EXTERNAL_FEED_URL")
+    external_feed_token: str | None = os.getenv("EXTERNAL_FEED_TOKEN")
+    external_feed_hmac_secret: str | None = os.getenv("EXTERNAL_FEED_HMAC_SECRET")
+    external_feed_verify_tls: bool = _as_bool(os.getenv("EXTERNAL_FEED_VERIFY_TLS"), True)
+    external_feed_allow_http: bool = _as_bool(os.getenv("EXTERNAL_FEED_ALLOW_HTTP"), False)
+    external_feed_require_contract: bool = _as_bool(os.getenv("EXTERNAL_FEED_REQUIRE_CONTRACT"), True)
+    external_feed_connect_timeout_seconds: int = int(os.getenv("EXTERNAL_FEED_CONNECT_TIMEOUT_SECONDS", "5"))
+    external_feed_read_timeout_seconds: int = int(os.getenv("EXTERNAL_FEED_READ_TIMEOUT_SECONDS", "60"))
+    external_feed_max_bytes: int = int(os.getenv("EXTERNAL_FEED_MAX_BYTES", str(20 * 1024 * 1024)))
+    external_feed_max_pages: int = int(os.getenv("EXTERNAL_FEED_MAX_PAGES", "20"))
+    external_feed_page_size: int = int(os.getenv("EXTERNAL_FEED_PAGE_SIZE", "250"))
+    wazuh_indexer_url: str | None = os.getenv("WAZUH_INDEXER_URL")
+    wazuh_indexer_username: str | None = os.getenv("WAZUH_INDEXER_USERNAME")
+    wazuh_indexer_password: str | None = os.getenv("WAZUH_INDEXER_PASSWORD")
+    wazuh_indexer_token: str | None = os.getenv("WAZUH_INDEXER_TOKEN")
+    wazuh_indexer_verify_tls: bool = _as_bool(os.getenv("WAZUH_INDEXER_VERIFY_TLS"), True)
+    wazuh_indexer_allow_http: bool = _as_bool(os.getenv("WAZUH_INDEXER_ALLOW_HTTP"), False)
+    wazuh_indexer_timeout_seconds: int = int(os.getenv("WAZUH_INDEXER_TIMEOUT_SECONDS", "30"))
+    wazuh_indexer_batch_size: int = int(os.getenv("WAZUH_INDEXER_BATCH_SIZE", "500"))
+    wazuh_indexer_name: str = os.getenv("WAZUH_INDEXER_NAME", "Wazuh VPS")
+    wazuh_index_pattern: str = os.getenv("WAZUH_INDEX_PATTERN", "wazuh-alerts*")
+    wazuh_timestamp_field: str = os.getenv("WAZUH_TIMESTAMP_FIELD", "timestamp")
+    wazuh_tiebreaker_field: str = os.getenv("WAZUH_TIEBREAKER_FIELD", "id")
+    wazuh_initial_since: str | None = os.getenv("WAZUH_INITIAL_SINCE")
+    dionaea_api_url: str | None = os.getenv("DIONAEA_API_URL")
+    dionaea_api_token: str | None = os.getenv("DIONAEA_API_TOKEN")
+    dionaea_api_hmac_secret: str | None = os.getenv("DIONAEA_API_HMAC_SECRET")
+    dionaea_api_verify_tls: bool = _as_bool(os.getenv("DIONAEA_API_VERIFY_TLS"), True)
+    dionaea_api_allow_http: bool = _as_bool(os.getenv("DIONAEA_API_ALLOW_HTTP"), False)
+    dionaea_api_timeout_seconds: int = int(os.getenv("DIONAEA_API_TIMEOUT_SECONDS", "30"))
+    dionaea_api_max_bytes: int = int(
+        os.getenv("DIONAEA_API_MAX_BYTES", str(20 * 1024 * 1024))
+    )
+    dionaea_api_max_pages: int = int(os.getenv("DIONAEA_API_MAX_PAGES", "20"))
+    dionaea_api_page_size: int = int(os.getenv("DIONAEA_API_PAGE_SIZE", "500"))
+    dionaea_sensor_name: str = os.getenv("DIONAEA_SENSOR_NAME", "Dionaea VPS")
+    ner_min_confidence: float = float(os.getenv("NER_MIN_CONFIDENCE", "0.50"))
+    ner_chunk_chars: int = int(os.getenv("NER_CHUNK_CHARS", "600"))
+    ner_chunk_overlap_chars: int = int(os.getenv("NER_CHUNK_OVERLAP_CHARS", "100"))
 
     @property
     def is_production(self) -> bool:
@@ -49,6 +88,19 @@ class Settings:
     @property
     def misp_configured(self) -> bool:
         return bool(self.misp_url and self.misp_api_key)
+
+    @property
+    def external_feed_configured(self) -> bool:
+        return bool(self.external_feed_url and self.external_feed_token)
+
+    @property
+    def wazuh_indexer_configured(self) -> bool:
+        has_auth = bool(self.wazuh_indexer_token or (self.wazuh_indexer_username and self.wazuh_indexer_password))
+        return bool(self.wazuh_indexer_url and has_auth)
+
+    @property
+    def dionaea_api_configured(self) -> bool:
+        return bool(self.dionaea_api_url and self.dionaea_api_token)
 
 
 @lru_cache(maxsize=1)
