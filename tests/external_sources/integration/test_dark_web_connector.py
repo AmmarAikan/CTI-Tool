@@ -59,6 +59,15 @@ class TorPolicyTests(unittest.TestCase):
             with self.assertRaises(DarkWebConfigurationError):
                 load_dark_web_config(path, environ={})
 
+    def test_environment_explicitly_overrides_local_proxy(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {"host": "127.0.0.1", "port": 9999},
+                "sources": [{"id": "curated-test", "name": "Test", "url": BASE_URL, "enabled": False,
+                             "allowed_paths": ["/advisories/"]}]}), encoding="utf-8")
+            proxy, _ = load_dark_web_config(path, environ={"TOR_PROXY_HOST": "192.0.2.1", "TOR_PROXY_PORT": "9150"})
+        self.assertEqual(proxy, TorProxy("192.0.2.1", 9150))
+
     def test_client_uses_socks5h_and_manual_safe_redirects(self):
         session = Mock(spec=requests.Session)
         session.get.side_effect = [
@@ -69,6 +78,7 @@ class TorPolicyTests(unittest.TestCase):
         result = client.get(source(), BASE_URL)
         self.assertEqual(result.status_code, 200)
         kwargs = session.get.call_args_list[0].kwargs
+        self.assertEqual(session.method_calls[0][0], "get")
         self.assertEqual(kwargs["proxies"]["http"], "socks5h://127.0.0.1:9999")
         self.assertFalse(kwargs["allow_redirects"])
 

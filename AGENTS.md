@@ -15,7 +15,7 @@ External Sources does not own Internal Sources, NER, IoC extraction, relation ex
 - `config/`: committed non-secret configuration.
 - `data/external/`: local External runtime state and outputs, not central persistence.
 - `tests/external_sources/`: deterministic External Sources tests.
-- `src/`: replaceable External prototype; do not extend or delete without an approved migration step.
+- The former top-level `src/` External Sources prototype has been retired. Do not recreate it.
 
 ## Environment and commands
 
@@ -34,7 +34,7 @@ External Sources does not own Internal Sources, NER, IoC extraction, relation ex
 - Use atomic writes for state and exports.
 - Isolate per-source and per-item failures and record safe errors without secrets.
 - Keep collectors independently configurable and bounded.
-- Never create a second final implementation under `src/`.
+- Never create a second External Sources implementation outside the canonical backend package.
 
 ## Contracts and team boundaries
 

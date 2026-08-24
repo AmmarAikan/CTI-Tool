@@ -106,7 +106,7 @@ The sole canonical implementation root for External Sources is:
 backend/app/pipeline/ingestion/external/
 ```
 
-Do not create a parallel final implementation under `src/`. The existing `src/` tree is a migration source only: preserve it until each useful module has been ported, integrated, and covered by equivalent tests, then remove obsolete prototype modules only in an explicitly approved cleanup phase. Final backend modules must not depend permanently on `src.*` compatibility imports.
+Do not create a parallel final implementation outside the canonical backend package. The former top-level prototype was retired after its useful behavior was migrated and covered by canonical tests. Final backend modules must remain independent of retired compatibility paths.
 
 Use the repository's existing stage-oriented architecture and approved shared modules:
 
@@ -210,7 +210,7 @@ CTI-Tool/
 5. If a shared contract or shared module cannot support a required External Sources behavior, stop before editing it and report the exact proposed change, affected consumers, compatibility impact, and tests required. Implement the shared change only after explicit approval.
 6. Keep External collection state, privacy handling, export contracts, application services, and source-specific connector logic inside the canonical External Sources package or the repository-level External-owned `config/`, `contracts/`, `data/external/`, and `tests/external_sources/` paths shown above.
 7. The versioned External export schema is a handoff contract; it must map explicitly to the existing shared `RawRecord`/`CTIObject` flow rather than silently redefining either shared type.
-8. Existing prototype modules under `src/` may be read and selectively migrated, but do not extend them as the final implementation and do not leave duplicate active collectors, schemas, storage helpers, classifiers, exporters, or orchestration paths.
+8. The former prototype modules have been retired. Do not recreate duplicate collectors, schemas, storage helpers, classifiers, exporters, or orchestration paths.
 
 Empty runtime directories may be retained with `.gitkeep`, but generated datasets, local dark-web source files, logs, secrets, model artifacts that cannot be redistributed, browser profiles, and temporary files must be ignored appropriately.
 

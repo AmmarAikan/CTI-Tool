@@ -19,7 +19,7 @@ from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 
 
-PROTOTYPE_MODEL = Path(__file__).resolve().parents[3] / "src" / "classification" / "model" / "cti_svm_model.pkl"
+APPROVED_MODEL_SHA256 = "0e929dfebd36c46498047a6f93d3b5d08ba9aad81d48f8f3f68070c6e21d7d8c"
 
 
 def item(*, source_type: str = "manual", status: str = "not_run", content: str | None = None) -> ExternalCTIItem:
@@ -62,10 +62,9 @@ class ClassificationTests(unittest.TestCase):
     def tearDown(self) -> None:
         CTIRelevanceClassifier.clear_cache_for_tests()
 
-    def test_model_copy_matches_prototype_and_approved_hash(self) -> None:
+    def test_canonical_model_matches_approved_immutable_hash(self) -> None:
         canonical_hash = hashlib.sha256(MODEL_PATH.read_bytes()).hexdigest()
-        prototype_hash = hashlib.sha256(PROTOTYPE_MODEL.read_bytes()).hexdigest()
-        self.assertEqual(canonical_hash, prototype_hash)
+        self.assertEqual(canonical_hash, APPROVED_MODEL_SHA256)
         self.assertEqual(canonical_hash, MODEL_SHA256)
         self.assertEqual(MODEL_VERSION, f"cti-svm-sha256:{MODEL_SHA256}")
 

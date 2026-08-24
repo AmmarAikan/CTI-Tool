@@ -1,6 +1,6 @@
 # External Sources Phase 8 — curated dark-web delivery
 
-The sole canonical implementation is `backend/app/pipeline/ingestion/external/dark_web_connector.py`. The preserved `src/dark_web/` collector and `tests/test_dark_web_collector.py` are prototype-only; the test imports `src.dark_web` and is not evidence for the canonical runtime.
+The sole canonical implementation is `backend/app/pipeline/ingestion/external/dark_web_connector.py`. The superseded collector and its legacy test were retired after their required behavior was covered by the canonical integration suite.
 
 ## Policy boundary
 

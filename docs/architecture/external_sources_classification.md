@@ -4,10 +4,10 @@ Phase 6 uses the approved immutable model at
 `backend/app/pipeline/ingestion/external/classification/model/cti_svm_model.pkl`.
 Its SHA-256 is
 `0e929dfebd36c46498047a6f93d3b5d08ba9aad81d48f8f3f68070c6e21d7d8c`,
-which matches the preserved prototype artifact exactly.
+which is the approved immutable artifact hash recorded during prototype retirement.
 
-The canonical runtime does not import `src.classification`. Before inference it
-reproduces the prototype's documented training path in this order:
+The canonical runtime has no dependency on the retired prototype. Before inference it
+reproduces the approved documented training path in this order:
 
 1. Replace `CVE-YYYY-NNNN...` values with `specifiedcve`.
 2. Replace IPv4-shaped values with `specifiedip`.

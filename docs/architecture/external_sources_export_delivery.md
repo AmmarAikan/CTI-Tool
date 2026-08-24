@@ -1,6 +1,6 @@
 # External Sources Phase 10 — dataset export and handoff
 
-The sole canonical exporter is `backend/app/pipeline/ingestion/external/export/final_dataset.py`. The preserved `src/export/final_dataset.py` prototype is not imported: it merges unrelated latest files and does not satisfy run isolation or the versioned contracts.
+The sole canonical exporter is `backend/app/pipeline/ingestion/external/export/final_dataset.py`. The obsolete prototype exporter was retired after canonical run isolation, contract validation, and deterministic export coverage were established.
 
 Orchestration creates one `RunManifest` (and therefore one `run_id`) before collection. Every collector result is wrapped in `RunSourceOutput` carrying that same ID. The exporter rejects any mixed run/checkpoint set and adds the run ID to exported record metadata.
 

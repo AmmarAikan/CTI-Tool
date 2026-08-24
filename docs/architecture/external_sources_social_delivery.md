@@ -1,8 +1,8 @@
 # External Sources social/community delivery methods
 
 Verified on 2026-08-23 for Phase 7. Canonical implementations are under
-`backend/app/pipeline/ingestion/external/`; preserved `src/social_media/`
-collectors are prototypes only.
+`backend/app/pipeline/ingestion/external/`; the superseded prototype collectors
+have been retired.
 
 | Source | Delivery method | Access policy |
 | --- | --- | --- |
