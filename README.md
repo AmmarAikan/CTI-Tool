@@ -22,6 +22,18 @@ Phase 9 implements the framework-independent `CanonicalManualSourceService` appl
 
 Phase 10 adds the single canonical `ExternalDatasetExporter` under `backend/app/pipeline/ingestion/external/export/`. It accepts only run-tagged source outputs matching one `RunManifest`, validates accepted records, routes excluded records to a run-scoped review artifact, deduplicates External observations while preserving provenance, assigns deterministic SHA-256 IDs, and atomically writes the dataset, manifest, review output, and run state. It never scans unrelated “latest” prototype files.
 
+Phase 11 adds an internal FastAPI adapter under `backend/app/pipeline/ingestion/external/integration/`. It exposes only versioned `/api/v1/external-sources` application operations, maps responses to the existing integration contracts, enforces replaceable authentication and role policy, and never imports collectors. The bundled thread-based runner, static token authentication, in-memory idempotency, and local source view are development adapters only; production deployment must replace them with the agreed identity provider, durable queue/job store, and composed application services.
+
+Local adapter start (PowerShell):
+
+```powershell
+$env:EXTERNAL_API_TOKEN = "replace-with-a-strong-random-local-token"
+$env:EXTERNAL_API_ROLES = "operator"
+python -m uvicorn backend.app.pipeline.ingestion.external.integration.local:app --host 127.0.0.1 --port 8000
+```
+
+The local health endpoint is `http://127.0.0.1:8000/api/v1/external-sources/health`. This development composition does not provide the final production collector orchestration or a durable job queue and must not be exposed publicly.
+
 Graduation project component responsible for collecting, extracting, and
 cleaning cybersecurity data from external sources, then handing off a
 unified dataset to the Content Classification / NER / IOC Extraction /

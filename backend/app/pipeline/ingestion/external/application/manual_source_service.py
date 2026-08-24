@@ -35,6 +35,10 @@ class ManualSourceResult:
 
 class ManualSourceService(ABC):
     @abstractmethod
+    def validate_url(self, url: str) -> str:
+        """Return the policy-approved canonical URL before a command is queued."""
+
+    @abstractmethod
     def add_manual_source(self, url: str, *, requested_by: str) -> ManualSourceResult:
         """Validate and submit a public URL through policy-aware routing."""
 
@@ -84,6 +88,9 @@ class CanonicalManualSourceService(ManualSourceService):
         if route.kind != "generic_web":
             return self._run_adapter(route, canonical, state)
         return self._run_web(canonical, state, force=False)
+
+    def validate_url(self, url: str) -> str:
+        return self.policy.validate(url).canonical_url
 
     def recheck_url(self, url: str, *, requested_by: str, force: bool = False) -> ManualSourceResult:
         if not force: return self.add_manual_source(url, requested_by=requested_by)
