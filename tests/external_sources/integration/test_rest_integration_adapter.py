@@ -86,6 +86,12 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         self.assertEqual(schema["components"]["securitySchemes"]["HTTPBearer"]["scheme"], "bearer")
         protected = schema["paths"][f"{API_PREFIX}/sources"]["get"]
         self.assertEqual(protected["security"], [{"HTTPBearer": []}])
+        collection_responses = schema["paths"][f"{API_PREFIX}/jobs"]["post"]["responses"]
+        self.assertTrue({"404", "409", "422", "503"}.issubset(collection_responses))
+        self.assertIn("IntegrationErrorResponse", str(collection_responses["503"]))
+        export_responses = schema["paths"][f"{API_PREFIX}/exports/latest"]["get"]["responses"]
+        self.assertIn("404", export_responses)
+        self.assertIn("IntegrationErrorResponse", str(export_responses["404"]))
         self.assertEqual(client.get(f"{API_PREFIX}/sources").status_code, 401)
 
     def test_authorization_boundaries(self):

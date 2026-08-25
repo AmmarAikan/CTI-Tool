@@ -79,6 +79,10 @@ class InProcessJobRunner:
             with self._lock:
                 job = self._jobs[job_id]
                 if job.cancellation_requested: job.state = "cancelled"
+                elif result.get("status") == "partial": job.state, job.result = "partial", result
+                elif result.get("status") == "failed":
+                    job.state, job.result = "failed", result
+                    job.error = {"code": "job_failed", "message": "job execution failed safely", "retryable": False, "details": {}}
                 else: job.state, job.result = "completed", result
                 job.updated_at = utc_now()
         except Exception as exc:

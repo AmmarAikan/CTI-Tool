@@ -9,7 +9,10 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
-from backend.app.pipeline.ingestion.external.application.collection_service import CollectionRequest, CollectionService
+from backend.app.pipeline.ingestion.external.application.collection_service import (
+    CollectionRequest, CollectionRequestError, CollectionService, DisabledSourceError,
+    ManualSourceCommandError, UnknownSourceError,
+)
 from backend.app.pipeline.ingestion.external.application.job_service import JobService
 from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceService
 from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
@@ -23,12 +26,22 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
 
 
 API_PREFIX = "/api/v1/external-sources"
+COLLECTION_ERROR_RESPONSES = {
+    404: {"model": IntegrationErrorResponse, "description": "One or more source IDs are not registered."},
+    409: {"model": IntegrationErrorResponse, "description": "A source is disabled or belongs to the Manual Source operation."},
+    422: {"model": IntegrationErrorResponse, "description": "The collection request is invalid."},
+    503: {"model": IntegrationErrorResponse, "description": "The collection service could not accept the command."},
+}
 
 
 class APIError(RuntimeError):
     def __init__(self, status_code: int, code: str, message: str, *, retryable: bool = False, details: dict[str, Any] | None = None) -> None:
         super().__init__(message); self.status_code, self.code, self.message = status_code, code, message
         self.retryable, self.details = retryable, details or {}
+
+
+class JobBusinessError(RuntimeError):
+    """Signal a safely categorized unsuccessful application result to the runner."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,19 +95,23 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     @app.get(f"{API_PREFIX}/health", response_model=HealthResponse)
     def health() -> HealthResponse: return HealthResponse()
 
-    @app.post(f"{API_PREFIX}/jobs", response_model=JobStatusResponse, status_code=202)
+    @app.post(f"{API_PREFIX}/jobs", response_model=JobStatusResponse, status_code=202, responses=COLLECTION_ERROR_RESPONSES)
     def start_collection(body: CollectionRequestBody, current: Principal = Depends(permitted("jobs:create")),
                          idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         cached = _cached(services, current, "start_collection", idempotency_key)
         if cached: return JobStatusResponse.model_validate(cached)
         command_id = _id("cmd")
         try: accepted = services.collection_service.start_collection(CollectionRequest(tuple(body.source_ids), body.force, current.subject, body.options))
+        except UnknownSourceError: raise APIError(404, "source_not_found", "one or more source identifiers were not found") from None
+        except DisabledSourceError: raise APIError(409, "source_disabled", "one or more selected sources are disabled") from None
+        except ManualSourceCommandError: raise APIError(409, "manual_source_route_required", "manual URLs must use the manual-source operation") from None
+        except CollectionRequestError: raise APIError(422, "invalid_collection_request", "collection request is invalid") from None
         except Exception: raise APIError(503, "collection_unavailable", "collection command could not be accepted", retryable=True) from None
         response = _queued(accepted.job_id, accepted.command_id or command_id)
         _remember(services, current, "start_collection", idempotency_key, response.model_dump())
         return response
 
-    @app.post(f"{API_PREFIX}/sources/{{source_id}}/jobs", response_model=JobStatusResponse, status_code=202)
+    @app.post(f"{API_PREFIX}/sources/{{source_id}}/jobs", response_model=JobStatusResponse, status_code=202, responses=COLLECTION_ERROR_RESPONSES)
     def collect_source(source_id: str, current: Principal = Depends(permitted("jobs:create")),
                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         _safe_source_id(source_id)
@@ -102,6 +119,10 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         if cached: return JobStatusResponse.model_validate(cached)
         command_id = _id("cmd")
         try: accepted = services.collection_service.collect_source(source_id, requested_by=current.subject)
+        except UnknownSourceError: raise APIError(404, "source_not_found", "source identifier was not found") from None
+        except DisabledSourceError: raise APIError(409, "source_disabled", "selected source is disabled") from None
+        except ManualSourceCommandError: raise APIError(409, "manual_source_route_required", "manual URLs must use the manual-source operation") from None
+        except CollectionRequestError: raise APIError(422, "invalid_collection_request", "collection request is invalid") from None
         except Exception: raise APIError(503, "collection_unavailable", "source collection could not be accepted", retryable=True) from None
         response = _queued(accepted.job_id, accepted.command_id or command_id)
         _remember(services, current, f"collect_source:{source_id}", idempotency_key, response.model_dump())
@@ -159,11 +180,13 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         try: return _legacy_job(services.job_service.cancel_job(job_id, requested_by=current.subject))
         except Exception: raise APIError(404, "job_not_found", "job was not found") from None
 
-    @app.get(f"{API_PREFIX}/exports/latest", response_model=LatestExportResponse)
+    @app.get(f"{API_PREFIX}/exports/latest", response_model=LatestExportResponse, responses={
+        404: {"model": IntegrationErrorResponse, "description": "No validated External Sources export is available."},
+    })
     def latest_export(_current: Principal = Depends(permitted("exports:read"))) -> LatestExportResponse:
         value = services.job_service.get_latest_export()
         if not value: raise APIError(404, "export_not_found", "no validated export is available")
-        allowed = {key: value.get(key) for key in LatestExportResponse.model_fields}
+        allowed = {key: value[key] for key in LatestExportResponse.model_fields if key in value}
         return LatestExportResponse.model_validate(allowed)
 
     if docs_enabled:
@@ -195,11 +218,18 @@ def _manual_job(services: AdapterServices, principal: Principal, url: str, force
     try: url = services.manual_source_service.validate_url(url)
     except Exception: raise APIError(422, "url_policy_rejected", "URL was rejected by source security policy") from None
     command_id = _id("cmd")
-    operation = (lambda: services.manual_source_service.recheck_url(url, requested_by=principal.subject, force=True)) if force else (lambda: services.manual_source_service.add_manual_source(url, requested_by=principal.subject))
+    service_operation = (lambda: services.manual_source_service.recheck_url(url, requested_by=principal.subject, force=True)) if force else (lambda: services.manual_source_service.add_manual_source(url, requested_by=principal.subject))
+    operation = lambda: _require_successful_business_result(service_operation())
     job = services.job_runner.submit(command_id, operation)
     response = _queued(job.job_id, command_id)
     _remember(services, principal, scope, key, response.model_dump())
     return response
+
+
+def _require_successful_business_result(result: Any) -> Any:
+    if getattr(result, "status", None) == "error":
+        raise JobBusinessError("application operation returned an error result")
+    return result
 
 
 def _queued(job_id: str, command_id: str) -> JobStatusResponse:

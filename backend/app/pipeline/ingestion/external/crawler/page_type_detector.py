@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass, field
+import re
 from typing import Any, Literal
 from urllib.parse import urljoin, urlsplit
 
@@ -11,6 +12,9 @@ from backend.app.pipeline.ingestion.external.common.canonical_url import canonic
 
 
 PageType = Literal["article", "listing", "unknown"]
+CONTAINER_TOKENS = ("card", "post", "article", "story", "item", "entry", "result", "teaser")
+UTILITY_TOKENS = ("menu", "nav", "footer", "header", "cookie", "consent", "utility", "account", "breadcrumb", "sidebar")
+UTILITY_SEGMENTS = frozenset({"contact", "login", "signin", "signup", "account", "privacy", "terms", "legal", "tag", "tags", "category", "categories", "page", "pagination"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,11 +94,16 @@ class PageTypeDetector:
 
     def _candidate_links(self, soup: BeautifulSoup, base_url: str) -> list[str]:
         base_host = (urlsplit(base_url).hostname or "").lower()
-        candidates: list[str] = []
-        seen: set[str] = set()
-        for anchor in soup.find_all("a", href=True):
+        base_path = self._segments(urlsplit(base_url).path)
+        signatures: Counter[str] = Counter()
+        for tag in soup.find_all(["article", "section", "div", "li"]):
+            signature = self._container_signature(tag)
+            if signature: signatures[signature] += 1
+        ranked: dict[str, tuple[float, int]] = {}
+        base_canonical = canonicalize_url(base_url)
+        for order, anchor in enumerate(soup.find_all("a", href=True)):
             text = anchor.get_text(" ", strip=True)
-            if len(text) < 12 or len(text.split()) < 2:
+            if self._inside_utility(anchor):
                 continue
             absolute = urljoin(base_url, str(anchor["href"]))
             if (urlsplit(absolute).hostname or "").lower() != base_host:
@@ -103,13 +112,72 @@ class PageTypeDetector:
                 canonical = canonicalize_url(absolute)
             except ValueError:
                 continue
-            if canonical == canonicalize_url(base_url) or canonical in seen:
+            if canonical == base_canonical or self._utility_path(urlsplit(canonical).path):
                 continue
-            seen.add(canonical)
-            candidates.append(canonical)
-            if len(candidates) >= self.max_candidate_links:
+            context = self._context(anchor, signatures)
+            headline = len(text) >= 18 and len(text.split()) >= 3
+            if not headline and context < 2:
+                continue
+            score = context + self._path_score(base_path, self._segments(urlsplit(canonical).path))
+            current = ranked.get(canonical)
+            if current is None or score > current[0]: ranked[canonical] = (score, order)
+        ordered = sorted(ranked, key=lambda value: (-ranked[value][0], ranked[value][1], value))
+        return ordered[:self.max_candidate_links]
+
+    @staticmethod
+    def _inside_utility(anchor) -> bool:
+        for parent in [anchor, *anchor.parents]:
+            if getattr(parent, "name", None) in {"header", "nav", "footer", "form", "aside"}: return True
+            role = str(parent.get("role") or "").lower() if hasattr(parent, "get") else ""
+            if role in {"navigation", "banner", "contentinfo", "form"}: return True
+            marker = " ".join(str(value).lower() for value in [*(parent.get("class") or []), parent.get("id") or ""] if value) if hasattr(parent, "get") else ""
+            if any(token in marker for token in UTILITY_TOKENS): return True
+        return False
+
+    @staticmethod
+    def _context(anchor, signatures: Counter[str]) -> float:
+        score = 0.0
+        if anchor.find_parent("main"): score += 1.0
+        if anchor.find_parent("article"): score += 4.0
+        if anchor.find_parent(["h1", "h2", "h3", "h4"]): score += 3.0
+        for parent in anchor.parents:
+            if getattr(parent, "name", None) not in {"article", "section", "div", "li"}: continue
+            signature = PageTypeDetector._container_signature(parent)
+            if signature:
+                score += 2.0
+                if signatures[signature] >= 2: score += 2.0
                 break
-        return candidates
+        return score
+
+    @staticmethod
+    def _container_signature(tag) -> str | None:
+        for class_name in tag.get("class") or []:
+            lowered = str(class_name).lower()
+            if any(token in lowered for token in CONTAINER_TOKENS): return f"{tag.name}.{lowered}"
+        return None
+
+    @staticmethod
+    def _utility_path(path: str) -> bool:
+        segments = PageTypeDetector._segments(path)
+        if any(segment in UTILITY_SEGMENTS for segment in segments): return True
+        if len(segments) == 3 and segments[:2] == ("blog", "products"): return True
+        if segments and re.fullmatch(r"page-?\d+", segments[-1]): return True
+        return False
+
+    @staticmethod
+    def _path_score(base: tuple[str, ...], child: tuple[str, ...]) -> float:
+        common = 0
+        for left, right in zip(base, child):
+            if left != right: break
+            common += 1
+        score = min(common, 4) * 0.75
+        if base and common == len(base) and len(child) > len(base): score += 2.5
+        elif common == 0: score -= 1.0
+        return score
+
+    @staticmethod
+    def _segments(path: str) -> tuple[str, ...]:
+        return tuple(value.lower() for value in path.split("/") if value)
 
     @staticmethod
     def _has_article_metadata(soup: BeautifulSoup) -> bool:
@@ -129,6 +197,6 @@ class PageTypeDetector:
             classes = tag.get("class") or []
             for class_name in classes:
                 lowered = str(class_name).lower()
-                if any(token in lowered for token in ("card", "post", "article", "story", "item", "entry")):
+                if any(token in lowered for token in CONTAINER_TOKENS):
                     signatures[f"{tag.name}.{lowered}"] += 1
         return max(signatures.values(), default=0)

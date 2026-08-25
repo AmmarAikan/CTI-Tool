@@ -65,6 +65,8 @@ class LocalSourceJobTests(unittest.TestCase):
             root = Path(folder)
             app = local.build_local_app(connector_factory=connector_factory, state_directory=root / "state",
                                         processed_directory=root / "processed", review_directory=root / "review",
+                                        exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
+                                        manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
                                         log_path=root / "logs" / "cti_tool.log")
             client = TestClient(app)
             headers = {"Authorization": "Bearer local-regression-token"}

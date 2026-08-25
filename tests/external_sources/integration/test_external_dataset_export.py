@@ -86,6 +86,33 @@ class ExternalDatasetExporterTests(unittest.TestCase):
         self.assertEqual(record["metadata"]["references"], ["https://a.example/", "https://b.example/"])
         self.assertEqual(record["metadata"]["source_identifiers"], ["CVE-2026-1234"])
 
+    def test_manual_and_registered_url_dedup_preserves_manual_stable_id(self):
+        link = "https://example.test/shared-advisory"
+        registered = item("feed-guid", source="RSS Source", source_type="rss", link=link,
+                          metadata={"observed_in": ["rss-source"]})
+        manual = item(link, source="Manual URL", source_type="manual_url", link=link, status="accepted",
+                      metadata={"observed_in": ["manual_url"]}).to_dict()
+        manual["record_id"] = "manual-" + sha256_text(link).split(":", 1)[1][:32]
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = self.manifest(); result = self.make(folder).export(manifest, [
+                RunSourceOutput(manifest.run_id, "rss-source", "completed", (registered,)),
+                RunSourceOutput(manifest.run_id, "manual_url", "completed", (manual,)),
+            ])
+            records = json.loads(result.dataset_path.read_text(encoding="utf-8"))
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["record_id"], manual["record_id"])
+        self.assertEqual(records[0]["metadata"]["observed_in"], ["manual_url", "rss-source"])
+
+    def test_carried_checkpoint_preserves_original_run_provenance(self):
+        carried = item("manual-carried", source="Manual URL", source_type="manual_url", status="accepted",
+                       metadata={"run_id": "ext-original-run", "observed_in": ["manual_url"]}).to_dict()
+        carried["record_id"] = "manual-" + "a" * 32
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = self.manifest(); result = self.make(folder).export(
+                manifest, [RunSourceOutput(manifest.run_id, "manual_url", "completed", (carried,))])
+            record = json.loads(result.dataset_path.read_text(encoding="utf-8"))[0]
+        self.assertEqual(record["metadata"]["run_id"], "ext-original-run")
+
     def test_exclusions_are_preserved_with_safe_review_reasons(self):
         empty = item("empty", content="")
         classify = item("classification", source_type="manual_url", status="error")

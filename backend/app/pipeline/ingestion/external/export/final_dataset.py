@@ -113,11 +113,26 @@ class ExternalDatasetExporter:
         return ExportResult(dataset_path, manifest_path, review_path, manifest_value)
 
     def _deduplicate(self, candidates: list[tuple[str, dict[str, Any]]]) -> tuple[list[dict[str, Any]], int]:
-        groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
-        for source_id, record in candidates: groups.setdefault(self._identity(record), []).append((source_id, record))
+        ordered_candidates = sorted(candidates, key=lambda value: canonical_json(value[1]))
+        parents = list(range(len(ordered_candidates))); owners: dict[str, int] = {}
+        def find(index: int) -> int:
+            while parents[index] != index:
+                parents[index] = parents[parents[index]]; index = parents[index]
+            return index
+        def union(left: int, right: int) -> None:
+            left, right = find(left), find(right)
+            if left != right: parents[max(left, right)] = min(left, right)
+        for index, (_source_id, record) in enumerate(ordered_candidates):
+            for key in self._identity_keys(record):
+                if key in owners: union(index, owners[key])
+                else: owners[key] = index
+        groups: dict[int, list[tuple[str, dict[str, Any]]]] = {}
+        for index, observation in enumerate(ordered_candidates): groups.setdefault(find(index), []).append(observation)
         result = []
-        for identity, observations in sorted(groups.items()):
+        for _group, observations in sorted(groups.items()):
             ordered = sorted(observations, key=lambda value: canonical_json(value[1]))
+            identities = {identity for _source_id, record in ordered for identity in self._identity_keys(record)}
+            identity = min(identities, key=lambda value: ({"official": 0, "url": 1, "content": 2, "fallback": 3}.get(value.split(":", 1)[0], 4), value))
             primary = deepcopy(ordered[0][1])
             metadata = primary.setdefault("metadata", {})
             observed = set(metadata.get("observed_in", [])); identifiers, provenance, references = set(), [], set()
@@ -132,20 +147,27 @@ class ExternalDatasetExporter:
             metadata["observed_in"], metadata["source_identifiers"] = sorted(observed), sorted(identifiers)
             if references: metadata["references"] = sorted(references)
             if provenance: metadata["provenance"] = sorted(provenance, key=canonical_json)
-            primary["record_id"] = f"ext-{sha256_text(identity).split(':', 1)[1][:32]}"
+            manual_ids = sorted(str(record.get("record_id")) for _source_id, record in ordered
+                                if record.get("source_type") == "manual_url" and str(record.get("record_id", "")).startswith("manual-"))
+            primary["record_id"] = manual_ids[0] if manual_ids else f"ext-{sha256_text(identity).split(':', 1)[1][:32]}"
             result.append(primary)
         return result, len(candidates) - len(result)
 
     def _identity(self, record: dict[str, Any]) -> str:
+        return self._identity_keys(record)[0]
+
+    def _identity_keys(self, record: dict[str, Any]) -> list[str]:
         metadata, source_type = record.get("metadata", {}), str(record.get("source_type", "")).lower()
+        identities = []
         official = metadata.get("cve_id") or metadata.get("ghsa_id") or (record.get("source_item_id") if source_type in OFFICIAL_TYPES else None)
-        if official: return f"official:{str(official).upper()}"
+        if official: identities.append(f"official:{str(official).upper()}")
         if record.get("link"):
-            try: return f"url:{canonicalize_url(str(record['link']))}"
+            try: identities.append(f"url:{canonicalize_url(str(record['link']))}")
             except ValueError: pass
         normalized = " ".join(str(record.get("content") or "").split()).casefold()
-        if normalized: return f"content:{sha256_text(normalized)}"
-        return f"fallback:{sha256_json({'source': record.get('source'), 'title': record.get('title'), 'published': record.get('published')})}"
+        if normalized: identities.append(f"content:{sha256_text(normalized)}")
+        identities.append(f"fallback:{sha256_json({'source': record.get('source'), 'title': record.get('title'), 'published': record.get('published')})}")
+        return identities
 
     @staticmethod
     def _exclusion_reasons(record: dict[str, Any]) -> list[str]:
@@ -161,7 +183,7 @@ class ExternalDatasetExporter:
     @staticmethod
     def _mapping(value: ExternalCTIItem | dict[str, Any], run_id: str) -> dict[str, Any]:
         result = deepcopy(value.to_dict() if isinstance(value, ExternalCTIItem) else value)
-        result.setdefault("metadata", {})["run_id"] = run_id
+        result.setdefault("metadata", {}).setdefault("run_id", run_id)
         return result
 
     def _review(self, value: ExternalCTIItem | dict[str, Any], source_id: str, *reasons: str) -> dict[str, Any]:

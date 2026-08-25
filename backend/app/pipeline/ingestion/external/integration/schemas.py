@@ -61,3 +61,5 @@ class LatestExportResponse(StrictModel):
     accepted_records: int = 0
     review_records: int = 0
     completed_at: str | None = None
+    dataset: list[dict[str, Any]] = Field(default_factory=list)
+    manifest: dict[str, Any] = Field(default_factory=dict)

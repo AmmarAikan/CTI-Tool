@@ -38,6 +38,40 @@ class PageTypeDetectorTests(unittest.TestCase):
         self.assertEqual(result.page_type, "unknown")
         self.assertLess(result.confidence, 0.5)
 
+    def test_navigation_heavy_listing_ranks_real_articles_before_limit(self) -> None:
+        html = (FIXTURES / "navigation_heavy_threat_listing.html").read_text(encoding="utf-8")
+        detector = PageTypeDetector(max_candidate_links=2)
+        result = detector.detect(html, "https://cloud.google.com/blog/topics/threat-intelligence/", "Latest research")
+        self.assertEqual(result.page_type, "listing")
+        self.assertEqual(len(result.candidate_links), 2)
+        self.assertTrue(all("/blog/topics/threat-intelligence/" in value for value in result.candidate_links))
+        self.assertTrue(any("fictional-ransomware-disruption" in value for value in result.candidate_links))
+        self.assertNotIn("https://cloud.google.com/contact/", result.candidate_links)
+        self.assertNotIn("https://cloud.google.com/blog/products/media-entertainment", result.candidate_links)
+
+    def test_relative_urls_are_canonicalized_and_duplicates_use_best_context(self) -> None:
+        html = """
+        <main><a href='/reports/alpha?utm_source=menu'>A duplicate security research report</a>
+        <section class='post-card'><h2><a href='https://example.test/reports/alpha'>Detailed Alpha campaign investigation report</a></h2></section>
+        <section class='post-card'><h2><a href='../reports/bravo'>Detailed Bravo malware investigation report</a></h2></section></main>
+        """
+        result = self.detector.detect(html, "https://example.test/reports/", "Recent reports")
+        self.assertEqual(result.candidate_links, (
+            "https://example.test/reports/alpha", "https://example.test/reports/bravo",
+        ))
+
+    def test_insufficient_candidates_do_not_force_listing_classification(self) -> None:
+        html = "<main><p>Short directory introduction.</p><a href='/reports/one'>One ordinary report link</a></main>"
+        result = self.detector.detect(html, "https://example.test/reports/", "Short directory introduction.")
+        self.assertEqual(result.page_type, "unknown")
+        self.assertLessEqual(len(result.candidate_links), 1)
+
+    def test_article_page_does_not_promote_utility_links(self) -> None:
+        html = (FIXTURES / "article_page.html").read_text(encoding="utf-8")
+        result = self.detector.detect(html, "https://example.test/advisory", "x" * 500)
+        self.assertEqual(result.page_type, "article")
+        self.assertEqual(result.candidate_links, ())
+
 
 if __name__ == "__main__":
     unittest.main()

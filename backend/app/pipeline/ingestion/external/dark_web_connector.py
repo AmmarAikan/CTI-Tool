@@ -217,6 +217,23 @@ class DarkWebConnector(ExternalConnector):
         if result.errors and not (result.accepted_items or result.review_items or result.rejected_items): result.status = "failed"
         return result
 
+    def collect_url(self, source: DarkWebSource, url: str, *, check_proxy: bool = True) -> DarkWebCollectionResult:
+        """Collect exactly one configured and allowed onion URL without listing expansion."""
+        result = DarkWebCollectionResult()
+        if not source.enabled or not source.allows(url):
+            result.status, result.errors = "failed", ["source_policy_rejected"]
+            return result
+        if check_proxy and not self.client.tor_available():
+            result.status, result.errors = "unavailable", ["tor_proxy_unavailable"]
+            return result
+        try:
+            response = self._fetch(source, url)
+            if response is None: result.skipped_items += 1
+            else: self._process_page(source, url, response, result)
+        except TorUnavailableError: result.status, result.errors = "unavailable", ["tor_unavailable"]
+        except Exception: result.status, result.errors = "failed", ["source_failed"]
+        return result
+
     def _collect_source(self, source: DarkWebSource, result: DarkWebCollectionResult) -> None:
         source_state = self.state["sources"].setdefault(source.source_id, {})
         source_state["source_config_hash"] = sha256_json({"id": source.source_id, "url": source.url, "allowed_paths": source.allowed_paths})

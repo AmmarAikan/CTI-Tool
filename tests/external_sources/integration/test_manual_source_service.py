@@ -69,6 +69,15 @@ class ManualSourceServiceTests(unittest.TestCase):
         self.assertEqual(result.status, "stored"); self.assertEqual(crawler.calls, [])
         self.assertEqual(adapter.collect_url.call_args.kwargs["identifier"], "GHSA-2345-6789-CFGH")
 
+    def test_unconfigured_structured_route_fails_closed_without_crawler(self):
+        crawler = FakeCrawler([])
+        with tempfile.TemporaryDirectory() as folder:
+            result = self.service(crawler, JsonStateManager(Path(folder) / "state.json")).add_manual_source(
+                "https://t.me/s/not-configured", requested_by="tester")
+        self.assertEqual(result.status, "ignored")
+        self.assertEqual(result.message, "telegram adapter is not configured")
+        self.assertEqual(crawler.calls, [])
+
     def test_feed_content_type_routes_to_rss_adapter_without_html_scraping(self):
         url = "https://example.test/updates"
         rejected_as_html = CrawlResult(url, url, "error", response_metadata={"content_type": "application/atom+xml"})
@@ -133,6 +142,21 @@ class ManualSourceServiceTests(unittest.TestCase):
             result = self.service(FakeCrawler([crawl(url)]), JsonStateManager(Path(folder) / "state.json"),
                                   classification_service=classification, record_sink=lambda i, d: stored.append(d)).add_manual_source(url, requested_by="tester")
         self.assertEqual(result.status, "review_required"); self.assertEqual(stored, ["review"])
+
+    def test_short_and_utility_content_are_gated_before_model_inference(self):
+        classification = Mock(); classification.classifier = type("Classifier", (), {"model_version": "test"})()
+        stored = []
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JsonStateManager(Path(folder) / "state.json")
+            short = self.service(FakeCrawler([crawl("https://example.test/report", text="Brief ambiguous security update.")]), manager,
+                                 classification_service=classification, record_sink=lambda item, disposition: stored.append((item, disposition)))
+            short_result = short.add_manual_source("https://example.test/report", requested_by="tester")
+            utility = self.service(FakeCrawler([crawl("https://example.test/contact/", text="Contact sales to get started and request a demo for our products.")]), manager,
+                                   classification_service=classification, record_sink=lambda item, disposition: stored.append((item, disposition)))
+            utility_result = utility.add_manual_source("https://example.test/contact/", requested_by="tester")
+        self.assertEqual((short_result.status, stored[0][1], stored[0][0].classification.status), ("review_required", "review", "not_run"))
+        self.assertEqual((utility_result.status, stored[1][1], stored[1][0].classification.label), ("ignored", "rejected", "utility_page"))
+        classification.classify_item.assert_not_called()
 
 
 if __name__ == "__main__": unittest.main()
