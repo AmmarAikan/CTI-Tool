@@ -80,6 +80,28 @@ class LocalSourceJobTests(unittest.TestCase):
             app.state.services.job_runner.shutdown()
             self._close_file_handler(root / "logs" / "cti_tool.log")
 
+    def test_local_docs_environment_flag_is_default_off_and_explicitly_enabled(self) -> None:
+        base_environment = {
+            "EXTERNAL_API_TOKEN": "local-docs-token",
+            "EXTERNAL_API_ROLES": "operator",
+            "EXTERNAL_API_DEV_WORKERS": "1",
+        }
+        with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, base_environment, clear=True):
+            local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
+            root = Path(folder)
+            disabled = local.build_local_app(log_path=root / "disabled.log")
+            self.assertEqual(TestClient(disabled).get("/docs").status_code, 404)
+            disabled.state.services.job_runner.shutdown()
+            self._close_file_handler(root / "disabled.log")
+
+            with patch.dict(os.environ, {**base_environment, "EXTERNAL_API_DOCS_ENABLED": "true"}, clear=True):
+                enabled = local.build_local_app(log_path=root / "enabled.log")
+                client = TestClient(enabled)
+                self.assertEqual(client.get("/docs").status_code, 200)
+                self.assertEqual(client.get("/openapi.json").status_code, 200)
+                enabled.state.services.job_runner.shutdown()
+                self._close_file_handler(root / "enabled.log")
+
     def test_runner_logs_safe_internal_failure_context(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             log_path = Path(folder) / "logs" / "cti_tool.log"

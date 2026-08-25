@@ -63,6 +63,14 @@ Health endpoint:
 GET http://127.0.0.1:8000/api/v1/external-sources/health
 ```
 
+Swagger and OpenAPI are disabled by default. For local development only, enable them before starting the adapter:
+
+```powershell
+$env:EXTERNAL_API_DOCS_ENABLED = "true"
+```
+
+Swagger is then available at `http://127.0.0.1:8000/docs` and the schema at `http://127.0.0.1:8000/openapi.json`. Use Swagger's **Authorize** button with the same bearer token configured in `EXTERNAL_API_TOKEN`. Documentation mode does not bypass authentication on protected API operations and must not be enabled on a publicly reachable adapter.
+
 The bundled static-token authentication, in-memory idempotency store, and thread runner are development adapters only. The local composition can execute enabled canonical RSS source jobs for authorized testing and maintenance, but it does not provide durable production orchestration or a cloud-ready queue. Internal job failures are recorded safely in `logs/cti_tool.log`; public responses never include exception details. Do not expose it publicly.
 
 ## Authorized maintenance and testing

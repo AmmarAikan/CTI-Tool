@@ -6,6 +6,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, Header, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from backend.app.pipeline.ingestion.external.application.collection_service import CollectionRequest, CollectionService
@@ -42,8 +43,14 @@ class AdapterServices:
     idempotency: IdempotencyStore
 
 
-def create_app(services: AdapterServices) -> FastAPI:
-    app = FastAPI(title="CTI Tool External Sources Internal API", version="1.0.0", docs_url=None, redoc_url=None, openapi_url=None)
+def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> FastAPI:
+    app = FastAPI(
+        title="CTI Tool External Sources Internal API",
+        version="1.0.0",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url=None,
+        openapi_url="/openapi.json" if docs_enabled else None,
+    )
     app.state.services = services
 
     @app.exception_handler(APIError)
@@ -158,6 +165,26 @@ def create_app(services: AdapterServices) -> FastAPI:
         if not value: raise APIError(404, "export_not_found", "no validated export is available")
         allowed = {key: value.get(key) for key in LatestExportResponse.model_fields}
         return LatestExportResponse.model_validate(allowed)
+
+    if docs_enabled:
+        def secured_openapi() -> dict[str, Any]:
+            if app.openapi_schema is not None:
+                return app.openapi_schema
+            schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+            components = schema.setdefault("components", {})
+            components.setdefault("securitySchemes", {})["HTTPBearer"] = {
+                "type": "http", "scheme": "bearer", "bearerFormat": "token",
+            }
+            for path, methods in schema.get("paths", {}).items():
+                if path == f"{API_PREFIX}/health":
+                    continue
+                for method, operation in methods.items():
+                    if method.lower() in {"get", "post", "put", "patch", "delete"} and isinstance(operation, dict):
+                        operation["security"] = [{"HTTPBearer": []}]
+            app.openapi_schema = schema
+            return schema
+
+        app.openapi = secured_openapi
 
     return app
 

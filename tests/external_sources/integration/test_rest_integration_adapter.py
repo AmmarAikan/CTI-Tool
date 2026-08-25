@@ -73,6 +73,21 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         Draft202012Validator(error_schema).validate(response.json())
         self.assertNotIn("trace", response.text.lower())
 
+    def test_swagger_and_openapi_are_disabled_by_default(self):
+        self.assertEqual(self.client.get("/docs").status_code, 404)
+        self.assertEqual(self.client.get("/openapi.json").status_code, 404)
+
+    def test_enabled_openapi_describes_bearer_auth_without_bypassing_it(self):
+        client = TestClient(create_app(self.services, docs_enabled=True))
+        self.assertEqual(client.get("/docs").status_code, 200)
+        schema_response = client.get("/openapi.json")
+        self.assertEqual(schema_response.status_code, 200)
+        schema = schema_response.json()
+        self.assertEqual(schema["components"]["securitySchemes"]["HTTPBearer"]["scheme"], "bearer")
+        protected = schema["paths"][f"{API_PREFIX}/sources"]["get"]
+        self.assertEqual(protected["security"], [{"HTTPBearer": []}])
+        self.assertEqual(client.get(f"{API_PREFIX}/sources").status_code, 401)
+
     def test_authorization_boundaries(self):
         response = self.client.post(f"{API_PREFIX}/jobs", json={}, headers=self.auth("viewer-token"))
         self.assertEqual(response.status_code, 403); self.collection.start_collection.assert_not_called()

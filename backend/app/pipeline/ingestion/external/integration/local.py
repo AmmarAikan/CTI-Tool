@@ -136,16 +136,19 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                     state_directory: Path = PROJECT_ROOT / "data" / "external" / "state",
                     processed_directory: Path = PROJECT_ROOT / "data" / "external" / "processed",
                     review_directory: Path = PROJECT_ROOT / "data" / "external" / "review",
-                    log_path: Path = ACTIVE_LOG_PATH):
+                    log_path: Path = ACTIVE_LOG_PATH, docs_enabled: bool | None = None):
     token = os.environ.get("EXTERNAL_API_TOKEN", "")
     if not token: raise RuntimeError("EXTERNAL_API_TOKEN must be set before starting the local internal API")
     roles = frozenset(value.strip() for value in os.environ.get("EXTERNAL_API_ROLES", "operator").split(",") if value.strip())
+    if docs_enabled is None:
+        docs_enabled = os.environ.get("EXTERNAL_API_DOCS_ENABLED", "").strip().lower() == "true"
     configure_file_logging(log_path)
     runner = InProcessJobRunner(max_workers=int(os.environ.get("EXTERNAL_API_DEV_WORKERS", "2")))
     collection = DevelopmentCollectionService(runner, connector_factory=connector_factory, state_directory=state_directory,
                                               processed_directory=processed_directory, review_directory=review_directory)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
-        DevelopmentManualService(), DevelopmentSourceService(), DevelopmentJobService(runner), runner, InMemoryIdempotencyStore()))
+        DevelopmentManualService(), DevelopmentSourceService(), DevelopmentJobService(runner), runner, InMemoryIdempotencyStore()),
+        docs_enabled=docs_enabled)
 
 
 app = build_local_app()
