@@ -133,7 +133,10 @@ class ExternalDatasetExporter:
             ordered = sorted(observations, key=lambda value: canonical_json(value[1]))
             identities = {identity for _source_id, record in ordered for identity in self._identity_keys(record)}
             identity = min(identities, key=lambda value: ({"official": 0, "url": 1, "content": 2, "fallback": 3}.get(value.split(":", 1)[0], 4), value))
-            primary = deepcopy(ordered[0][1])
+            primary_observation = min(ordered, key=lambda value: (
+                value[1].get("source_type") != "manual_url", canonical_json(value[1])
+            ))
+            primary = deepcopy(primary_observation[1])
             metadata = primary.setdefault("metadata", {})
             observed = set(metadata.get("observed_in", [])); identifiers, provenance, references = set(), [], set()
             for source_id, record in ordered:

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from backend.app.pipeline.ingestion.external.application.collection_service import SourceExecutionResult
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
+from backend.app.pipeline.ingestion.external.common.json_storage import save_json
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 from backend.app.pipeline.ingestion.external.integration.api import API_PREFIX
 
@@ -40,6 +41,10 @@ def export_item(identity: str, *, classification="not_required") -> ExternalCTII
 
 class FailingExportCoordinator:
     def export(self, run_id, started_at, results):
+        raise OSError("private filesystem path must not escape")
+    def begin_manual_capture(self): pass
+    def end_manual_capture(self): return ()
+    def export_unified(self, run_id, started_at, results, manual_results, manual_review):
         raise OSError("private filesystem path must not escape")
 
 
@@ -78,6 +83,31 @@ class LocalCollectionJobTests(unittest.TestCase):
             terminal = self._wait(client, accepted.json()["job_id"], self._headers())
             self.assertEqual((terminal["state"], terminal["result"]["source_count"], terminal["result"]["accepted_records"]), ("completed", 2, 2))
             self.assertEqual([call[0] for call in executor.calls], ["the-hacker-news", "cisco-talos"])
+            self._close(app, root)
+
+    def test_all_enabled_scope_is_accepted_without_changing_legacy_selection(self):
+        scoped_executor, legacy_executor = RecordingExecutor(), RecordingExecutor()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); app = self._build(root, scoped_executor); client = TestClient(app)
+            scoped = client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self._headers())
+            scoped_terminal = self._wait(client, scoped.json()["job_id"], self._headers())
+            self.assertEqual((scoped.status_code, scoped_terminal["state"]), (202, "completed"))
+            self.assertEqual(scoped_terminal["result"]["scope"], "all_enabled")
+            self.assertEqual(scoped_terminal["result"]["export"]["status"], "completed")
+            self._close(app, root)
+            second_root = root / "legacy"; app = self._build(second_root, legacy_executor); client = TestClient(app)
+            legacy = client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers())
+            self._wait(client, legacy.json()["job_id"], self._headers())
+            self.assertEqual([call[0] for call in legacy_executor.calls], ["the-hacker-news"])
+            self._close(app, second_root)
+
+    def test_all_enabled_scope_rejects_nonempty_source_ids(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); executor = RecordingExecutor(); app = self._build(root, executor); client = TestClient(app)
+            response = client.post(f"{API_PREFIX}/jobs", json={
+                "scope": "all_enabled", "source_ids": ["the-hacker-news"]}, headers=self._headers())
+            self.assertEqual((response.status_code, response.json()["code"]), (422, "invalid_collection_request"))
+            self.assertEqual(executor.calls, [])
             self._close(app, root)
 
     def test_unknown_source_is_documented_404_before_job_creation(self):
@@ -159,6 +189,43 @@ class LocalCollectionJobTests(unittest.TestCase):
             self.assertEqual((terminal["state"], latest["dataset"], latest["accepted_records"]), ("completed", [], 0))
             self._close(app, root)
 
+    def test_unified_export_includes_only_active_manual_checkpoint_and_deduplicates_with_provenance(self):
+        registered = export_item("shared-observation")
+        original_run = "ext-original-manual-run"
+        manual = ExternalCTIItem(record_id="manual-" + "a" * 32,
+            source_item_id=registered.link, source="Manual URL", source_type="manual_url", category="manual",
+            title=registered.title, link=registered.link, content=registered.content, summary=registered.summary,
+            collected_at="2026-08-20T00:00:00Z", content_hash=registered.content_hash,
+            classification=ExternalClassification(status="not_required"),
+            metadata={"run_id": original_run, "observed_in": ["manual_url"], "lifecycle": {"active": True}})
+        retired = ExternalCTIItem(record_id="manual-" + "b" * 32,
+            source_item_id="https://example.test/retired", source="Manual URL", source_type="manual_url",
+            category="manual", title="Retired", link="https://example.test/retired",
+            content="Retired historical content.", summary="Retired historical content.",
+            collected_at="2026-08-19T00:00:00Z", content_hash=sha256_text("Retired historical content."),
+            classification=ExternalClassification(status="not_required"),
+            metadata={"run_id": "ext-retired-run", "lifecycle": {"active": False}})
+        executor = RecordingExecutor({"the-hacker-news": SourceExecutionResult(
+            "the-hacker-news", "completed", accepted_records=1, accepted=(registered,))})
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            save_json({"schema_version": "1.0", "accepted": {manual.record_id: manual.to_dict()},
+                       "retired": {retired.record_id: {"record": retired.to_dict(), "reason": "retired"}}},
+                      root / "state" / "manual_checkpoints.json")
+            app = self._build(root, executor); client = TestClient(app)
+            queued = client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self._headers()).json()
+            terminal = self._wait(client, queued["job_id"], self._headers())
+            latest = client.get(f"{API_PREFIX}/exports/latest", headers=self._headers()).json()
+            self.assertEqual(terminal["result"]["export"]["run_id"], terminal["result"]["run_id"])
+            self.assertEqual(len(latest["dataset"]), 1)
+            record = latest["dataset"][0]
+            self.assertEqual((record["record_id"], record["collected_at"], record["metadata"]["run_id"]),
+                             (manual.record_id, manual.collected_at, original_run))
+            self.assertTrue({"manual_url", "the-hacker-news"}.issubset(set(record["metadata"]["observed_in"])))
+            self.assertNotIn(retired.record_id, str(latest))
+            self.assertEqual(latest["manifest"]["duplicates_removed"], 1)
+            self._close(app, root)
+
     def test_review_records_are_preserved_in_run_review_artifact(self):
         review = export_item("guid-review", classification="error")
         executor = RecordingExecutor({"the-hacker-news": SourceExecutionResult(
@@ -199,6 +266,31 @@ class LocalCollectionJobTests(unittest.TestCase):
             root = Path(folder); app = self._build(root, RecordingExecutor()); client = TestClient(app)
             response = client.get(f"{API_PREFIX}/exports/latest", headers=self._headers())
             self.assertEqual((response.status_code, response.json()["code"]), (404, "export_not_found"))
+            self._close(app, root)
+
+    def test_unified_export_failure_preserves_previous_latest_export(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); first_app = self._build(root, RecordingExecutor({"the-hacker-news": SourceExecutionResult(
+                "the-hacker-news", "completed", accepted_records=1, accepted=(export_item("previous-valid"),))}))
+            first_client = TestClient(first_app)
+            queued = first_client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers()).json()
+            self._wait(first_client, queued["job_id"], self._headers())
+            previous = first_client.get(f"{API_PREFIX}/exports/latest", headers=self._headers()).json()["run_id"]
+            self._close(first_app, root)
+            environment = {"EXTERNAL_API_TOKEN": "collection-test-token", "EXTERNAL_API_ROLES": "operator"}
+            with patch.dict(os.environ, environment):
+                local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
+                app = local.build_local_app(collection_executor=RecordingExecutor(), collection_exporter=FailingExportCoordinator(),
+                    dark_web_config_path=root / "missing-dark-web.json", state_directory=root / "state",
+                    processed_directory=root / "processed", review_directory=root / "review",
+                    exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
+                    manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
+                    manual_state_path=root / "state" / "manual.json", log_path=root / "logs" / "cti_tool.log")
+            client = TestClient(app)
+            failed_job = client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self._headers()).json()
+            terminal = self._wait(client, failed_job["job_id"], self._headers())
+            self.assertEqual((terminal["state"], terminal["result"]["export"]["status"]), ("partial", "failed"))
+            self.assertEqual(client.get(f"{API_PREFIX}/exports/latest", headers=self._headers()).json()["run_id"], previous)
             self._close(app, root)
 
     @staticmethod

@@ -115,9 +115,11 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
         status = str(getattr(result, "status", "failed"))
         if source.source_type == "dark_web" and status == "unavailable": status = "failed"
         errors = list(getattr(result, "errors", []))
-        return SourceExecutionResult(source.source_id, status, len(accepted), len(review), len(rejected),
-                                     int(getattr(result, "skipped_items", 0)), len(errors), tuple(accepted),
-                                     tuple([*review, *rejected]), tuple(str(value) for value in errors))
+        return SourceExecutionResult(source_id=source.source_id, status=status, accepted_records=len(accepted),
+            review_records=len(review), rejected_records=len(rejected),
+            skipped_records=int(getattr(result, "skipped_items", 0)), error_count=len(errors),
+            accepted=tuple(accepted), review=tuple(review), errors=tuple(str(value) for value in errors),
+            rejected=tuple(rejected))
 
     def _connector(self, source: RegisteredSource, state: dict[str, Any]):
         raw = source.configuration
@@ -385,6 +387,13 @@ class LocalCollectionExportCoordinator(CollectionExportCoordinator):
     def __init__(self, exporter: ExternalDatasetExporter, manual_sink: LocalManualRecordSink) -> None:
         self.exporter, self.manual_sink = exporter, manual_sink
 
+    def begin_manual_capture(self) -> None:
+        self.manual_sink.begin()
+
+    def end_manual_capture(self) -> tuple[tuple[ExternalCTIItem, str], ...]:
+        captured, _material = self.manual_sink.end()
+        return captured
+
     def export(self, run_id: str, started_at: str, results: tuple[SourceExecutionResult, ...]) -> dict[str, Any]:
         manifest = RunManifest(run_id=run_id, started_at=started_at)
         outputs = tuple(RunSourceOutput(run_id, value.source_id, value.status, value.accepted, value.review, value.errors)
@@ -395,6 +404,27 @@ class LocalCollectionExportCoordinator(CollectionExportCoordinator):
         return {"status": "completed", "run_id": run_id, "dataset_sha256": exported.manifest["dataset_sha256"],
                 "accepted_records": exported.manifest["accepted_records"], "review_records": exported.manifest["review_records"]}
 
+    def export_unified(self, run_id: str, started_at: str, results: tuple[SourceExecutionResult, ...],
+                       manual_results: dict[str, dict[str, Any]],
+                       manual_review: tuple[ExternalCTIItem, ...]) -> dict[str, Any]:
+        manifest = RunManifest(run_id=run_id, started_at=started_at)
+        outputs = [RunSourceOutput(run_id, value.source_id, value.status, value.accepted, value.review, value.errors)
+                   for value in results]
+        active_manual = self.manual_sink.accepted()
+        if active_manual or manual_review:
+            outputs.append(RunSourceOutput(run_id, "manual_url", "completed", active_manual, manual_review))
+        for root_id, value in sorted(manual_results.items()):
+            if value.get("status") == "failed":
+                outputs.append(RunSourceOutput(run_id, root_id, "failed", errors=("manual_source_failed",)))
+        exported = self.exporter.export(manifest, tuple(outputs))
+        return {"status": "completed", "run_id": run_id,
+                "dataset_sha256": exported.manifest["dataset_sha256"],
+                "accepted_records": exported.manifest["accepted_records"],
+                "review_records": exported.manifest["review_records"],
+                "dataset_file": exported.dataset_path.name,
+                "manifest_file": exported.manifest_path.name,
+                "review_file": exported.review_path.name}
+
 
 class ExportingManualSourceService(ManualSourceService):
     """Export explicit Manual Source checkpoints after a material operation."""
@@ -404,6 +434,7 @@ class ExportingManualSourceService(ManualSourceService):
         self.delegate, self.sink, self.exporter, self.reader = delegate, sink, exporter, reader
 
     def validate_url(self, url: str) -> str: return self.delegate.validate_url(url)
+    def list_tracked_roots(self): return self.delegate.list_tracked_roots()
     def add_manual_source(self, url: str, *, requested_by: str) -> ManualSourceResult:
         return self._run(lambda: self.delegate.add_manual_source(url, requested_by=requested_by))
     def recheck_url(self, url: str, *, requested_by: str, force: bool = False) -> ManualSourceResult:
@@ -471,7 +502,6 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                                         provenance_resolver=export_reader.earliest_run_id,
                                         listing_state_manager=JsonStateManager(manual_state_path))
     exporter = collection_exporter or LocalCollectionExportCoordinator(canonical_exporter, manual_sink)
-    collection = CanonicalCollectionService(runner, registry, executor, exporter)
     resolved_policy = manual_policy
     resolved_adapters = build_registered_manual_adapters(registry)
     if dark_sources and resolved_dark_client is not None:
@@ -487,6 +517,7 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                                             adapters=resolved_adapters, router=ManualURLRouter(registry), state_path=manual_state_path,
                                             processed_directory=processed_directory, review_directory=review_directory,
                                             record_sink=manual_sink)
+    collection = CanonicalCollectionService(runner, registry, executor, exporter, manual_service=manual_delegate)
     manual = ExportingManualSourceService(manual_delegate, manual_sink, canonical_exporter, export_reader)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
         manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner, InMemoryIdempotencyStore()),

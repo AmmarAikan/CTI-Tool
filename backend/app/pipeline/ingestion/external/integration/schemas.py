@@ -17,6 +17,10 @@ class HealthResponse(StrictModel):
 
 class CollectionRequestBody(StrictModel):
     source_ids: list[str] = Field(default_factory=list, max_length=100)
+    scope: Literal["all_enabled"] | None = Field(
+        default=None,
+        description="Run all enabled registered sources and active tracked Manual roots in one job and validated export.",
+    )
     force: bool = False
     options: dict[str, Any] = Field(default_factory=dict)
 

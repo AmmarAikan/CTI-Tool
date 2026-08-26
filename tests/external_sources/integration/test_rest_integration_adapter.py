@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 import json
 from pathlib import Path
 
-from backend.app.pipeline.ingestion.external.application.collection_service import CollectionService, JobAccepted
+from backend.app.pipeline.ingestion.external.application.collection_service import AllEnabledRunActiveError, CollectionService, JobAccepted
 from backend.app.pipeline.ingestion.external.application.job_service import JobService
 from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceService
 from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
@@ -89,6 +89,9 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         collection_responses = schema["paths"][f"{API_PREFIX}/jobs"]["post"]["responses"]
         self.assertTrue({"404", "409", "422", "503"}.issubset(collection_responses))
         self.assertIn("IntegrationErrorResponse", str(collection_responses["503"]))
+        request_schema = schema["components"]["schemas"]["CollectionRequestBody"]
+        self.assertIn("all_enabled", str(request_schema["properties"]["scope"]))
+        self.assertIn("must not be combined", collection_responses["422"]["description"].lower())
         export_responses = schema["paths"][f"{API_PREFIX}/exports/latest"]["get"]["responses"]
         self.assertIn("404", export_responses)
         self.assertIn("IntegrationErrorResponse", str(export_responses["404"]))
@@ -106,6 +109,12 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         self.collection.start_collection.assert_called_once(); self.assertEqual(self.collection.start_collection.call_args.args[0].requested_by, "operator")
         schema = json.loads((Path(__file__).resolve().parents[3] / "contracts/job_status.schema.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(first.json())
+
+    def test_overlapping_all_enabled_command_returns_safe_conflict(self):
+        self.collection.start_collection.side_effect = AllEnabledRunActiveError("internal detail")
+        response = self.client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self.auth())
+        self.assertEqual((response.status_code, response.json()["code"]), (409, "all_enabled_job_active"))
+        self.assertNotIn("internal detail", response.text)
 
     def test_manual_url_validation_and_job_creation(self):
         invalid = self.client.post(f"{API_PREFIX}/manual-sources", json={"url": "file:///secret"}, headers=self.auth())

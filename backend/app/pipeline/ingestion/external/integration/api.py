@@ -10,7 +10,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from backend.app.pipeline.ingestion.external.application.collection_service import (
-    CollectionRequest, CollectionRequestError, CollectionService, DisabledSourceError,
+    AllEnabledRunActiveError, CollectionRequest, CollectionRequestError, CollectionService, DisabledSourceError,
     ManualSourceCommandError, UnknownSourceError,
 )
 from backend.app.pipeline.ingestion.external.application.job_service import JobService
@@ -28,8 +28,8 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
 API_PREFIX = "/api/v1/external-sources"
 COLLECTION_ERROR_RESPONSES = {
     404: {"model": IntegrationErrorResponse, "description": "One or more source IDs are not registered."},
-    409: {"model": IntegrationErrorResponse, "description": "A source is disabled or belongs to the Manual Source operation."},
-    422: {"model": IntegrationErrorResponse, "description": "The collection request is invalid."},
+    409: {"model": IntegrationErrorResponse, "description": "A source is disabled, belongs to Manual Source, or an all-enabled job is already active."},
+    422: {"model": IntegrationErrorResponse, "description": "The collection request is invalid; scope=all_enabled must not be combined with non-empty source_ids."},
     503: {"model": IntegrationErrorResponse, "description": "The collection service could not accept the command."},
 }
 
@@ -101,7 +101,11 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         cached = _cached(services, current, "start_collection", idempotency_key)
         if cached: return JobStatusResponse.model_validate(cached)
         command_id = _id("cmd")
-        try: accepted = services.collection_service.start_collection(CollectionRequest(tuple(body.source_ids), body.force, current.subject, body.options))
+        try: accepted = services.collection_service.start_collection(CollectionRequest(
+            source_ids=tuple(body.source_ids), scope=body.scope, force=body.force,
+            requested_by=current.subject, options=body.options,
+        ))
+        except AllEnabledRunActiveError: raise APIError(409, "all_enabled_job_active", "an all-enabled collection job is already active") from None
         except UnknownSourceError: raise APIError(404, "source_not_found", "one or more source identifiers were not found") from None
         except DisabledSourceError: raise APIError(409, "source_disabled", "one or more selected sources are disabled") from None
         except ManualSourceCommandError: raise APIError(409, "manual_source_route_required", "manual URLs must use the manual-source operation") from None

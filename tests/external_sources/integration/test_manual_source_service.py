@@ -15,6 +15,7 @@ from backend.app.pipeline.ingestion.external.classification.classification_servi
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
+from backend.app.pipeline.ingestion.external.common.json_storage import save_json
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy
 from backend.app.pipeline.ingestion.external.manual_source.url_router import ManualURLRouter
@@ -102,6 +103,56 @@ class ManualSourceServiceTests(unittest.TestCase):
         schema = json.loads((Path(__file__).resolve().parents[3] / "contracts" / "external_cti_item.schema.json").read_text(encoding="utf-8"))
         Draft202012Validator(schema).validate(stored[0][0].to_dict())
         self.assertEqual(crawler.calls[1][1]["etag"], '"v1"')
+
+    def test_explicit_submission_registers_stable_safe_active_root(self):
+        url = "https://example.test/report"
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JsonStateManager(Path(folder) / "state.json")
+            service = self.service(FakeCrawler([crawl(url)]), manager)
+            service.add_manual_source(url, requested_by="tester")
+            roots = service.list_tracked_roots()
+            state = manager.load()
+        self.assertEqual(len(roots), 1)
+        self.assertTrue(roots[0].root_id.startswith("manual-root-"))
+        self.assertEqual(roots[0].canonical_url, url)
+        self.assertNotIn(url, str(roots[0].safe_dict()))
+        self.assertEqual(state["tracked_roots"][roots[0].root_id]["origin"], "explicit")
+
+    def test_listing_children_are_not_registered_as_roots(self):
+        listing = "https://example.test/index"
+        children = ("https://example.test/article-one", "https://example.test/article-two")
+        crawler = FakeCrawler([crawl(listing, page_type="listing", links=children), crawl(children[0]), crawl(children[1])])
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JsonStateManager(Path(folder) / "state.json")
+            service = self.service(crawler, manager)
+            service.add_manual_source(listing, requested_by="tester")
+            roots = service.list_tracked_roots()
+        self.assertEqual([root.canonical_url for root in roots], [listing])
+
+    def test_legacy_root_migration_excludes_children_and_inactive_roots_idempotently(self):
+        listing = "https://example.test/index"
+        child = "https://example.test/article-one"
+        standalone = "https://example.test/standalone"
+        inactive = "https://example.test/retired"
+        historical = {"custom_history": {"first_seen": "2024-01-01T00:00:00Z"}}
+        legacy = {"schema_version": "1.0", "sources": {}, "items": {}, "runs": {}, "urls": {
+            listing: {"known_sub_links": [child], "last_checked": "2025-01-01T00:00:00Z"},
+            child: {"active": True, "last_checked": "2025-01-02T00:00:00Z"},
+            standalone: {"active": True, **historical},
+            inactive: {"active": False, "retired_at": "2025-01-03T00:00:00Z"},
+        }}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "state.json"; save_json(legacy, path)
+            service = self.service(FakeCrawler([]), JsonStateManager(path))
+            first = service.list_tracked_roots(); migrated = JsonStateManager(path).load()
+            second = service.list_tracked_roots(); repeated = JsonStateManager(path).load()
+        self.assertEqual({root.canonical_url for root in first}, {listing, standalone})
+        self.assertEqual(first, second)
+        self.assertEqual(migrated, repeated)
+        self.assertEqual(migrated["urls"][standalone]["custom_history"], historical["custom_history"])
+        indexed = migrated["tracked_roots"]
+        self.assertFalse(indexed[service._root_id(inactive)]["active"])
+        self.assertNotIn(service._root_id(child), indexed)
 
     def test_rule_fingerprint_change_forces_downstream_rerun_without_conditionals(self):
         url = "https://example.test/report"

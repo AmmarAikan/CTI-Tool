@@ -34,7 +34,9 @@ class IntegrationJob:
 
 
 class JobRunner(Protocol):
-    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None) -> IntegrationJob: ...
+    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None,
+               cancellation_event: threading.Event | None = None,
+               on_queued_cancel: Callable[[], None] | None = None) -> IntegrationJob: ...
     def get(self, job_id: str) -> IntegrationJob | None: ...
     def cancel(self, job_id: str) -> IntegrationJob | None: ...
 
@@ -45,11 +47,18 @@ class InProcessJobRunner:
     def __init__(self, *, max_workers: int = 2) -> None:
         self._executor = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="external-api-dev")
         self._jobs: dict[str, IntegrationJob] = {}
+        self._cancellation_events: dict[str, threading.Event] = {}
+        self._queued_cancel_callbacks: dict[str, Callable[[], None]] = {}
         self._lock = threading.Lock()
 
-    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None) -> IntegrationJob:
+    def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None,
+               cancellation_event: threading.Event | None = None,
+               on_queued_cancel: Callable[[], None] | None = None) -> IntegrationJob:
         job = IntegrationJob(f"job-{secrets.token_hex(12)}", command_id)
-        with self._lock: self._jobs[job.job_id] = job
+        with self._lock:
+            self._jobs[job.job_id] = job
+            if cancellation_event is not None: self._cancellation_events[job.job_id] = cancellation_event
+            if on_queued_cancel is not None: self._queued_cancel_callbacks[job.job_id] = on_queued_cancel
         self._executor.submit(self._run, job.job_id, operation, dict(safe_context or {}))
         return job
 
@@ -57,13 +66,19 @@ class InProcessJobRunner:
         with self._lock: return self._jobs.get(job_id)
 
     def cancel(self, job_id: str) -> IntegrationJob | None:
+        callback = None
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None: return None
-            if job.state == "queued": job.state = "cancelled"
+            if job.state == "queued":
+                job.state = "cancelled"
+                callback = self._queued_cancel_callbacks.pop(job_id, None)
             elif job.state == "running": job.state = "cancellation_requested"; job.cancellation_requested = True
+            event = self._cancellation_events.get(job_id)
+            if event is not None: event.set()
             job.updated_at = utc_now()
-            return job
+        if callback is not None: callback()
+        return job
 
     def shutdown(self, *, wait: bool = True) -> None:
         self._executor.shutdown(wait=wait)
@@ -78,7 +93,7 @@ class InProcessJobRunner:
             result = asdict(value) if is_dataclass(value) else value if isinstance(value, dict) else {"status": str(value)}
             with self._lock:
                 job = self._jobs[job_id]
-                if job.cancellation_requested: job.state = "cancelled"
+                if job.cancellation_requested: job.state, job.result = "cancelled", result
                 elif result.get("status") == "partial": job.state, job.result = "partial", result
                 elif result.get("status") == "failed":
                     job.state, job.result = "failed", result
