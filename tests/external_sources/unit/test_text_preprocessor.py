@@ -58,6 +58,18 @@ class TextPreprocessorTests(unittest.TestCase):
         second = preprocessor.process("Alpha\r\n\r\nBeta &amp; Gamma")
         self.assertEqual(first, second)
 
+    def test_truncates_configured_trailing_boilerplate_and_keeps_article_substantial(self) -> None:
+        source = (FIXTURES / "cpu_article_with_trailing_boilerplate.txt").read_text(encoding="utf-8")
+        result = TextPreprocessor(RULES).process(source)
+        self.assertIn("CPU diagnostic evidence", result.text)
+        self.assertIn("References", result.text)
+        self.assertIn("CVE-2026-12345", result.text)
+        self.assertNotIn("Recent Posts", result.text)
+        self.assertNotIn("Want more?", result.text)
+        self.assertNotIn("Unrelated story card", result.text)
+        self.assertGreater(len(result.text), 300)
+        self.assertGreaterEqual(result.removed_boilerplate_lines, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,7 +14,7 @@ from backend.app.pipeline.ingestion.external.common.hashing import sha256_json, 
 from backend.app.pipeline.preprocessing.cleaner import TextCleaner
 
 
-IMPLEMENTATION_VERSION = "external_text_preprocessor_v1"
+IMPLEMENTATION_VERSION = "external_text_preprocessor_v2"
 SPACE_RE = re.compile(r"[\t \f\v]+")
 HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
 
@@ -62,6 +62,11 @@ class TextPreprocessor:
         if not isinstance(patterns, list) or not all(isinstance(item, str) for item in patterns):
             raise ValueError("boilerplate_patterns must be a list of strings")
         self.boilerplate_patterns = tuple(re.compile(item) for item in patterns)
+        trailing_patterns = self.rules.get("trailing_boilerplate_start_patterns", [])
+        if not isinstance(trailing_patterns, list) or not all(isinstance(item, str) for item in trailing_patterns):
+            raise ValueError("trailing_boilerplate_start_patterns must be a list of strings")
+        self.trailing_boilerplate_start_patterns = tuple(re.compile(item) for item in trailing_patterns)
+        self.trailing_boilerplate_min_content_chars = max(0, int(self.rules.get("trailing_boilerplate_min_content_chars", 200)))
         self.preserve_fenced_code = bool(self.rules.get("preserve_fenced_code_blocks", True))
         self.rules_hash = sha256_json(self.rules)
         self.cleaner = cleaner or TextCleaner()
@@ -86,6 +91,11 @@ class TextPreprocessor:
                 continue
 
             line = self.cleaner.clean(raw_line)
+            preceding_chars = sum(len(value) for value in output_lines)
+            if (line and preceding_chars >= self.trailing_boilerplate_min_content_chars
+                    and any(pattern.search(line) for pattern in self.trailing_boilerplate_start_patterns)):
+                removed += 1
+                break
             if line and any(pattern.search(line) for pattern in self.boilerplate_patterns):
                 removed += 1
                 continue

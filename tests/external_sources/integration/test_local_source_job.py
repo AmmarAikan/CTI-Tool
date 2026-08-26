@@ -64,6 +64,7 @@ class LocalSourceJobTests(unittest.TestCase):
             local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             root = Path(folder)
             app = local.build_local_app(connector_factory=connector_factory, state_directory=root / "state",
+                                        dark_web_config_path=root / "missing-dark-web.json",
                                         processed_directory=root / "processed", review_directory=root / "review",
                                         exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
                                         manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
@@ -91,13 +92,15 @@ class LocalSourceJobTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, base_environment, clear=True):
             local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             root = Path(folder)
-            disabled = local.build_local_app(log_path=root / "disabled.log")
+            disabled = local.build_local_app(log_path=root / "disabled.log",
+                                             dark_web_config_path=root / "missing-dark-web.json")
             self.assertEqual(TestClient(disabled).get("/docs").status_code, 404)
             disabled.state.services.job_runner.shutdown()
             self._close_file_handler(root / "disabled.log")
 
             with patch.dict(os.environ, {**base_environment, "EXTERNAL_API_DOCS_ENABLED": "true"}, clear=True):
-                enabled = local.build_local_app(log_path=root / "enabled.log")
+                enabled = local.build_local_app(log_path=root / "enabled.log",
+                                                dark_web_config_path=root / "missing-dark-web.json")
                 client = TestClient(enabled)
                 self.assertEqual(client.get("/docs").status_code, 200)
                 self.assertEqual(client.get("/openapi.json").status_code, 200)

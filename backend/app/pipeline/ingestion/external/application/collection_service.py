@@ -86,7 +86,7 @@ class CollectionService(ABC):
         """Validate a collection request and enqueue a job."""
 
     @abstractmethod
-    def collect_source(self, source_id: str, *, requested_by: str) -> JobAccepted:
+    def collect_source(self, source_id: str, *, requested_by: str, force: bool = False) -> JobAccepted:
         """Validate and enqueue collection for one approved source."""
 
 
@@ -106,12 +106,12 @@ class CanonicalCollectionService(CollectionService):
                                  safe_context={"source_id": "multiple"})
         return JobAccepted(job.job_id, command_id=command_id)
 
-    def collect_source(self, source_id: str, *, requested_by: str) -> JobAccepted:
+    def collect_source(self, source_id: str, *, requested_by: str, force: bool = False) -> JobAccepted:
         del requested_by
         source_ids = self._validated_ids((source_id,))
         command_id = f"cmd-{secrets.token_hex(12)}"
         run_id, started_at = generate_run_id(), utc_now_iso()
-        job = self.runner.submit(command_id, lambda: self._run(source_ids, force=False, command_id=command_id,
+        job = self.runner.submit(command_id, lambda: self._run(source_ids, force=force, command_id=command_id,
                                                                 run_id=run_id, started_at=started_at),
                                  safe_context={"source_id": source_id})
         return JobAccepted(job.job_id, command_id=command_id)

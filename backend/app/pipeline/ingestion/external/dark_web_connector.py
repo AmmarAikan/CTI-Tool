@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import socket
 import time
 from dataclasses import dataclass, field
@@ -28,6 +29,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[5]
 LOCAL_CONFIG = PROJECT_ROOT / "config" / "dark_web_sources.local.json"
 ALLOWED_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
 NOISE_TAGS = ("script", "style", "noscript", "template", "nav", "header", "footer", "aside", "form")
+SAFE_SOURCE_ID = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+V3_ONION_LABEL = re.compile(r"^[a-z2-7]{56}$")
 
 
 class DarkWebConfigurationError(ValueError):
@@ -165,17 +168,50 @@ def load_dark_web_config(path: str | Path = LOCAL_CONFIG, *, environ: dict[str, 
         raise DarkWebConfigurationError("Tor proxy host and port must be explicitly configured")
     try: proxy = TorProxy(str(host), int(raw_port))
     except (TypeError, ValueError) as exc: raise DarkWebConfigurationError("Tor proxy port must be an integer") from exc
-    sources = []
+    sources, source_ids = [], set()
     for raw in values.get("sources", []):
         if not isinstance(raw, dict): continue
-        allowed_paths = tuple(str(value) for value in raw.get("allowed_paths", []))
-        source = DarkWebSource(str(raw.get("id") or ""), str(raw.get("name") or ""), str(raw.get("url") or ""), allowed_paths,
-                               bool(raw.get("enabled", False)), str(raw.get("category") or "dark_web_cti"),
-                               max(1, min(int(raw.get("max_items", 20)), 100)), max(0, float(raw.get("rate_limit_seconds", 2))), bool(raw.get("trusted_curated", False)))
-        if not source.source_id or not source.name or not allowed_paths or not source.allows(source.url):
-            raise DarkWebConfigurationError("dark-web source is incomplete or outside its own policy")
+        raw_id = str(raw.get("id") or "")
+        if raw_id in source_ids:
+            raise _source_configuration_error(raw_id, "duplicate_source_id")
+        source_ids.add(raw_id)
+        enabled = bool(raw.get("enabled", False))
+        try:
+            allowed_paths = tuple(str(value) for value in raw.get("allowed_paths", []))
+            source = DarkWebSource(raw_id, str(raw.get("name") or ""), str(raw.get("url") or ""), allowed_paths,
+                                   enabled, str(raw.get("category") or "dark_web_cti"),
+                                   max(1, min(int(raw.get("max_items", 20)), 100)), max(0, float(raw.get("rate_limit_seconds", 2))), bool(raw.get("trusted_curated", False)))
+        except (TypeError, ValueError) as exc:
+            if enabled: raise _source_configuration_error(raw_id, "invalid_limits") from exc
+            continue
+        reason = _source_validation_reason(source)
+        if reason:
+            if enabled: raise _source_configuration_error(raw_id, reason)
+            continue
         sources.append(source)
     return proxy, tuple(sources)
+
+
+def _source_validation_reason(source: DarkWebSource) -> str | None:
+    if not SAFE_SOURCE_ID.fullmatch(source.source_id): return "invalid_source_id"
+    if not source.name.strip(): return "missing_name"
+    if not source.allowed_paths: return "missing_allowed_paths"
+    try: parsed = urlsplit(source.url)
+    except ValueError: return "invalid_url"
+    if parsed.scheme not in {"http", "https"}: return "invalid_url_scheme"
+    if parsed.username or parsed.password: return "credentials_not_allowed"
+    hostname = (parsed.hostname or "").lower()
+    if not hostname.endswith(".onion"): return "invalid_onion_hostname"
+    label = hostname[:-6]
+    if len(label) != 56: return "invalid_v3_onion_length"
+    if not V3_ONION_LABEL.fullmatch(label): return "invalid_v3_onion_hostname"
+    if not source.allows(source.url): return "source_url_outside_allowed_paths"
+    return None
+
+
+def _source_configuration_error(source_id: str, reason: str) -> DarkWebConfigurationError:
+    safe_id = source_id if SAFE_SOURCE_ID.fullmatch(source_id) else "invalid-source-id"
+    return DarkWebConfigurationError(f"invalid dark-web source source_id={safe_id} reason={reason}")
 
 
 @dataclass(slots=True)
@@ -204,14 +240,14 @@ class DarkWebConnector(ExternalConnector):
     def collect(self) -> Iterable[RawRecord]:
         return (item.to_raw_record() for item in self.collect_result().accepted_items)
 
-    def collect_result(self, *, check_proxy: bool = True) -> DarkWebCollectionResult:
+    def collect_result(self, *, check_proxy: bool = True, force: bool = False) -> DarkWebCollectionResult:
         result = DarkWebCollectionResult()
         if check_proxy and not self.client.tor_available():
             result.status, result.errors = "unavailable", ["tor_proxy_unavailable"]
             return result
         for source in self.sources:
             if not source.enabled: continue
-            try: self._collect_source(source, result)
+            try: self._collect_source(source, result, force=force)
             except TorUnavailableError: result.errors.append(f"{source.source_id}:tor_unavailable")
             except Exception: result.errors.append(f"{source.source_id}:source_failed")
         if result.errors and not (result.accepted_items or result.review_items or result.rejected_items): result.status = "failed"
@@ -234,10 +270,10 @@ class DarkWebConnector(ExternalConnector):
         except Exception: result.status, result.errors = "failed", ["source_failed"]
         return result
 
-    def _collect_source(self, source: DarkWebSource, result: DarkWebCollectionResult) -> None:
+    def _collect_source(self, source: DarkWebSource, result: DarkWebCollectionResult, *, force: bool = False) -> None:
         source_state = self.state["sources"].setdefault(source.source_id, {})
         source_state["source_config_hash"] = sha256_json({"id": source.source_id, "url": source.url, "allowed_paths": source.allowed_paths})
-        response = self._fetch(source, source.url)
+        response = self._fetch(source, source.url, force=force)
         if response is None: result.skipped_items += 1; return
         html = response.content.decode("utf-8", errors="replace")
         text = self._extract_text(html)
@@ -247,7 +283,7 @@ class DarkWebConnector(ExternalConnector):
             for index, child in enumerate(children):
                 self.sleeper(source.rate_limit_seconds)
                 try:
-                    child_response = self._fetch(source, child)
+                    child_response = self._fetch(source, child, force=force)
                     if child_response is None: result.skipped_items += 1; continue
                     self._process_page(source, child, child_response, result, parent_url=source.url)
                 except Exception: result.errors.append(f"{source.source_id}:item_failed")
@@ -255,16 +291,17 @@ class DarkWebConnector(ExternalConnector):
             self._process_page(source, source.url, response, result)
         source_state.update({"last_checked": self._now(), "last_successful_run": self._now()})
 
-    def _fetch(self, source: DarkWebSource, url: str) -> TorResponse | None:
+    def _fetch(self, source: DarkWebSource, url: str, *, force: bool = False) -> TorResponse | None:
         key = sha256_text(url)
         url_state = self.state["urls"].setdefault(key, {})
-        response = self.client.get(source, url, etag=url_state.get("etag"), last_modified=url_state.get("last_modified"))
+        response = self.client.get(source, url, etag=None if force else url_state.get("etag"),
+                                   last_modified=None if force else url_state.get("last_modified"))
         url_state["last_checked"] = self._now()
         if response.status_code == 304: return None
         if response.status_code != 200: raise DarkWebRequestError("source returned unsuccessful status")
         raw_hash, previous = sha256_text(response.content.decode("utf-8", errors="replace")), url_state.get("raw_content_hash")
         url_state.update({"etag": response.etag, "last_modified": response.last_modified, "raw_content_hash": raw_hash})
-        if previous == raw_hash: return None
+        if previous == raw_hash and not force: return None
         url_state["last_changed"] = self._now()
         return response
 
@@ -274,28 +311,31 @@ class DarkWebConnector(ExternalConnector):
         processed = self.content_processor.process(extracted)
         title = (soup.title.get_text(" ", strip=True) if soup.title else source.name) or source.name
         record_id = f"dark-{sha256_text(url).split(':', 1)[1][:32]}"
+        item_state = self.state["items"].setdefault(record_id, {})
+        checked_at = self._now()
+        original_stage_time = item_state.get("stages", {}).get("extraction", {}).get("timestamp")
+        collected_at = str(item_state.get("collected_at") or original_stage_time or checked_at)
         item = ExternalCTIItem(record_id=record_id, source_item_id=sha256_text(url), source=source.name, source_type="dark_web",
                                category=source.category, title=title, link=url, content=processed.export_content,
-                               summary=processed.export_content[:300], collected_at=self._now(), content_hash=sha256_text(processed.export_content),
+                               summary=processed.export_content[:300], collected_at=collected_at, content_hash=sha256_text(processed.export_content),
                                classification=ExternalClassification(status="not_required") if source.trusted_curated else ExternalClassification(),
                                metadata={"network": "tor", "collection_method": "configured_onion_get", "source_id": source.source_id,
                                          "parent_listing": parent_url, **processed.metadata})
         classified_result = self.classification_service.classify_item(item)
         classified = classified_result.item
-        item_state = self.state["items"].setdefault(record_id, {})
         stable = classified.to_dict(); stable.pop("collected_at", None)
         record_hash = sha256_json(stable)
-        checked_at = self._now()
         stages = {
             "extraction": {"input_hash": sha256_text(html), "output_hash": sha256_text(extracted), "status": "completed", "timestamp": checked_at, "version": "dark_web_html_extraction_v1"},
             "cleaning": {"input_hash": processed.preprocessing.input_hash, "output_hash": processed.preprocessing.output_hash, "status": "completed", "timestamp": checked_at, "version": processed.preprocessing.implementation_version},
             "privacy": {"input_hash": processed.privacy.input_hash, "output_hash": processed.privacy.output_hash, "status": processed.privacy.status, "timestamp": checked_at, "version": processed.privacy.implementation_version},
             "classification": {"input_hash": classified.content_hash, "output_hash": classified.metadata.get("classification_stage", {}).get("output_hash"), "status": classified.classification.status, "timestamp": checked_at, "version": classified.classification.model_version},
         }
-        item_state.update({"raw_content_hash": sha256_text(html), "extracted_content_hash": sha256_text(extracted),
+        item_state.update({"collected_at": collected_at, "last_checked": checked_at,
+                           "raw_content_hash": sha256_text(html), "extracted_content_hash": sha256_text(extracted),
                            "clean_content_hash": processed.preprocessing.output_hash, "privacy_output_hash": processed.privacy.output_hash,
                            "classification_output_hash": classified.metadata.get("classification_stage", {}).get("output_hash"),
-                           "record_hash": record_hash, "last_checked": checked_at, "stages": stages})
+                           "record_hash": record_hash, "stages": stages})
         if processed.review_required or not processed.export_content or classified_result.disposition == "review": result.review_items.append(classified)
         elif classified_result.disposition == "rejected": result.rejected_items.append(classified)
         else: result.accepted_items.append(classified)

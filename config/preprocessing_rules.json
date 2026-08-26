@@ -1,8 +1,17 @@
 {
   "schema_version": "1.0",
-  "rules_version": "1.0",
+  "rules_version": "1.1",
   "unicode_normalization": "NFC",
   "preserve_fenced_code_blocks": true,
+  "trailing_boilerplate_min_content_chars": 200,
+  "trailing_boilerplate_start_patterns": [
+    "(?i)^recent posts?:?$",
+    "(?i)^related (?:articles?|posts?|stories|content):?$",
+    "(?i)^recommended (?:articles?|posts?|stories|reading):?$",
+    "(?i)^want more\\?\\s*(?:go )?back to (?:the )?(?:index|home(?:page)?).*$",
+    "(?i)^(?:subscribe|sign up) (?:for|to) .*(?:newsletter|updates).*$",
+    "(?i)^more from (?:this|the) (?:site|blog|author).*$"
+  ],
   "boilerplate_patterns": [
     "(?i)^advertisement$",
     "(?i)^sponsored content$",

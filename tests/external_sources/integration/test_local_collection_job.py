@@ -59,6 +59,7 @@ class LocalCollectionJobTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             return local.build_local_app(collection_executor=executor, state_directory=root / "state",
+                                         dark_web_config_path=root / "missing-dark-web.json",
                                          processed_directory=root / "processed", review_directory=root / "review",
                                          exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
                                          manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
@@ -180,6 +181,7 @@ class LocalCollectionJobTests(unittest.TestCase):
             with patch.dict(os.environ, environment):
                 local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
                 app = local.build_local_app(collection_executor=RecordingExecutor(), collection_exporter=FailingExportCoordinator(),
+                    dark_web_config_path=root / "missing-dark-web.json",
                     state_directory=root / "state", processed_directory=root / "processed", review_directory=root / "review",
                     exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
                     manual_checkpoint_path=root / "state" / "manual_checkpoints.json",

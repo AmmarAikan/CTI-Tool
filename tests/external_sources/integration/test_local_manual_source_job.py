@@ -103,6 +103,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
         with patch.dict(os.environ, environment):
             local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             app = local.build_local_app(
+                dark_web_config_path=root / "missing-dark-web.json",
                 manual_policy=ManualURLPolicy(resolver=PUBLIC), manual_crawler=crawler,
                 manual_classification_service=classification, manual_state_path=root / "state" / "manual_sources.json",
                 processed_directory=root / "processed", review_directory=root / "review", log_path=root / "logs" / "cti_tool.log",

@@ -38,7 +38,7 @@ from backend.app.pipeline.ingestion.external.manual_source.adapters import (
     DarkWebManualAdapter, build_registered_manual_adapters,
 )
 from backend.app.pipeline.ingestion.external.dark_web_connector import (
-    DarkWebConnector, TorHttpClient, load_dark_web_config,
+    LOCAL_CONFIG, DarkWebConfigurationError, DarkWebConnector, DarkWebSource, TorHttpClient, load_dark_web_config,
 )
 from backend.app.pipeline.ingestion.external.preprocessing.content_processor import ExternalContentProcessor
 from backend.app.pipeline.ingestion.external.preprocessing.text_preprocessor import TextPreprocessor
@@ -58,7 +58,8 @@ RSSConnectorFactory = Callable[[RSSSource, dict[str, Any]], RSSConnector]
 MANUAL_LISTING_RECONCILIATION_VERSION = "1.0"
 
 
-def load_collection_registry(path: Path = PROJECT_ROOT / "config" / "sources.json") -> dict[str, RegisteredSource]:
+def load_collection_registry(path: Path = PROJECT_ROOT / "config" / "sources.json",
+                             *, dark_web_sources: tuple[DarkWebSource, ...] = ()) -> dict[str, RegisteredSource]:
     config = load_json(path, default={})
     sections = {
         "rss_sources": "rss", "cert_sources": "cert", "vulnerability_sources": "vulnerability",
@@ -73,6 +74,11 @@ def load_collection_registry(path: Path = PROJECT_ROOT / "config" / "sources.jso
             source_id = str(raw.get("source_id") or "").strip()
             if source_id:
                 registry[source_id] = RegisteredSource(source_id, source_type, bool(raw.get("enabled", True)), dict(raw))
+    for source in dark_web_sources:
+        if source.source_id in registry:
+            raise DarkWebConfigurationError(f"duplicate external source id: {source.source_id}")
+        registry[source.source_id] = RegisteredSource(source.source_id, "dark_web", source.enabled,
+            {"source_id": source.source_id, "name": source.name, "category": source.category})
     return registry
 
 
@@ -80,19 +86,22 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
     """Compose registered definitions with existing canonical collectors."""
 
     def __init__(self, *, rss_factory: RSSConnectorFactory | None = None,
+                 dark_web_sources: tuple[DarkWebSource, ...] = (), dark_web_client: TorHttpClient | None = None,
                  state_directory: Path = PROJECT_ROOT / "data" / "external" / "state",
                  processed_directory: Path = PROJECT_ROOT / "data" / "external" / "processed",
                  review_directory: Path = PROJECT_ROOT / "data" / "external" / "review") -> None:
         self.rss_factory = rss_factory or (lambda source, state: RSSConnector.from_source(source, state=state))
         self.state_directory, self.processed_directory, self.review_directory = state_directory, processed_directory, review_directory
+        self.dark_web_sources = {source.source_id: source for source in dark_web_sources}
+        self.dark_web_client = dark_web_client
 
     def execute(self, source: RegisteredSource, *, force: bool, command_id: str) -> SourceExecutionResult:
         manager = JsonStateManager(self.state_directory / f"{source.source_type}_{source.source_id}.json")
         state = manager.load()
-        if force:
+        if force and source.source_type != "dark_web":
             state.setdefault("sources", {}).pop(source.source_id, None)
         connector = self._connector(source, state)
-        result = connector.collect_result()
+        result = connector.collect_result(force=force) if source.source_type == "dark_web" else connector.collect_result()
         manager.save(state)
         accepted = list(getattr(result, "accepted_items", []))
         review = list(getattr(result, "review_items", []))
@@ -104,6 +113,7 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
         if review or rejected:
             save_json([item.to_dict() for item in [*review, *rejected]], self.review_directory / f"{prefix}.json")
         status = str(getattr(result, "status", "failed"))
+        if source.source_type == "dark_web" and status == "unavailable": status = "failed"
         errors = list(getattr(result, "errors", []))
         return SourceExecutionResult(source.source_id, status, len(accepted), len(review), len(rejected),
                                      int(getattr(result, "skipped_items", 0)), len(errors), tuple(accepted),
@@ -124,6 +134,11 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
             return TelegramConnector(TelegramSource.from_mapping(raw), processor=processor)
         if source.source_type == "reddit":
             return RedditConnector(RedditSource.from_mapping(raw), processor=processor)
+        if source.source_type == "dark_web":
+            configured = self.dark_web_sources.get(source.source_id)
+            if configured is None or self.dark_web_client is None:
+                raise ValueError("registered dark-web source composition is unavailable")
+            return DarkWebConnector((configured,), self.dark_web_client, state=state)
         raise ValueError("registered source type has no canonical connector")
 
 
@@ -298,15 +313,10 @@ def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None, cra
 
 
 class DevelopmentSourceService(SourceManagementService):
-    def __init__(self, path: Path = PROJECT_ROOT / "config" / "sources.json") -> None:
-        value = load_json(path, default={}); self._sources: dict[str, SourceView] = {}
-        for section, entries in value.items() if isinstance(value, dict) else []:
-            if not isinstance(entries, list): continue
-            for raw in entries:
-                if not isinstance(raw, dict): continue
-                source_id = str(raw.get("source_id") or raw.get("id") or "").strip()
-                if source_id:
-                    self._sources[source_id] = SourceView(source_id, str(raw.get("name") or source_id), str(raw.get("type") or section), "enabled" if raw.get("enabled") else "disabled", {})
+    def __init__(self, registry: dict[str, RegisteredSource]) -> None:
+        self._sources = {source_id: SourceView(source_id, str(source.configuration.get("name") or source_id),
+            source.source_type, "enabled" if source.enabled else "disabled", {})
+            for source_id, source in registry.items()}
     def list_sources(self) -> list[SourceView]: return sorted(self._sources.values(), key=lambda value: value.source_id)
     def get_source_status(self, source_id: str) -> SourceView | None: return self._sources.get(source_id)
     def request_source_enable(self, source_id: str, *, requested_by: str) -> SourceView:
@@ -427,6 +437,7 @@ class ExportingManualSourceService(ManualSourceService):
 
 def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                     collection_executor: SourceExecutor | None = None,
+                    dark_web_config_path: Path = LOCAL_CONFIG, dark_web_client: TorHttpClient | None = None,
                     state_directory: Path = PROJECT_ROOT / "data" / "external" / "state",
                     processed_directory: Path = PROJECT_ROOT / "data" / "external" / "processed",
                     review_directory: Path = PROJECT_ROOT / "data" / "external" / "review",
@@ -444,11 +455,15 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     roles = frozenset(value.strip() for value in os.environ.get("EXTERNAL_API_ROLES", "operator").split(",") if value.strip())
     if docs_enabled is None:
         docs_enabled = os.environ.get("EXTERNAL_API_DOCS_ENABLED", "").strip().lower() == "true"
+    dark_proxy, dark_sources = (load_dark_web_config(dark_web_config_path)
+                                if dark_web_config_path.exists() else (None, ()))
+    resolved_dark_client = dark_web_client or (TorHttpClient(dark_proxy) if dark_proxy is not None else None)
+    registry = load_collection_registry(dark_web_sources=dark_sources)
     configure_file_logging(log_path)
     runner = InProcessJobRunner(max_workers=int(os.environ.get("EXTERNAL_API_DEV_WORKERS", "2")))
-    registry = load_collection_registry()
     executor = collection_executor or LocalCanonicalSourceExecutor(rss_factory=connector_factory, state_directory=state_directory,
-                                                                   processed_directory=processed_directory, review_directory=review_directory)
+                                                                   processed_directory=processed_directory, review_directory=review_directory,
+                                                                   dark_web_sources=dark_sources, dark_web_client=resolved_dark_client)
     canonical_exporter = ExternalDatasetExporter(exports_dir=exports_directory, review_dir=review_directory,
                                                   state_manager=JsonStateManager(export_state_path))
     export_reader = LocalValidatedExportReader(exports_directory)
@@ -459,15 +474,14 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     collection = CanonicalCollectionService(runner, registry, executor, exporter)
     resolved_policy = manual_policy
     resolved_adapters = build_registered_manual_adapters(registry)
+    if dark_sources and resolved_dark_client is not None:
+        dark_connector = DarkWebConnector(dark_sources, resolved_dark_client, state={})
+        resolved_adapters["dark_web"] = DarkWebManualAdapter(dark_sources, dark_connector)
     if manual_adapters: resolved_adapters.update(manual_adapters)
     if resolved_policy is None:
-        try:
-            proxy, dark_sources = load_dark_web_config()
-            dark_connector = DarkWebConnector(dark_sources, TorHttpClient(proxy), state={})
-            resolved_adapters["dark_web"] = DarkWebManualAdapter(dark_sources, dark_connector)
-            resolved_policy = ManualURLPolicy(approved_onion=lambda url: any(source.enabled and source.allows(url) for source in dark_sources))
-        except (OSError, ValueError):
-            resolved_policy = ManualURLPolicy()
+        resolved_policy = ManualURLPolicy(approved_onion=lambda url: any(
+            source.enabled and source.allows(url) for source in dark_sources
+        ))
     manual_delegate = build_canonical_manual_service(policy=resolved_policy, crawler=manual_crawler,
                                             classification_service=manual_classification_service,
                                             adapters=resolved_adapters, router=ManualURLRouter(registry), state_path=manual_state_path,
@@ -475,8 +489,8 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                                             record_sink=manual_sink)
     manual = ExportingManualSourceService(manual_delegate, manual_sink, canonical_exporter, export_reader)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
-        manual, DevelopmentSourceService(), DevelopmentJobService(runner, export_reader), runner, InMemoryIdempotencyStore()),
+        manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner, InMemoryIdempotencyStore()),
         docs_enabled=docs_enabled)
 
 
-app = build_local_app()
+app = build_local_app(dark_web_config_path=Path(os.environ.get("EXTERNAL_DARK_WEB_CONFIG_PATH", str(LOCAL_CONFIG))))

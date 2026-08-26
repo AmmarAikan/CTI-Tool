@@ -21,6 +21,10 @@ class CollectionRequestBody(StrictModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceCollectionRequestBody(StrictModel):
+    force: bool = False
+
+
 class ManualURLRequestBody(StrictModel):
     url: HttpUrl
     force: bool = False

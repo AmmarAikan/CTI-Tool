@@ -19,7 +19,7 @@ from backend.app.pipeline.ingestion.external.dark_web_connector import (
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
-FAKE_HOST = "example-not-a-real-service.onion"
+FAKE_HOST = "a" * 56 + ".onion"
 BASE_URL = f"http://{FAKE_HOST}/advisories/"
 
 
@@ -68,6 +68,29 @@ class TorPolicyTests(unittest.TestCase):
             proxy, _ = load_dark_web_config(path, environ={"TOR_PROXY_HOST": "192.0.2.1", "TOR_PROXY_PORT": "9150"})
         self.assertEqual(proxy, TorProxy("192.0.2.1", 9150))
 
+    def test_enabled_invalid_v3_source_fails_with_source_id_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            sensitive_host = "c" * 55 + ".onion"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {"host": "127.0.0.1", "port": 9999},
+                "sources": [{"id": "invalid-length-test", "name": "Test",
+                             "url": f"http://{sensitive_host}/advisories/", "enabled": True,
+                             "allowed_paths": ["/advisories/"]}]}), encoding="utf-8")
+            with self.assertRaises(DarkWebConfigurationError) as raised:
+                load_dark_web_config(path, environ={})
+        message = str(raised.exception)
+        self.assertEqual(message, "invalid dark-web source source_id=invalid-length-test reason=invalid_v3_onion_length")
+        self.assertNotIn(".onion", message); self.assertNotIn("c" * 20, message)
+
+    def test_invalid_disabled_placeholder_does_not_block_startup(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {"host": "127.0.0.1", "port": 9999},
+                "sources": [{"id": "disabled-placeholder", "name": "Disabled", "url": "http://placeholder.onion/",
+                             "enabled": False, "allowed_paths": ["/"]}]}), encoding="utf-8")
+            _proxy, sources = load_dark_web_config(path, environ={})
+        self.assertEqual(sources, ())
+
     def test_client_uses_socks5h_and_manual_safe_redirects(self):
         session = Mock(spec=requests.Session)
         session.get.side_effect = [
@@ -98,10 +121,11 @@ class TorPolicyTests(unittest.TestCase):
 
 
 class FakeClient:
-    def __init__(self, pages, available=True): self.pages, self.available, self.calls = pages, available, []
+    def __init__(self, pages, available=True): self.pages, self.available, self.calls, self.requests = pages, available, [], []
     def tor_available(self): return self.available
     def get(self, source, url, **kwargs):
         self.calls.append(url)
+        self.requests.append((url, kwargs))
         value = self.pages[url]
         if isinstance(value, Exception): raise value
         return TorResponse(200, value.encode(), "text/html", '"test"', "Wed, 01 Jan 2025 00:00:00 GMT")
@@ -135,6 +159,22 @@ class DarkWebConnectorTests(unittest.TestCase):
         second = connector.collect_result()
         self.assertEqual(second.skipped_items, 1)
         self.assertEqual(second.accepted_items, [])
+
+    def test_force_reprocesses_unchanged_hash_without_changing_identity_or_collected_at(self):
+        client, state = FakeClient({BASE_URL: self.article}), {"schema_version": "1.0", "sources": {}, "urls": {}, "items": {}, "runs": {}}
+        connector = DarkWebConnector([source()], client, state=state, clock=self.clock)
+        first = connector.collect_result().accepted_items[0]
+        state["items"][first.record_id].pop("collected_at")  # legacy checkpoint compatibility
+        forced = connector.collect_result(force=True)
+        self.assertEqual((forced.skipped_items, len(forced.accepted_items)), (0, 1))
+        again = forced.accepted_items[0]
+        self.assertEqual((again.record_id, again.collected_at), (first.record_id, first.collected_at))
+        self.assertIsNone(client.requests[-1][1]["etag"])
+        self.assertIsNone(client.requests[-1][1]["last_modified"])
+        item_state = state["items"][first.record_id]
+        self.assertEqual(item_state["collected_at"], first.collected_at)
+        self.assertIn("external_privacy_filter_v2", item_state["stages"]["privacy"]["version"])
+        self.assertIn("external_text_preprocessor_v2", item_state["stages"]["cleaning"]["version"])
 
     def test_classification_error_routes_general_source_to_review(self):
         service = Mock()

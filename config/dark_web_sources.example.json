@@ -8,7 +8,7 @@
     {
       "id": "replace-with-approved-source",
       "name": "Disabled placeholder",
-      "url": "http://example-not-a-real-service.onion/advisories/",
+      "url": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion/advisories/",
       "enabled": false,
       "category": "dark_web_cti",
       "allowed_paths": ["/advisories/"],

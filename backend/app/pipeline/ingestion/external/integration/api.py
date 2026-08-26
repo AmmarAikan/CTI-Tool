@@ -4,7 +4,7 @@ import secrets
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
-from fastapi import Depends, FastAPI, Header, Request, status
+from fastapi import Body, Depends, FastAPI, Header, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -21,7 +21,7 @@ from backend.app.pipeline.ingestion.external.integration.idempotency import Idem
 from backend.app.pipeline.ingestion.external.integration.jobs import IntegrationJob, JobRunner, utc_now
 from backend.app.pipeline.ingestion.external.integration.schemas import (
     CollectionRequestBody, HealthResponse, IntegrationErrorResponse, JobStatusResponse,
-    LatestExportResponse, ManualURLRequestBody, SourceResponse,
+    LatestExportResponse, ManualURLRequestBody, SourceCollectionRequestBody, SourceResponse,
 )
 
 
@@ -112,13 +112,14 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         return response
 
     @app.post(f"{API_PREFIX}/sources/{{source_id}}/jobs", response_model=JobStatusResponse, status_code=202, responses=COLLECTION_ERROR_RESPONSES)
-    def collect_source(source_id: str, current: Principal = Depends(permitted("jobs:create")),
+    def collect_source(source_id: str, body: SourceCollectionRequestBody = Body(default=SourceCollectionRequestBody()),
+                       current: Principal = Depends(permitted("jobs:create")),
                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         _safe_source_id(source_id)
         cached = _cached(services, current, f"collect_source:{source_id}", idempotency_key)
         if cached: return JobStatusResponse.model_validate(cached)
         command_id = _id("cmd")
-        try: accepted = services.collection_service.collect_source(source_id, requested_by=current.subject)
+        try: accepted = services.collection_service.collect_source(source_id, requested_by=current.subject, force=body.force)
         except UnknownSourceError: raise APIError(404, "source_not_found", "source identifier was not found") from None
         except DisabledSourceError: raise APIError(409, "source_disabled", "selected source is disabled") from None
         except ManualSourceCommandError: raise APIError(409, "manual_source_route_required", "manual URLs must use the manual-source operation") from None

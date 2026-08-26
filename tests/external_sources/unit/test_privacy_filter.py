@@ -46,6 +46,56 @@ class PrivacyFilterTests(unittest.TestCase):
         self.assertTrue({"cve", "url", "ipv4", "hash", "email"}.issubset(set(preserved)))
         self.assertEqual(result.metadata["privacy"]["redactions_count"], 0)
 
+    def test_preserves_technical_numbers_and_records_their_types(self) -> None:
+        text = """CPU MHz: 3192.004
+processor : 12
+processor id: 0000-00A1
+microcode : 0x2f
+CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H
+port 9050
+203.0.113.42
+d41d8cd98f00b204e9800998ecf8427e
+CVE-2026-12345"""
+        result = self.filter.apply(text)
+        self.assertEqual(result.content, text)
+        self.assertNotIn("[REDACTED:phone_number]", result.content)
+        preserved = set(result.metadata["privacy"]["cti_value_types_preserved"])
+        self.assertTrue({"diagnostic_output", "processor_hardware_id", "cvss_value", "network_port",
+                         "ipv4", "hash", "cve"}.issubset(preserved))
+
+    def test_genuine_phone_is_redacted_but_uncontextual_number_is_not(self) -> None:
+        text = "Personal phone: +1 202-555-0142. Diagnostic counter 12345678."
+        result = self.filter.apply(text)
+        self.assertIn("[REDACTED:phone_number]", result.content)
+        self.assertIn("Diagnostic counter 12345678", result.content)
+        self.assertEqual(result.metadata["privacy"]["redactions_count"], 1)
+
+    def test_disclosure_timeline_dates_are_not_phone_numbers(self) -> None:
+        values = (
+            "June 10",
+            "June 10-18",
+            "June 20, 2021",
+            "December 1-28 2021",
+            "2020-2021",
+        )
+        text = "Disclosure timeline\n" + "\n".join(values)
+        result = self.filter.apply(text)
+        self.assertEqual(result.content, text)
+        self.assertNotIn("[REDACTED:phone_number]", result.content)
+        self.assertEqual(result.metadata["privacy"]["redactions_count"], 0)
+        self.assertTrue({"calendar_date", "year_range"}.issubset(
+            set(result.metadata["privacy"]["cti_value_types_preserved"])))
+
+    def test_international_and_contextual_local_phone_numbers_are_redacted(self) -> None:
+        international = "+44 20 7946 0958"
+        local = "202-555-0142"
+        text = f"Emergency line: {international}. Contact phone: {local}."
+        result = self.filter.apply(text)
+        self.assertNotIn(international, result.content)
+        self.assertNotIn(local, result.content)
+        self.assertEqual(result.content.count("[REDACTED:phone_number]"), 2)
+        self.assertEqual(result.metadata["privacy"]["redactions_count"], 2)
+
     def test_ambiguous_email_and_username_require_review_without_redaction(self) -> None:
         text = "The document mentions person@example.test and @unverified_handle without context."
         result = self.filter.apply(text)
