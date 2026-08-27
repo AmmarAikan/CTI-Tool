@@ -1,0 +1,46 @@
+services:
+  external-sources:
+    build:
+      context: .
+      dockerfile: Dockerfile.external
+    env_file:
+      - .env.external.local
+    environment:
+      EXTERNAL_DARK_WEB_CONFIG_PATH: /run/secrets/dark_web_sources
+      TOR_PROXY_HOST: host.docker.internal
+      TOR_PROXY_PORT: "9050"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - external-data:/app/data/external
+      - external-logs:/app/logs
+    secrets:
+      - dark_web_sources
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/external-sources/health', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  external-data:
+  external-logs:
+
+secrets:
+  dark_web_sources:
+    file: ./config/dark_web_sources.local.json

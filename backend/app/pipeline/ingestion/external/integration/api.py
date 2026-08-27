@@ -15,13 +15,14 @@ from backend.app.pipeline.ingestion.external.application.collection_service impo
 )
 from backend.app.pipeline.ingestion.external.application.job_service import JobService
 from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceService
+from backend.app.pipeline.ingestion.external.application.review_service import ReviewService
 from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
 from backend.app.pipeline.ingestion.external.integration.auth import AuthenticationError, Authenticator, AuthorizationError, Authorizer, Principal
 from backend.app.pipeline.ingestion.external.integration.idempotency import IdempotencyStore
 from backend.app.pipeline.ingestion.external.integration.jobs import IntegrationJob, JobRunner, utc_now
 from backend.app.pipeline.ingestion.external.integration.schemas import (
     CollectionRequestBody, HealthResponse, IntegrationErrorResponse, JobStatusResponse,
-    LatestExportResponse, ManualURLRequestBody, SourceCollectionRequestBody, SourceResponse,
+    LatestExportResponse, LatestReviewResponse, ManualURLRequestBody, SourceCollectionRequestBody, SourceResponse,
 )
 
 
@@ -54,6 +55,7 @@ class AdapterServices:
     job_service: JobService
     job_runner: JobRunner
     idempotency: IdempotencyStore
+    review_service: ReviewService | None = None
 
 
 def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> FastAPI:
@@ -193,6 +195,17 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         if not value: raise APIError(404, "export_not_found", "no validated export is available")
         allowed = {key: value[key] for key in LatestExportResponse.model_fields if key in value}
         return LatestExportResponse.model_validate(allowed)
+
+    @app.get(f"{API_PREFIX}/reviews/latest", response_model=LatestReviewResponse, responses={
+        404: {"model": IntegrationErrorResponse, "description": "No validated External Sources review artifact is available."},
+        503: {"model": IntegrationErrorResponse, "description": "The review read adapter is not configured."},
+    })
+    def latest_reviews(_current: Principal = Depends(permitted("reviews:read"))) -> LatestReviewResponse:
+        if services.review_service is None:
+            raise APIError(503, "review_unavailable", "review read operation is unavailable")
+        value = services.review_service.latest()
+        if value is None: raise APIError(404, "review_not_found", "no validated review artifact is available")
+        return LatestReviewResponse.model_validate(value)
 
     if docs_enabled:
         def secured_openapi() -> dict[str, Any]:

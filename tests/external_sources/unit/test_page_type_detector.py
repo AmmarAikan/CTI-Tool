@@ -72,6 +72,22 @@ class PageTypeDetectorTests(unittest.TestCase):
         self.assertEqual(result.page_type, "article")
         self.assertEqual(result.candidate_links, ())
 
+    def test_strong_structural_listing_cannot_be_overridden_by_dense_extracted_text(self) -> None:
+        html = (FIXTURES / "dense_structural_listing.html").read_text(encoding="utf-8")
+        result = self.detector.detect(html, "https://example.test/research/", "x" * 1800)
+        self.assertEqual(result.page_type, "listing")
+        self.assertTrue(result.signals["strong_structural_listing"])
+        self.assertFalse(result.signals["article_metadata"])
+        self.assertFalse(result.signals["semantic_article_container"])
+        self.assertGreaterEqual(len(result.candidate_links), 4)
+        self.assertEqual(result.signals["repeated_card_elements"], 0)
+
+    def test_summary_large_image_is_not_independent_article_metadata(self) -> None:
+        html = "<html><head><meta name='twitter:card' content='summary_large_image'></head><body><h1>Directory</h1></body></html>"
+        result = self.detector.detect(html, "https://example.test/research/", "A short directory introduction.")
+        self.assertFalse(result.signals["article_metadata"])
+        self.assertEqual(result.page_type, "unknown")
+
 
 if __name__ == "__main__":
     unittest.main()

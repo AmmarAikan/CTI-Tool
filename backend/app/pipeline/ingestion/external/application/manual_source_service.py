@@ -13,7 +13,8 @@ from backend.app.pipeline.ingestion.external.common.hashing import sha256_json, 
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
-from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult, WebCrawler
+from backend.app.pipeline.ingestion.external.crawler.web_crawler import EXTRACTION_IMPLEMENTATION_VERSION, CrawlResult, WebCrawler
+from backend.app.pipeline.ingestion.external.crawler.page_type_detector import PAGE_DETECTION_IMPLEMENTATION_VERSION
 from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy, URLPolicyError
 from backend.app.pipeline.ingestion.external.manual_source.url_router import ManualURLRouter, URLRoute
 from backend.app.pipeline.ingestion.external.preprocessing.content_processor import ExternalContentProcessor
@@ -24,6 +25,7 @@ from backend.app.pipeline.ingestion.external.privacy.privacy_filter import Priva
 PROJECT_ROOT = Path(__file__).resolve().parents[6]
 MIN_MANUAL_CONTENT_CHARACTERS = 120
 MANUAL_TRACKED_ROOTS_VERSION = "1.0"
+REVIEW_STAGE_IMPLEMENTATION_VERSION = "manual_review_v2"
 UTILITY_PATH_SEGMENTS = frozenset({"contact", "support", "login", "signin", "signup", "account", "privacy", "terms", "legal"})
 
 
@@ -258,7 +260,8 @@ class CanonicalManualSourceService(ManualSourceService):
         metadata = {"parent_listing": parent, "lifecycle": {"active": True, "last_seen_at": observed_at}, **processed.metadata}
         item = ExternalCTIItem(record_id=record_id, source_item_id=canonical, source="Manual URL", source_type="manual_url",
                                category="manual", title=crawl.title or canonical, link=canonical, content=processed.export_content,
-                               summary=processed.export_content[:300], collected_at=observed_at, content_hash=sha256_text(processed.export_content),
+                               summary=self._article_summary(processed.export_content, crawl.title), published=crawl.published,
+                               author=crawl.author, collected_at=observed_at, content_hash=sha256_text(processed.export_content),
                                metadata=metadata)
         gate = self._preclassification_gate(canonical, item.title, processed.export_content)
         if gate == "utility_page":
@@ -279,7 +282,7 @@ class CanonicalManualSourceService(ManualSourceService):
         previous = item_state.get("record_hash"); record_hash = self._record_hash(final)
         changed = "updated" if previous else "created"
         url_state = state["urls"].setdefault(canonical, {})
-        stages = {"extraction": {"input_hash": crawl.raw_content_hash, "output_hash": crawl.extracted_content_hash, "status": "completed", "timestamp": self._now(), "version": "web_crawler_v1"},
+        stages = {"extraction": {"input_hash": crawl.raw_content_hash, "output_hash": crawl.extracted_content_hash, "status": "completed", "timestamp": self._now(), "version": crawl.extraction_version},
                   "cleaning": {"input_hash": processed.preprocessing.input_hash, "output_hash": processed.preprocessing.output_hash, "status": "completed", "timestamp": self._now(), "version": processed.preprocessing.implementation_version},
                   "privacy": {"input_hash": processed.privacy.input_hash, "output_hash": processed.privacy.output_hash, "status": processed.privacy.status, "timestamp": self._now(), "version": processed.privacy.implementation_version},
                   "classification": {"input_hash": final.content_hash, "output_hash": final.metadata.get("classification_stage", {}).get("output_hash"), "status": final.classification.status, "timestamp": self._now(), "version": final.classification.model_version}}
@@ -295,7 +298,26 @@ class CanonicalManualSourceService(ManualSourceService):
         classifier = getattr(self.classification_service, "classifier", None)
         return sha256_json({"preprocessing_rules": self.content_processor.preprocessor.rules_hash,
                             "privacy_rules": self.content_processor.privacy_filter.rules_hash,
-                            "model_version": getattr(classifier, "model_version", None)})
+                            "model_version": getattr(classifier, "model_version", None),
+                            "extraction_version": EXTRACTION_IMPLEMENTATION_VERSION,
+                            "page_detection_version": PAGE_DETECTION_IMPLEMENTATION_VERSION,
+                            "review_version": REVIEW_STAGE_IMPLEMENTATION_VERSION})
+
+    @staticmethod
+    def _article_summary(content: str, title: str, *, maximum_characters: int = 300) -> str:
+        normalized_title = title.strip().casefold()
+        meaningful = []
+        for raw in content.splitlines():
+            line = raw.strip()
+            if not line or line.casefold() == normalized_title or len(line) < 40:
+                continue
+            meaningful.append(line)
+            if len(" ".join(meaningful)) >= maximum_characters: break
+        source = " ".join(meaningful) or content.strip()
+        if len(source) <= maximum_characters: return source
+        clipped = source[:maximum_characters + 1]
+        boundary = clipped.rfind(" ", 0, maximum_characters + 1)
+        return clipped[:boundary if boundary > maximum_characters // 2 else maximum_characters].rstrip()
 
     def _register_tracked_root(self, state: dict[str, Any], canonical: str) -> None:
         root_id = self._root_id(canonical)

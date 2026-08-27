@@ -53,13 +53,25 @@ class FakeSources:
         old = self.values[source_id]; value = SourceView(old.source_id, old.name, old.source_type, "disabled", old.metadata); self.values[source_id] = value; return value
 
 
+class FakeReviews:
+    def latest(self):
+        return {"run_id": "ext-review-0000001", "records": [{
+            "record_id": "manual-" + "a" * 32, "canonical_url": "https://example.test/report",
+            "title": "Sanitized report", "source_type": "manual_url", "review_reason": "privacy_unresolved",
+            "review_reasons": ["collector_review", "privacy_unresolved"],
+            "stage_status": {"privacy": "review_required", "classification": "accepted"},
+            "classification_label": "cti_related", "privacy_status": "review_required",
+            "collected_at": "2026-08-27T00:00:00Z", "published": None,
+        }]}
+
+
 class RestIntegrationAdapterTests(unittest.TestCase):
     def setUp(self):
         self.collection = Mock(spec=CollectionService); self.collection.start_collection.return_value = JobAccepted("job-collection-0001"); self.collection.collect_source.return_value = JobAccepted("job-source-00000001")
         self.manual = Mock(spec=ManualSourceService); self.sources = FakeSources(); self.job_service = Mock(spec=JobService); self.runner = FakeRunner()
         self.manual.validate_url.side_effect = lambda value: value
         self.job_service.get_job_status.return_value = None
-        self.services = AdapterServices(TokenAuth(), RoleAuthorizer(), self.collection, self.manual, self.sources, self.job_service, self.runner, InMemoryIdempotencyStore())
+        self.services = AdapterServices(TokenAuth(), RoleAuthorizer(), self.collection, self.manual, self.sources, self.job_service, self.runner, InMemoryIdempotencyStore(), FakeReviews())
         self.client = TestClient(create_app(self.services))
 
     @staticmethod
@@ -144,6 +156,15 @@ class RestIntegrationAdapterTests(unittest.TestCase):
             "accepted_records": 2, "review_records": 1, "completed_at": "2026-08-24T00:00:00Z", "dataset_file": "C:\\private\\file.json"}
         export = self.client.get(f"{API_PREFIX}/exports/latest", headers=self.auth("viewer-token")).json()
         self.assertNotIn("dataset_file", export); self.assertNotIn("private", str(export).lower())
+
+    def test_authenticated_review_read_returns_only_safe_contract_fields(self):
+        self.assertEqual(self.client.get(f"{API_PREFIX}/reviews/latest").status_code, 401)
+        response = self.client.get(f"{API_PREFIX}/reviews/latest", headers=self.auth("viewer-token"))
+        self.assertEqual(response.status_code, 200)
+        record = response.json()["records"][0]
+        self.assertEqual(record["review_reason"], "privacy_unresolved")
+        self.assertNotIn("content", record); self.assertNotIn("metadata", record)
+        self.assertNotIn("path", str(record).lower())
 
     def test_cancellation_and_not_found(self):
         created = self.client.post(f"{API_PREFIX}/manual-sources", json={"url": "https://example.test/report"}, headers=self.auth()).json()

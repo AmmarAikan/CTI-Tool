@@ -19,6 +19,7 @@ from backend.app.pipeline.ingestion.external.common.state_manager import JsonSta
 
 PROJECT_ROOT = Path(__file__).resolve().parents[6]
 OFFICIAL_TYPES = frozenset({"rss", "cert", "nvd", "cve", "mitre", "github_advisories", "cisa_kev", "vulnerability", "reddit", "hackernews", "telegram"})
+REVIEW_IMPLEMENTATION_VERSION = "external_review_v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +62,8 @@ class ExternalDatasetExporter:
             source_counts[batch.source_id] = {"status": batch.status, "total": len(batch.accepted) + len(batch.review), "accepted": 0, "review": len(batch.review), "invalid": 0}
             if batch.status == "failed" and not batch.errors: manifest.record_failure(batch.source_id, "source_failed")
             for value in batch.review:
-                review_entries.append(self._review(self._mapping(value, manifest.run_id), batch.source_id, "collector_review"))
+                record = self._mapping(value, manifest.run_id)
+                review_entries.append(self._review(record, batch.source_id, "collector_review", *self._specific_review_reasons(record)))
             for reason in batch.errors:
                 manifest.record_failure(batch.source_id, self._safe_reason(reason))
             for value in batch.accepted:
@@ -193,7 +195,19 @@ class ExternalDatasetExporter:
         record = deepcopy(value.to_dict() if isinstance(value, ExternalCTIItem) else value)
         link = str(record.get("link") or "")
         if ".onion" in link.lower(): record["link"] = "onion://[redacted]"
-        return {"source_id": source_id, "reason_codes": sorted(set(reasons)), "record": record}
+        return {"source_id": source_id, "reason": "collector_review", "reason_codes": sorted(set(reasons)),
+                "review_version": REVIEW_IMPLEMENTATION_VERSION, "record": record}
+
+    @staticmethod
+    def _specific_review_reasons(record: dict[str, Any]) -> tuple[str, ...]:
+        reasons: list[str] = []
+        privacy = record.get("metadata", {}).get("privacy", {})
+        classification = record.get("classification", {})
+        if privacy.get("status") == "review_required": reasons.append("privacy_unresolved")
+        if classification.get("status") == "rejected": reasons.append("classification_rejected")
+        if not str(record.get("content") or "").strip(): reasons.append("extraction_failed")
+        if classification.get("status") == "error": reasons.append("collector_error")
+        return tuple(reasons)
 
     @staticmethod
     def _safe_reason(value: str) -> str:

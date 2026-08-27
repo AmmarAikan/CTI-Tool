@@ -16,6 +16,7 @@ from backend.app.pipeline.ingestion.external.dark_web_connector import (
     DarkWebConfigurationError, DarkWebConnector, DarkWebRequestError, DarkWebSource,
     TorHttpClient, TorProxy, TorResponse, load_dark_web_config,
 )
+from backend.app.pipeline.ingestion.external.privacy.privacy_filter import IMPLEMENTATION_VERSION as PRIVACY_IMPLEMENTATION_VERSION
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -173,7 +174,7 @@ class DarkWebConnectorTests(unittest.TestCase):
         self.assertIsNone(client.requests[-1][1]["last_modified"])
         item_state = state["items"][first.record_id]
         self.assertEqual(item_state["collected_at"], first.collected_at)
-        self.assertIn("external_privacy_filter_v2", item_state["stages"]["privacy"]["version"])
+        self.assertIn(PRIVACY_IMPLEMENTATION_VERSION, item_state["stages"]["privacy"]["version"])
         self.assertIn("external_text_preprocessor_v2", item_state["stages"]["cleaning"]["version"])
 
     def test_classification_error_routes_general_source_to_review(self):

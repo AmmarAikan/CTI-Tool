@@ -381,6 +381,41 @@ class DevelopmentJobService(JobService):
     def get_latest_export(self) -> dict[str, Any] | None: return self.export_reader.latest()
 
 
+class LocalReviewService:
+    """Project a validated run's review file into the narrow authenticated API contract."""
+
+    def __init__(self, review_directory: Path, export_reader: LocalValidatedExportReader) -> None:
+        self.review_directory, self.export_reader = review_directory, export_reader
+
+    def latest(self) -> dict[str, Any] | None:
+        latest = self.export_reader.latest()
+        if not latest: return None
+        run_id = str(latest["run_id"])
+        path = self.review_directory / f"external_review_{run_id}.json"
+        values = load_json(path, default=None)
+        if not isinstance(values, list): return None
+        records = []
+        for entry in values:
+            if not isinstance(entry, dict) or not isinstance(entry.get("record"), dict): continue
+            record = entry["record"]
+            metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
+            privacy = metadata.get("privacy") if isinstance(metadata.get("privacy"), dict) else {}
+            classification = record.get("classification") if isinstance(record.get("classification"), dict) else {}
+            stages = metadata.get("stages") if isinstance(metadata.get("stages"), dict) else {}
+            stage_status = {str(key): str(value.get("status")) for key, value in stages.items()
+                            if key in {"extraction", "cleaning", "privacy", "classification"} and isinstance(value, dict) and value.get("status")}
+            link = str(record.get("link") or "") or None
+            if link and ".onion" in link.lower(): link = "onion://[redacted]"
+            reasons = [str(value) for value in entry.get("reason_codes", []) if isinstance(value, str)]
+            specific = next((value for value in reasons if value != "collector_review"), str(entry.get("reason") or "collector_review"))
+            records.append({"record_id": str(record.get("record_id") or ""), "canonical_url": link,
+                "title": record.get("title"), "source_type": record.get("source_type"),
+                "review_reason": specific, "review_reasons": reasons, "stage_status": stage_status,
+                "classification_label": classification.get("label"), "privacy_status": privacy.get("status"),
+                "collected_at": record.get("collected_at"), "published": record.get("published")})
+        return {"run_id": run_id, "records": sorted(records, key=lambda value: value["record_id"])}
+
+
 class LocalCollectionExportCoordinator(CollectionExportCoordinator):
     """Adapt run-scoped collection results to the sole canonical Phase 10 exporter."""
 
@@ -520,7 +555,8 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     collection = CanonicalCollectionService(runner, registry, executor, exporter, manual_service=manual_delegate)
     manual = ExportingManualSourceService(manual_delegate, manual_sink, canonical_exporter, export_reader)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
-        manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner, InMemoryIdempotencyStore()),
+        manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner,
+        InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader)),
         docs_enabled=docs_enabled)
 
 

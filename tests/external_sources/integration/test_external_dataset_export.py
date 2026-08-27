@@ -125,6 +125,32 @@ class ExternalDatasetExporterTests(unittest.TestCase):
         reasons = {reason for entry in review for reason in entry["reason_codes"]}
         self.assertTrue({"empty_content", "classification_incomplete", "privacy_unresolved", "item_contract_invalid"}.issubset(reasons))
 
+    def test_collector_review_preserves_specific_privacy_and_classification_reasons(self):
+        privacy = item("privacy-review", metadata={"privacy": {"status": "review_required"}})
+        rejected = item("model-review", source_type="manual_url", status="rejected")
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = self.manifest()
+            result = self.make(folder).export(manifest, [RunSourceOutput(
+                manifest.run_id, "manual_url", "completed", review=(privacy, rejected)
+            )])
+            review = json.loads(result.review_path.read_text(encoding="utf-8"))
+        reason_sets = [set(value["reason_codes"]) for value in review]
+        self.assertTrue(any({"collector_review", "privacy_unresolved"}.issubset(value) for value in reason_sets))
+        self.assertTrue(any({"collector_review", "classification_rejected"}.issubset(value) for value in reason_sets))
+        self.assertTrue(all(value["reason"] == "collector_review" for value in review))
+
+    def test_model_rejected_record_never_enters_accepted_dataset(self):
+        rejected = item("model-rejected", source_type="manual_url", status="rejected")
+        with tempfile.TemporaryDirectory() as folder:
+            manifest = self.manifest()
+            result = self.make(folder).export(manifest, [RunSourceOutput(
+                manifest.run_id, "manual_url", "completed", accepted=(rejected,)
+            )])
+            dataset = json.loads(result.dataset_path.read_text(encoding="utf-8"))
+            review = json.loads(result.review_path.read_text(encoding="utf-8"))
+        self.assertEqual(dataset, [])
+        self.assertIn("classification_rejected", review[0]["reason_codes"])
+
     def test_state_and_filenames_are_scoped_to_run(self):
         with tempfile.TemporaryDirectory() as folder:
             manifest = self.manifest(); exporter = self.make(folder)

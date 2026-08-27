@@ -110,6 +110,25 @@ CVE-2026-12345"""
         self.assertIn("analyst@example.test", result.content)
         self.assertEqual(result.metadata["privacy"]["finding_categories"]["public_attribution"], 1)
 
+    def test_attacker_email_indicators_are_preserved_but_personal_email_is_reviewed(self) -> None:
+        attacker = self.filter.apply(
+            "IOC table: attacker email used to register attacker infrastructure: operator@bad.example"
+        )
+        self.assertEqual(attacker.status, "reviewed")
+        self.assertIn("operator@bad.example", attacker.content)
+        self.assertIn("email", attacker.metadata["privacy"]["cti_value_types_preserved"])
+        personal = self.filter.apply("Meeting attendee address: person@example.test")
+        self.assertEqual(personal.status, "review_required")
+
+    def test_python_decorators_are_technical_but_social_handles_remain_ambiguous(self) -> None:
+        code = "import functions_framework\n@functions_framework.http\ndef handler(request):\n    return 'ok'"
+        result = self.filter.apply(code)
+        self.assertEqual(result.status, "reviewed")
+        self.assertIn("@functions_framework.http", result.content)
+        self.assertIn("programming_decorator", result.metadata["privacy"]["cti_value_types_preserved"])
+        social = self.filter.apply("The public profile uses @security_researcher.")
+        self.assertEqual(social.status, "review_required")
+
     def test_clean_and_privacy_hashes_remain_distinct(self) -> None:
         text = "Personal phone: +1 202-555-0142"
         result = self.filter.apply(text)

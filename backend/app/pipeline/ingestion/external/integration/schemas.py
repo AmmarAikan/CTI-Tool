@@ -71,3 +71,22 @@ class LatestExportResponse(StrictModel):
     completed_at: str | None = None
     dataset: list[dict[str, Any]] = Field(default_factory=list)
     manifest: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReviewRecordResponse(StrictModel):
+    record_id: str
+    canonical_url: str | None = None
+    title: str | None = None
+    source_type: str | None = None
+    review_reason: str
+    review_reasons: list[str] = Field(default_factory=list)
+    stage_status: dict[str, str] = Field(default_factory=dict)
+    classification_label: str | None = None
+    privacy_status: str | None = None
+    collected_at: str | None = None
+    published: str | None = None
+
+
+class LatestReviewResponse(StrictModel):
+    run_id: str
+    records: list[ReviewRecordResponse] = Field(default_factory=list)

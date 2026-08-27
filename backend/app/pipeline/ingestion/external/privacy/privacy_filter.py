@@ -9,7 +9,7 @@ from backend.app.pipeline.ingestion.external.common.hashing import sha256_json, 
 from backend.app.pipeline.ingestion.external.privacy.pii_detector import PrivacyFinding, SensitiveDataDetector
 
 
-IMPLEMENTATION_VERSION = "external_privacy_filter_v2"
+IMPLEMENTATION_VERSION = "external_privacy_filter_v3"
 
 
 @dataclass(frozen=True, slots=True)

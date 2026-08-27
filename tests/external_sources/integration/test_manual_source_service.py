@@ -12,11 +12,12 @@ import json
 
 from backend.app.pipeline.ingestion.external.application.manual_source_service import AdapterResult, CanonicalManualSourceService
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassifiedItemResult
-from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
+from backend.app.pipeline.ingestion.external.common.hashing import sha256_json, sha256_text
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
 from backend.app.pipeline.ingestion.external.common.json_storage import save_json
-from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
+from backend.app.pipeline.ingestion.external.crawler.page_type_detector import PAGE_DETECTION_IMPLEMENTATION_VERSION
+from backend.app.pipeline.ingestion.external.crawler.web_crawler import EXTRACTION_IMPLEMENTATION_VERSION, CrawlResult
 from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy
 from backend.app.pipeline.ingestion.external.manual_source.url_router import ManualURLRouter
 
@@ -165,6 +166,33 @@ class ManualSourceServiceTests(unittest.TestCase):
             second.add_manual_source(url, requested_by="tester")
         self.assertIsNone(crawler.calls[1][1]["etag"]); self.assertIsNone(crawler.calls[1][1]["last_modified"])
 
+    def test_legacy_extraction_fingerprint_forces_rerun_and_metadata_is_preserved(self):
+        url = "https://example.test/report"
+        text = ("Overview\n\nThis first meaningful paragraph explains a targeted malware campaign, its authentication abuse, "
+                "and the defensive evidence responders should review before reading later technical sections.\n\n"
+                "Later section\n\nAdditional details describe command-and-control infrastructure and remediation guidance.")
+        value = replace(crawl(url, text=text), title="Complete sanitized report", author="Avery Analyst, Riley Researcher",
+                        published="2026-08-20")
+        stored = []
+        with tempfile.TemporaryDirectory() as folder:
+            manager = JsonStateManager(Path(folder) / "state.json")
+            legacy_fingerprint = sha256_json({"preprocessing_rules": "legacy", "privacy_rules": "legacy", "model_version": "test-model"})
+            manager.save({"schema_version": "1.0", "urls": {url: {"etag": '"old"', "last_modified": "yesterday",
+                          "stage_fingerprint": legacy_fingerprint}}, "items": {}, "sources": {}, "runs": {}})
+            service = self.service(FakeCrawler([value]), manager, record_sink=lambda item, disposition: stored.append(item))
+            service.add_manual_source(url, requested_by="tester")
+            state = manager.load()
+        self.assertIsNone(service.crawler.calls[0][1]["etag"])
+        self.assertEqual(stored[0].author, "Avery Analyst, Riley Researcher")
+        self.assertEqual(stored[0].published, "2026-08-20")
+        self.assertTrue(stored[0].summary.startswith("This first meaningful paragraph"))
+        self.assertNotIn("Later section", stored[0].summary)
+        self.assertEqual(state["urls"][url]["stages"]["extraction"]["version"], value.extraction_version)
+        self.assertEqual(EXTRACTION_IMPLEMENTATION_VERSION, value.extraction_version)
+        self.assertEqual(state["urls"][url]["stage_fingerprint"], service._stage_fingerprint())
+        self.assertNotEqual(state["urls"][url]["stage_fingerprint"], legacy_fingerprint)
+        self.assertEqual(PAGE_DETECTION_IMPLEMENTATION_VERSION, "page_type_detector_v2")
+
     def test_listing_is_bounded_one_level_and_marks_disappeared_links(self):
         listing = "https://example.test/index"
         children = [f"https://example.test/article-{number}" for number in range(1, 4)]
@@ -193,6 +221,21 @@ class ManualSourceServiceTests(unittest.TestCase):
             result = self.service(FakeCrawler([crawl(url)]), JsonStateManager(Path(folder) / "state.json"),
                                   classification_service=classification, record_sink=lambda i, d: stored.append(d)).add_manual_source(url, requested_by="tester")
         self.assertEqual(result.status, "review_required"); self.assertEqual(stored, ["review"])
+
+    def test_classification_receives_complete_article_content(self):
+        url = "https://example.test/full-report"
+        text = "Opening threat analysis. " + ("Detailed campaign evidence and defensive guidance. " * 8) + "FINAL-IOC-TABLE-MARKER"
+        classification = Mock(); classification.classifier = type("Classifier", (), {"model_version": "test"})()
+        def classify(item):
+            self.assertEqual(item.content, text)
+            self.assertTrue(item.content.endswith("FINAL-IOC-TABLE-MARKER"))
+            return ClassifiedItemResult(replace(item, classification=ExternalClassification(status="accepted", label="cti_related")), "accepted", None)
+        classification.classify_item.side_effect = classify
+        with tempfile.TemporaryDirectory() as folder:
+            result = self.service(FakeCrawler([crawl(url, text=text)]), JsonStateManager(Path(folder) / "state.json"),
+                                  classification_service=classification).add_manual_source(url, requested_by="tester")
+        self.assertEqual(result.status, "stored")
+        classification.classify_item.assert_called_once()
 
     def test_short_and_utility_content_are_gated_before_model_inference(self):
         classification = Mock(); classification.classifier = type("Classifier", (), {"model_version": "test"})()

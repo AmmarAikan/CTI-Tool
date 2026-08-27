@@ -71,6 +71,42 @@ $env:EXTERNAL_API_DOCS_ENABLED = "true"
 
 Swagger is then available at `http://127.0.0.1:8000/docs` and the schema at `http://127.0.0.1:8000/openapi.json`. Use Swagger's **Authorize** button with the same bearer token configured in `EXTERNAL_API_TOKEN`. Documentation mode does not bypass authentication on protected API operations and must not be enabled on a publicly reachable adapter.
 
+## Local Docker Desktop
+
+The External Sources-only container uses Python 3.12, runs the canonical FastAPI adapter as non-root UID/GID `10001`, and publishes the API only on host loopback. Docker Desktop must be using Linux containers. This setup does not include Tor, a dashboard, a production queue, or cloud deployment.
+
+Create the ignored runtime environment file and the ignored local dark-web configuration before validating Compose:
+
+```powershell
+if (!(Test-Path .env.external.local)) { Copy-Item .env.external.example .env.external.local }
+if (!(Test-Path config/dark_web_sources.local.json)) { Copy-Item config/dark_web_sources.example.json config/dark_web_sources.local.json }
+```
+
+Set a strong `EXTERNAL_API_TOKEN` in `.env.external.local`. Configure only approved sources in `config/dark_web_sources.local.json`; Compose mounts that file read-only as `/run/secrets/dark_web_sources`, so it is never copied into the image. The container reaches the existing Windows Tor SOCKS service through `host.docker.internal:9050`. Tor must be configured to accept that Docker Desktop connection. Onion requests retain the canonical `socks5h` isolation and never fall back to direct web access.
+
+Validate, build, and start only the External Sources service:
+
+```powershell
+docker compose -f compose.external.yml config
+docker compose -f compose.external.yml build
+docker compose -f compose.external.yml up -d
+docker compose -f compose.external.yml ps
+```
+
+Health is available without authentication:
+
+```powershell
+curl.exe http://127.0.0.1:8000/api/v1/external-sources/health
+```
+
+Stop the service without deleting its named volumes:
+
+```powershell
+docker compose -f compose.external.yml down
+```
+
+Runtime state, exports, and logs persist in the `external-data` and `external-logs` named volumes. The root filesystem remains read-only, all Linux capabilities are dropped, and `no-new-privileges` is enabled. The local thread runner and job status are still in-process development adapters: a container restart preserves files but does not resume an active job. Do not add multiple Uvicorn workers.
+
 The bundled static-token authentication, in-memory idempotency store, and thread runner are development adapters only. The local composition can execute enabled canonical RSS source jobs and the canonical Manual Source workflow for authorized testing and maintenance. Manual public URLs retain DNS/redirect SSRF validation and pass through crawling, preprocessing, privacy, classification, incremental state, and atomic accepted/review output. A returned business error becomes a failed job rather than a successful completion. The adapter still does not provide durable production orchestration or a cloud-ready queue. Internal job failures are recorded safely in `logs/cti_tool.log`; public responses never include exception details. Do not expose it publicly.
 
 `POST /api/v1/external-sources/jobs` accepts enabled registered source IDs from `config/sources.json` and valid operator-approved IDs loaded at startup from the ignored `config/dark_web_sources.local.json`. It supports multi-source and force requests. `"scope": "all_enabled"` runs every enabled registered source and then every active tracked Manual root sequentially in one job; it must not be combined with non-empty `source_ids`. Failures are isolated, Manual outcomes expose only stable root hashes, cancellation is checked between operations, and a local lock prevents overlapping all-enabled jobs. After collection, the canonical Phase 10 exporter is invoked exactly once with the same run ID; Latest Export changes only after validated dataset, review, and manifest artifacts are atomically published. Cancellation creates no export, while export failure preserves the previous Latest Export and remains visible in the unified result. Source APIs never expose onion URLs, allowed paths, rate limits, Tor settings, or local artifact paths. Unknown IDs return `404 source_not_found`; disabled sources and Manual Source identifiers return `409`; conflicting scope/source selections return `422 invalid_collection_request`. Manual URLs must be submitted only through `POST /api/v1/external-sources/manual-sources` or its recheck operation. Failures to accept an otherwise valid command return the safely redacted `503 collection_unavailable` response.

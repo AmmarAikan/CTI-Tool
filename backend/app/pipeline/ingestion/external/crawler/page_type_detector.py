@@ -12,7 +12,8 @@ from backend.app.pipeline.ingestion.external.common.canonical_url import canonic
 
 
 PageType = Literal["article", "listing", "unknown"]
-CONTAINER_TOKENS = ("card", "post", "article", "story", "item", "entry", "result", "teaser")
+PAGE_DETECTION_IMPLEMENTATION_VERSION = "page_type_detector_v2"
+CONTAINER_TOKENS = ("card", "post", "article", "story", "entry", "result", "teaser")
 UTILITY_TOKENS = ("menu", "nav", "footer", "header", "cookie", "consent", "utility", "account", "breadcrumb", "sidebar")
 UTILITY_SEGMENTS = frozenset({"contact", "login", "signin", "signup", "account", "privacy", "terms", "legal", "tag", "tags", "category", "categories", "page", "pagination"})
 
@@ -33,13 +34,18 @@ class PageTypeResult:
 class PageTypeDetector:
     """Classify a page with explainable article/listing signals."""
 
-    def __init__(self, *, max_candidate_links: int = 100, decision_threshold: float = 0.5) -> None:
+    def __init__(self, *, max_candidate_links: int = 100, decision_threshold: float = 0.5,
+                 strong_listing_min_links: int = 4, strong_listing_link_text_ratio: float = 0.4) -> None:
         if max_candidate_links <= 0:
             raise ValueError("max_candidate_links must be positive")
         if not 0 < decision_threshold <= 1:
             raise ValueError("decision_threshold must be between 0 and 1")
+        if strong_listing_min_links < 2 or not 0 < strong_listing_link_text_ratio <= 1:
+            raise ValueError("invalid strong-listing thresholds")
         self.max_candidate_links = max_candidate_links
         self.decision_threshold = decision_threshold
+        self.strong_listing_min_links = strong_listing_min_links
+        self.strong_listing_link_text_ratio = strong_listing_link_text_ratio
 
     def detect(self, html: str, url: str, extracted_text: str = "") -> PageTypeResult:
         soup = BeautifulSoup(html, "lxml")
@@ -49,10 +55,17 @@ class PageTypeDetector:
         h1_count = len(soup.find_all("h1"))
         heading_count = len(soup.find_all(["h1", "h2", "h3"]))
         metadata_article = self._has_article_metadata(soup)
+        semantic_article = self._has_semantic_article(soup)
         visible_text = soup.get_text(" ", strip=True)
         text_density = len(extracted_text.strip()) / max(1, len(visible_text))
         link_text_total = sum(len(anchor.get_text(" ", strip=True)) for anchor in soup.find_all("a"))
         link_text_ratio = link_text_total / max(1, len(visible_text))
+        strong_structural_listing = (
+            len(candidates) >= self.strong_listing_min_links
+            and link_text_ratio >= self.strong_listing_link_text_ratio
+            and not semantic_article
+            and not metadata_article
+        )
 
         article_score = 0.0
         article_score += 0.35 if metadata_article else 0.0
@@ -70,7 +83,10 @@ class PageTypeDetector:
         article_score = min(1.0, article_score)
         listing_score = min(1.0, listing_score)
         best_score = max(article_score, listing_score)
-        if best_score < self.decision_threshold or abs(article_score - listing_score) < 0.1:
+        if strong_structural_listing:
+            page_type = "listing"
+            best_score = max(best_score, self.decision_threshold)
+        elif best_score < self.decision_threshold or abs(article_score - listing_score) < 0.1:
             page_type: PageType = "unknown"
         elif article_score > listing_score:
             page_type = "article"
@@ -85,6 +101,9 @@ class PageTypeDetector:
             "h1_count": h1_count,
             "heading_count": heading_count,
             "article_metadata": metadata_article,
+            "semantic_article_container": semantic_article,
+            "strong_structural_listing": strong_structural_listing,
+            "page_detection_version": PAGE_DETECTION_IMPLEMENTATION_VERSION,
             "extraction_yield": len(extracted_text.strip()),
             "text_density": round(text_density, 4),
             "headline_link_count": len(candidates),
@@ -154,6 +173,9 @@ class PageTypeDetector:
         for class_name in tag.get("class") or []:
             lowered = str(class_name).lower()
             if any(token in lowered for token in CONTAINER_TOKENS): return f"{tag.name}.{lowered}"
+            if (re.search(r"(?:^|[-_])item(?:$|[-_])", lowered)
+                    and tag.find(["h1", "h2", "h3", "h4"]) and tag.find("a", href=True) and tag.find("p")):
+                return f"{tag.name}.{lowered}"
         return None
 
     @staticmethod
@@ -184,19 +206,23 @@ class PageTypeDetector:
         for tag in soup.find_all("meta"):
             key = str(tag.get("property") or tag.get("name") or "").lower()
             content = str(tag.get("content") or "").lower()
-            if key in {"og:type", "twitter:card"} and ("article" in content or "summary_large_image" in content):
+            if key == "og:type" and content == "article":
                 return True
             if key in {"article:published_time", "datepublished", "author"} and content:
                 return True
         return bool(soup.find(attrs={"itemtype": lambda value: value and "Article" in str(value)}))
 
     @staticmethod
-    def _repeated_card_count(soup: BeautifulSoup) -> int:
+    def _has_semantic_article(soup: BeautifulSoup) -> bool:
+        return bool(soup.find("article") or soup.select_one(
+            "[itemprop='articleBody'], [itemtype*='Article'], [itemtype*='BlogPosting'], [itemtype*='NewsArticle']"
+        ))
+
+    @classmethod
+    def _repeated_card_count(cls, soup: BeautifulSoup) -> int:
         signatures: Counter[str] = Counter()
         for tag in soup.find_all(["article", "section", "div", "li"]):
-            classes = tag.get("class") or []
-            for class_name in classes:
-                lowered = str(class_name).lower()
-                if any(token in lowered for token in CONTAINER_TOKENS):
-                    signatures[f"{tag.name}.{lowered}"] += 1
+            if cls._inside_utility(tag): continue
+            signature = cls._container_signature(tag)
+            if signature: signatures[signature] += 1
         return max(signatures.values(), default=0)

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import requests
 
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_bytes, sha256_text
 from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse, ResponseTooLargeError
-from backend.app.pipeline.ingestion.external.crawler.web_crawler import WebCrawler
+from backend.app.pipeline.ingestion.external.crawler.web_crawler import EXTRACTION_IMPLEMENTATION_VERSION, WebCrawler
+from backend.app.pipeline.ingestion.external.preprocessing.content_processor import ExternalContentProcessor
+from backend.app.pipeline.ingestion.external.preprocessing.text_preprocessor import TextPreprocessor
+from backend.app.pipeline.ingestion.external.privacy.privacy_filter import PrivacyFilter
 
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
@@ -52,6 +56,65 @@ class WebCrawlerTests(unittest.TestCase):
         self.assertEqual(result.extracted_content_hash, sha256_text(result.extracted_text))
         self.assertEqual(result.response_metadata["etag"], '"fixture-v1"')
 
+    def test_complete_multisection_article_metadata_tables_and_boilerplate(self) -> None:
+        response = response_for("multisection_cti_article.html")
+        result = WebCrawler(http_client=StubHttpClient(response=response)).crawl("https://example.test/advisory")
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.title, "Going with the Flow(s): Distinct Sanitized Clusters")
+        self.assertEqual(result.author, "Avery Analyst, Riley Researcher")
+        self.assertEqual(result.published, "2026-08-20")
+        self.assertEqual(result.extraction_version, EXTRACTION_IMPLEMENTATION_VERSION)
+        for marker in ("Overview", "Cluster Alpha", "OAuth activity", "Cluster Charlie",
+                       "Network Indicators", "File Indicators", "Defensive considerations"):
+            self.assertIn(marker, result.extracted_text)
+        for indicator in ("control-example[.]test", "198.51.100[.]42", "RIVERSTONE",
+                          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"):
+            self.assertIn(indicator, result.extracted_text)
+        self.assertNotIn("Unrelated marketing article", result.extracted_text)
+        self.assertNotIn("trackingSecret", result.extracted_text)
+
+    def test_label_only_byline_uses_bounded_sibling_and_rejects_punctuation(self) -> None:
+        html = b"""<html><main><article><h1>Sanitized security report</h1>
+        <div class='byline'>Written by:</div><div itemprop='author'>Avery Analyst and Riley Researcher</div>
+        <p>A substantial technical analysis describes malicious infrastructure, defensive evidence, and remediation guidance for responders.</p>
+        </article></main></html>"""
+        response = HttpResponse("https://example.test/report", 200, {"Content-Type": "text/html"}, html)
+        result = WebCrawler(http_client=StubHttpClient(response=response)).crawl("https://example.test/report")
+        self.assertEqual(result.author, "Avery Analyst and Riley Researcher")
+        self.assertNotEqual(result.author, ":")
+
+    def test_semantic_article_wins_when_readability_returns_middle_fragment(self) -> None:
+        class FragmentedDocument:
+            def __init__(self, _html): pass
+            def short_title(self): return "Distinct Sanitized Clusters"
+            def summary(self, *, html_partial):
+                self.assert_partial = html_partial
+                return ("<div><h3>Cluster Charlie</h3><p>After authenticating, the target was redirected to an "
+                        "attacker-controlled application that collected an authorization token. This deliberately "
+                        "fragmented readability candidate omits every earlier section and both indicator tables.</p></div>")
+
+        with patch("backend.app.pipeline.ingestion.external.crawler.web_crawler.Document", FragmentedDocument):
+            result = WebCrawler(http_client=StubHttpClient(response=response_for("multisection_cti_article.html"))).crawl(
+                "https://example.test/advisory")
+        self.assertIn("Overview", result.extracted_text)
+        self.assertIn("Cluster Alpha", result.extracted_text)
+        self.assertIn("Network Indicators", result.extracted_text)
+        self.assertIn("HEADWIND", result.extracted_text)
+
+    def test_cti_indicators_survive_canonical_preprocessing_and_privacy(self) -> None:
+        result = WebCrawler(http_client=StubHttpClient(response=response_for("multisection_cti_article.html"))).crawl(
+            "https://example.test/advisory")
+        project_root = Path(__file__).resolve().parents[3]
+        processor = ExternalContentProcessor(
+            TextPreprocessor(project_root / "config" / "preprocessing_rules.json"),
+            PrivacyFilter(project_root / "config" / "privacy_rules.json"),
+        )
+        processed = processor.process(result.extracted_text)
+        for indicator in ("control-example[.]test", "198.51.100[.]42", "RIVERSTONE",
+                          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"):
+            self.assertIn(indicator, processed.export_content)
+
     def test_listing_exposes_candidate_links_and_signals(self) -> None:
         client = StubHttpClient(response=response_for("listing_page.html", final_url="https://example.test/reports/"))
         result = WebCrawler(http_client=client).crawl("https://example.test/reports/")
@@ -59,6 +122,15 @@ class WebCrawlerTests(unittest.TestCase):
         self.assertEqual(result.page_type, "listing")
         self.assertEqual(len(result.candidate_links), 4)
         self.assertIn("listing_score", result.signals)
+
+    def test_dense_listing_is_structurally_locked_before_complete_content_extraction(self) -> None:
+        response = response_for("dense_structural_listing.html", final_url="https://example.test/research/")
+        result = WebCrawler(http_client=StubHttpClient(response=response)).crawl("https://example.test/research/")
+        self.assertEqual(result.page_type, "listing")
+        self.assertTrue(result.signals["strong_structural_listing"])
+        self.assertGreater(len(result.extracted_text), 300)
+        self.assertEqual(len(result.candidate_links), 5)
+        self.assertTrue(all(value.startswith("https://example.test/research/") for value in result.candidate_links))
 
     def test_conditional_request_can_return_unchanged(self) -> None:
         response = HttpResponse("https://example.test/feed", 304, {"ETag": '"v2"'}, b"", not_modified=True)
