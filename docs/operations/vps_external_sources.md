@@ -66,13 +66,13 @@ Mutating operations require an `admin` or `analyst` JWT and are written to the c
 
 For an operator-provided public URL, use the Manual Sources endpoint. It performs canonical routing and can reuse a registered connector when the URL matches one. Unknown or unsafe local/private URLs fail closed.
 
-Registered scheduled sources remain committed in `config/sources.json` so changes are reviewed, tested, and reproducible. Real onion sources remain in the root-only VPS file `/etc/cti-platform/dark_web_sources.json`; the committed example stays disabled and contains no operational source.
+Registered scheduled sources remain committed in `config/sources.json` so changes are reviewed, tested, and reproducible. The current VPS has no Tor proxy or approved live Onion list, so the External container deliberately does not mount an Onion configuration. Enabling live Onion collection later requires an explicit Tor endpoint, a root-only source file, an intentional container mount, and separate live acceptance evidence; the committed example remains disabled and is not operational evidence.
 
 ## Secrets
 
 `/etc/cti-platform/vps.env` contains the External control token and existing Gateway secrets with mode `0600`. Ammar receives a generated client fragment containing only the read/control values required by the local backend. The obsolete collaborator publisher fragment is removed.
 
-Never commit `/etc/cti-platform/vps.env`, `.vps-client.env`, real onion configuration, or provider credentials.
+Never commit `/etc/cti-platform/vps.env`, `.vps-client.env`, any future real Onion configuration, or provider credentials.
 
 ## Resource and retention policy
 

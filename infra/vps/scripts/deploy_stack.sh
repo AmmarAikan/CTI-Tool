@@ -32,7 +32,6 @@ MAX_PUBLISH_BYTES=20971520
 MAX_SENSOR_BYTES=52428800
 MAX_FEED_ITEMS=20000
 EXTERNAL_API_DEV_WORKERS=2
-EXTERNAL_DARK_WEB_CONFIG_FILE=/etc/cti-platform/dark_web_sources.json
 EOF
 fi
 chmod 0600 "${secret_file}"
@@ -43,16 +42,6 @@ fi
 if ! grep -q '^EXTERNAL_API_DEV_WORKERS=' "${secret_file}"; then
   printf '%s\n' 'EXTERNAL_API_DEV_WORKERS=2' >>"${secret_file}"
 fi
-if ! grep -q '^EXTERNAL_DARK_WEB_CONFIG_FILE=' "${secret_file}"; then
-  printf '%s\n' 'EXTERNAL_DARK_WEB_CONFIG_FILE=/etc/cti-platform/dark_web_sources.json' >>"${secret_file}"
-fi
-
-dark_web_config=/etc/cti-platform/dark_web_sources.json
-if [[ ! -e "${dark_web_config}" ]]; then
-  install -o root -g root -m 0600 \
-    "${release_root}/config/dark_web_sources.example.json" "${dark_web_config}"
-fi
-
 if ! getent group cti-sensor-read >/dev/null; then
   groupadd --system --gid 31002 cti-sensor-read
 fi

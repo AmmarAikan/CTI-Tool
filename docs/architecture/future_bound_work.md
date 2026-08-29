@@ -66,7 +66,7 @@ MISP is live, but automatic publishing is deliberately disabled. Future work inc
 
 ### Other sources and frontend
 
-Live Suricata, Zeek, Sysmon, firewall, TAXII, and Onion sources; Alembic operational migrations; model retraining automation; and the analyst frontend remain future work. Registered External additions still require reviewed configuration, while operator-supplied public URLs use the implemented Manual Source API. The existing FastAPI endpoints are the contract for the frontend phase.
+Live Suricata, Zeek, Sysmon, firewall, TAXII, and Onion sources; Alembic operational migrations; model retraining automation; and the analyst frontend remain future work. Because the current VPS has no Tor proxy or approved live Onion source list, its External container does not mount the disabled example as though it were operational. Registered External additions still require reviewed configuration, while operator-supplied public URLs use the implemented Manual Source API. The existing FastAPI endpoints are the contract for the frontend phase.
 
 ## Not claimed
 

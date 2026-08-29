@@ -55,7 +55,6 @@ services:
       EXTERNAL_API_ROLES: operator
       EXTERNAL_API_DEV_WORKERS: ${EXTERNAL_API_DEV_WORKERS:-2}
       EXTERNAL_API_DOCS_ENABLED: "false"
-      EXTERNAL_DARK_WEB_CONFIG_PATH: /run/secrets/dark_web_sources
       NVD_API_KEY: ${NVD_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID:-}
@@ -78,7 +77,6 @@ services:
     volumes:
       - external_data:/app/data/external
       - external_logs:/app/logs
-      - ${EXTERNAL_DARK_WEB_CONFIG_FILE:-../../config/dark_web_sources.example.json}:/run/secrets/dark_web_sources:ro
     networks:
       - external_egress
     healthcheck:

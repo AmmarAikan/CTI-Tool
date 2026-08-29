@@ -11,6 +11,7 @@ This directory contains the project-owned deployment for the graduation lab. Lar
 - Local Ammar PC: FastAPI, PostgreSQL, DNRTI BERT primary model, sklearn fallback, correlation, risk, and final CTI API.
 - VPS External Sources: canonical collectors, privacy/classification, versioned export, and a scheduled loopback publisher.
 - Wazuh is not deployed in the current 12 GB VPS design. Its connector remains optional code only.
+- Live Onion collection is not enabled: the current VPS has no Tor proxy or approved operational Onion list, so no placeholder dark-web configuration is mounted.
 
 MISP, Gateway, and External control are never exposed directly. The local backend reaches them through SSH local forwarding.
 
