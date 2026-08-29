@@ -6,24 +6,24 @@ This directory contains the project-owned deployment for the graduation lab. Lar
 
 - VPS: Ubuntu 24.04, Docker Engine, Compose, 4 GB swap, UFW, fail2ban, unattended upgrades.
 - Public sensor: Dionaea on selected honeypot ports.
-- Private services: CTI Gateway on `127.0.0.1:8088`; MISP HTTP/HTTPS on `127.0.0.1:8080/8443`.
+- Private services: CTI Gateway on `127.0.0.1:8088`; External Sources control on `127.0.0.1:8090`; MISP HTTP/HTTPS on `127.0.0.1:8080/8443`.
 - Lightweight internal telemetry: Dionaea JSON, SSH journal events, and gateway web-access JSON.
 - Local Ammar PC: FastAPI, PostgreSQL, DNRTI BERT primary model, sklearn fallback, correlation, risk, and final CTI API.
-- Collaborator PC: External Sources collectors and JSON publisher.
+- VPS External Sources: canonical collectors, privacy/classification, versioned export, and a scheduled loopback publisher.
 - Wazuh is not deployed in the current 12 GB VPS design. Its connector remains optional code only.
 
-MISP and the Gateway are never exposed directly. The local backend reaches them through SSH local forwarding.
+MISP, Gateway, and External control are never exposed directly. The local backend reaches them through SSH local forwarding.
 
 ## Repository layout
 
-- `compose.yaml`: Gateway and Dionaea.
+- `compose.yaml`: Gateway, VPS External Sources, and Dionaea.
 - `gateway/`: authenticated feed/sensor API with HMAC, ETag, cursor, bounds, redaction, and structured web telemetry.
 - `collectors/`: lightweight SSH journal collector.
 - `misp/compose.override.yaml`: resource limits and loopback-only ports over the official MISP Compose project.
 - `scripts/bootstrap_host.sh`: host hardening and Docker prerequisites.
-- `scripts/deploy_stack.sh`: builds and starts Gateway/Dionaea on the VPS.
+- `scripts/deploy_stack.sh`: builds and starts Gateway/External Sources/Dionaea and installs their timers on the VPS.
 - `scripts/deploy_misp.sh`: pins and starts MISP and creates a least-privilege backend client fragment.
-- `scripts/start_local_tunnels.ps1`: starts the two required Windows SSH tunnels.
+- `scripts/start_local_tunnels.ps1`: starts the three required Windows SSH forwards.
 - `systemd/`, `logrotate/`, `sysctl/`: timers, firewall persistence, log rotation, and the documented IPv4-only registry workaround.
 
 ## First deployment
@@ -52,13 +52,14 @@ docker compose --env-file .env --env-file .vps-client.env --env-file .misp-clien
 Forwarding is:
 
 - `127.0.0.1:18088` -> VPS `127.0.0.1:8088` for feed/sensors.
+- `127.0.0.1:18090` -> VPS `127.0.0.1:8090` for External source control/jobs.
 - `127.0.0.1:18443` -> VPS `127.0.0.1:8443` for MISP.
 
 After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port.
 
 ## Public and private ports
 
-Public ingress is limited to SSH plus the intended Dionaea services: TCP `21`, `445`, `1433`, `3306`, `5060`, `11211`, and UDP `5060`. Gateway, MISP, MariaDB, Valkey/Redis, PostgreSQL, and Docker management sockets are not public.
+Public ingress is limited to SSH plus the intended Dionaea services: TCP `21`, `445`, `1433`, `3306`, `5060`, `11211`, and UDP `5060`. Gateway, External control, MISP, MariaDB, Valkey/Redis, PostgreSQL, and Docker management sockets are not public.
 
 The `DOCKER-USER` policy allows established replies and drops new outbound connections from the honeypot and gateway subnets. This is a cost-constrained single-VPS lab boundary, not kernel-level isolation between physical hosts.
 
@@ -68,9 +69,10 @@ On the VPS:
 
 ```bash
 curl --fail http://127.0.0.1:8088/health
+curl --fail http://127.0.0.1:8090/api/v1/external-sources/health
 curl --insecure --fail https://127.0.0.1:8443/users/heartbeat
 docker ps
-systemctl is-active cti-ssh-collector.timer cti-docker-firewall.service
+systemctl is-active cti-ssh-collector.timer cti-external-collection.timer cti-storage-maintenance.timer cti-docker-firewall.service
 ```
 
 On Ammar's PC, use the authenticated FastAPI endpoints:
@@ -78,6 +80,9 @@ On Ammar's PC, use the authenticated FastAPI endpoints:
 ```text
 /api/v1/integrations/status
 /api/v1/integrations/external-feed/pull
+/api/v1/integrations/external-control/health
+/api/v1/integrations/external-control/sources
+/api/v1/integrations/external-control/jobs
 /api/v1/integrations/dionaea/pull
 /api/v1/integrations/host-auth/pull
 /api/v1/integrations/web-access/pull
@@ -88,6 +93,12 @@ On Ammar's PC, use the authenticated FastAPI endpoints:
 ```
 
 An identical External Feed returns HTTP 304 and creates a completed zero-record run. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
+
+The External timer runs every two hours. Manual source addition and per-source collection are issued through the central FastAPI API, not by publishing the VPS adapter or enabling its Swagger UI.
+
+## Storage retention
+
+The upstream Dionaea all-level text log is disabled in the derived image because it can grow by more than 100 GB per day on a public SMB sensor. JSON incidents remain enabled. Host logrotate bounds warning/error text logs, while the daily storage timer retains bistreams for seven days and captured binaries for thirty days.
 
 ## Backup and restore boundary
 

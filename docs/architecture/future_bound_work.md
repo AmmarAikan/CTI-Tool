@@ -15,6 +15,7 @@ The current system includes:
 - PostgreSQL central persistence, API authentication/roles/audit, NVD client, correlation, explainable risk, and STIX export.
 - DNRTI BERT NER as primary and DNRTI sklearn NER as secondary fallback, with saved held-out evidence and runtime quality gates.
 - Live MISP 2.5.44 on the VPS with unpublished, verified, idempotent event/attribute delivery.
+- VPS-hosted External Sources with private job control, scheduled validated export, and no collaborator-computer availability dependency.
 - Hardened VPS, loopback-only Gateway/MISP administration, SSH tunnels, scoped secrets, Dionaea egress controls, systemd collection, and log rotation.
 
 ## Deferred infrastructure
@@ -65,7 +66,7 @@ MISP is live, but automatic publishing is deliberately disabled. Future work inc
 
 ### Other sources and frontend
 
-Live Suricata, Zeek, Sysmon, firewall, TAXII, and Onion sources; Alembic operational migrations; model retraining automation; and the analyst frontend remain future work. The existing FastAPI endpoints are the contract for the frontend phase.
+Live Suricata, Zeek, Sysmon, firewall, TAXII, and Onion sources; Alembic operational migrations; model retraining automation; and the analyst frontend remain future work. Registered External additions still require reviewed configuration, while operator-supplied public URLs use the implemented Manual Source API. The existing FastAPI endpoints are the contract for the frontend phase.
 
 ## Not claimed
 

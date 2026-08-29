@@ -1,0 +1,12 @@
+/var/lib/docker/volumes/cti-vps_dionaea_logs/_data/dionaea.log
+/var/lib/docker/volumes/cti-vps_dionaea_logs/_data/dionaea-errors.log {
+    daily
+    size 25M
+    rotate 4
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

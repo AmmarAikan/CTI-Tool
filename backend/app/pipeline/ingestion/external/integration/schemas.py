@@ -73,6 +73,15 @@ class LatestExportResponse(StrictModel):
     manifest: dict[str, Any] = Field(default_factory=dict)
 
 
+class LatestExportSummaryResponse(StrictModel):
+    run_id: str
+    status: str
+    dataset_sha256: str | None = None
+    accepted_records: int = 0
+    review_records: int = 0
+    completed_at: str | None = None
+
+
 class ReviewRecordResponse(StrictModel):
     record_id: str
     canonical_url: str | None = None

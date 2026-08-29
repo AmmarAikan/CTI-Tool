@@ -68,9 +68,10 @@ The default file is `data/cti_platform.db` and is ignored by Git.
 
 ## Remote integration clients
 
-The backend can pull three remote services without changing the unified CTI schema:
+The backend can pull remote services without changing the unified CTI schema:
 
-- collaborator external feed: `/integrations/external-feed/health` and `/pull`;
+- VPS External feed: `/integrations/external-feed/health` and `/pull`;
+- VPS External job control: `/integrations/external-control/health`, `/sources`, `/jobs`, Manual Source operations, and `/exports/latest`;
 - Wazuh Indexer: `/integrations/wazuh/health` and `/pull`;
 - Dionaea raw sensor API: `/integrations/dionaea/health` and `/pull`.
 
@@ -78,7 +79,7 @@ The backend can pull three remote services without changing the unified CTI sche
 
 Wazuh pagination stores the last `search_after` sort tuple in non-secret source state, preventing same-timestamp alert loss. `WAZUH_INITIAL_SINCE` can limit the first historical import. `WAZUH_INDEX_PATTERN` defaults to `wazuh-alerts*`; keep the officially documented `timestamp` field unless the live mapping proves otherwise. `WAZUH_TIEBREAKER_FIELD` defaults to the stable alert `id` field and must be verified as sortable during live acceptance.
 
-Remote pulls are analyst/admin operations and are audit logged. Run them manually during this synchronous phase; automatic scheduling is intentionally deferred.
+Remote pulls and External collection mutations are analyst/admin operations and are audit logged. The VPS schedules External collection/publishing every two hours; the central pull remains explicit so a demonstration can show validation, BERT/Regex processing, persistence, and ETag/304 idempotency step by step. Background central workers remain deferred.
 
 ## Local isolated Dionaea lab
 

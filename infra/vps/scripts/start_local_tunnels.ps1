@@ -11,7 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $resolvedKey = (Resolve-Path -LiteralPath $KeyPath).Path
-$ports = @(18088, 18443)
+$ports = @(18088, 18090, 18443)
 $listeners = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
     Where-Object { $_.LocalPort -in $ports }
 
@@ -29,6 +29,7 @@ $sshArguments = @(
     "-o", "ServerAliveCountMax=3",
     "-N",
     "-L", "18088:127.0.0.1:8088",
+    "-L", "18090:127.0.0.1:8090",
     "-L", "18443:127.0.0.1:8443",
     "$SshUser@$ServerHost"
 )
@@ -56,5 +57,6 @@ if (@($ready).Count -ne $ports.Count) {
 [pscustomobject]@{
     ProcessId = $process.Id
     Gateway = "http://127.0.0.1:18088"
+    ExternalControl = "http://127.0.0.1:18090"
     MISP = "https://127.0.0.1:18443"
 }

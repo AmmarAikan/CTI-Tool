@@ -2,16 +2,18 @@
 
 ## Current decision
 
-The graduation project uses a cost-aware hybrid architecture. Heavy ML and the central database remain on Ammar's computer; internet-facing collection and CTI sharing run on the VPS; External Sources collection remains owned by the collaborator.
+The graduation project uses a two-node, cost-aware hybrid architecture. Heavy ML and the central database remain on Ammar's computer. Internet-facing External collection, internal sensors, the private Gateway, and CTI sharing run continuously on the VPS. No collaborator computer is an operational dependency.
 
 ```mermaid
 flowchart LR
-    Alaa["Collaborator PC\nExternal Sources collectors"] -->|"versioned JSON publish token"| Gateway["VPS CTI Gateway\nFeed + sensor API"]
-    Internet["Untrusted internet"] --> Dionaea["VPS Dionaea\npublic honeypot ports"]
+    Internet["Untrusted internet"] --> External["VPS External Sources\ncollect + privacy + versioned export"]
+    External -->|"scheduled validated JSON publish"| Gateway["VPS CTI Gateway\nFeed + sensor API"]
+    Internet --> Dionaea["VPS Dionaea\npublic honeypot ports"]
     Dionaea -->|"rotated JSON"| Gateway
     SSHLog["VPS SSH journal collector"] --> Gateway
     WebLog["Gateway access telemetry"] --> Gateway
     Gateway -->|"SSH tunnel + bearer + HMAC"| API["Ammar PC FastAPI"]
+    API -->|"SSH tunnel; source control and jobs"| External
     API --> BERT["DNRTI BERT primary\nsklearn secondary fallback"]
     API --> PG["Local PostgreSQL\nraw + processed + audit"]
     API -->|"SSH tunnel; unpublished first"| MISP["VPS MISP 2.5.44"]
@@ -22,7 +24,7 @@ flowchart LR
 
 | Component | Location | Role |
 |---|---|---|
-| External collectors | Collaborator PC | Collect, preprocess, privacy-filter, deduplicate within External scope, export versioned JSON |
+| External collectors | VPS loopback service | Collect, preprocess, privacy-filter, deduplicate within External scope, export versioned JSON, accept bounded private control jobs |
 | CTI Gateway | VPS loopback | Accept scoped publish, serve authenticated/HMAC feed and sensor pages, log safe web metadata |
 | Dionaea | VPS public sensor network | Capture selected hostile service interactions into JSON; no backend/MISP secret |
 | SSH journal collector | VPS host | Convert accepted/failed SSH authentication metadata into bounded JSONL without passwords |
@@ -34,9 +36,9 @@ flowchart LR
 ## External flow
 
 ```text
-External collectors
+VPS External collectors
 -> versioned JSON
--> publish-only Gateway token
+-> scheduled loopback publisher
 -> privacy and structural validation
 -> ETag/HMAC authenticated backend pull
 -> raw_items
@@ -71,12 +73,13 @@ PostgreSQL remains authoritative. MISP contains a controlled sharing copy and fu
 
 ## Trust and network boundaries
 
-### Personal computers to VPS
+### Ammar computer to VPS
 
 - SSH key authentication only; password and keyboard-interactive login are disabled.
 - Gateway and MISP are bound to VPS loopback and reached through local SSH forwarding.
-- Read and publish tokens are separate; the collaborator does not receive sensor-read or MISP credentials.
+- Read, control, sensor, and MISP credentials remain independently scoped.
 - Client secret fragments are ignored by Git.
+- The External control API is bound to VPS `127.0.0.1:8090` and forwarded only to Ammar's local `127.0.0.1:18090`.
 
 ### Honeypot boundary
 
@@ -97,6 +100,7 @@ Live acceptance currently covers:
 
 - hardened SSH and host firewall;
 - healthy Gateway, Dionaea, MISP Core, MariaDB, Valkey/Redis, and MISP Modules;
+- healthy VPS External Sources control service and scheduled publish path;
 - live External publish/pull and HTTP 304 repeat;
 - live Dionaea, SSH-auth, and web sensor pulls;
 - PostgreSQL raw/processed separation and outlier-only promotion;

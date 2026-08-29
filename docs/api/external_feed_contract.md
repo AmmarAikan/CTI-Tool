@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This contract is the hand-off boundary between the collaborator's external-source collectors and the backend that performs classification, BERT NER, IoC extraction, correlation, scoring, and persistence. The collector may run on another computer, but the backend receives one predictable JSON schema.
+This contract is the hand-off boundary between the VPS-hosted External Sources service and the backend that performs BERT NER, IoC extraction, correlation, scoring, and persistence. The collector and Gateway run as separate private services so the backend still receives one predictable JSON schema.
 
 Contract version: `1.0`.
 
@@ -21,13 +21,13 @@ Production rules:
 - Give this client read-only access.
 - Treat `cursor` and `checkpoint` as opaque strings; clients must not parse them.
 - Return at most the requested `limit`, with a server-side upper bound.
-- Do not expose the collaborator's computer directly to the internet. Synchronize the JSON to the VPS feed service, or reach the collaborator through a private WireGuard tunnel.
+- Do not expose the External control API or Gateway publicly. Both remain on VPS loopback and the backend reaches them through SSH forwarding.
 
 The implemented graduation lab binds the Gateway to VPS loopback and carries both publish and read traffic through SSH forwarding. Cleartext HTTP is therefore confined inside the encrypted SSH tunnel; a future public endpoint must use valid HTTPS.
 
 ## Collaborator publish endpoint
 
-The collaborator sends the completed JSON artifact with a publish-only credential:
+The VPS systemd publisher sends the completed JSON artifact to the loopback Gateway with a publish-only credential:
 
 ```http
 POST /api/v1/external-feed/publish

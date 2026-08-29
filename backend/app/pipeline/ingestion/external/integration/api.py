@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from typing import Any, Callable
+from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Header, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -10,21 +11,51 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from backend.app.pipeline.ingestion.external.application.collection_service import (
-    AllEnabledRunActiveError, CollectionRequest, CollectionRequestError, CollectionService, DisabledSourceError,
-    ManualSourceCommandError, UnknownSourceError,
+    AllEnabledRunActiveError,
+    CollectionRequest,
+    CollectionRequestError,
+    CollectionService,
+    DisabledSourceError,
+    ManualSourceCommandError,
+    UnknownSourceError,
 )
 from backend.app.pipeline.ingestion.external.application.job_service import JobService
-from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceService
-from backend.app.pipeline.ingestion.external.application.review_service import ReviewService
-from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
-from backend.app.pipeline.ingestion.external.integration.auth import AuthenticationError, Authenticator, AuthorizationError, Authorizer, Principal
-from backend.app.pipeline.ingestion.external.integration.idempotency import IdempotencyStore
-from backend.app.pipeline.ingestion.external.integration.jobs import IntegrationJob, JobRunner, utc_now
-from backend.app.pipeline.ingestion.external.integration.schemas import (
-    CollectionRequestBody, HealthResponse, IntegrationErrorResponse, JobStatusResponse,
-    LatestExportResponse, LatestReviewResponse, ManualURLRequestBody, SourceCollectionRequestBody, SourceResponse,
+from backend.app.pipeline.ingestion.external.application.manual_source_service import (
+    ManualSourceService,
 )
-
+from backend.app.pipeline.ingestion.external.application.review_service import (
+    ReviewService,
+)
+from backend.app.pipeline.ingestion.external.application.source_management_service import (
+    SourceManagementService,
+    SourceView,
+)
+from backend.app.pipeline.ingestion.external.integration.auth import (
+    AuthenticationError,
+    Authenticator,
+    AuthorizationError,
+    Authorizer,
+    Principal,
+)
+from backend.app.pipeline.ingestion.external.integration.idempotency import (
+    IdempotencyStore,
+)
+from backend.app.pipeline.ingestion.external.integration.jobs import (
+    JobRunner,
+    utc_now,
+)
+from backend.app.pipeline.ingestion.external.integration.schemas import (
+    CollectionRequestBody,
+    HealthResponse,
+    IntegrationErrorResponse,
+    JobStatusResponse,
+    LatestExportResponse,
+    LatestExportSummaryResponse,
+    LatestReviewResponse,
+    ManualURLRequestBody,
+    SourceCollectionRequestBody,
+    SourceResponse,
+)
 
 API_PREFIX = "/api/v1/external-sources"
 COLLECTION_ERROR_RESPONSES = {
@@ -195,6 +226,15 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         if not value: raise APIError(404, "export_not_found", "no validated export is available")
         allowed = {key: value[key] for key in LatestExportResponse.model_fields if key in value}
         return LatestExportResponse.model_validate(allowed)
+
+    @app.get(f"{API_PREFIX}/exports/latest/summary", response_model=LatestExportSummaryResponse, responses={
+        404: {"model": IntegrationErrorResponse, "description": "No validated External Sources export is available."},
+    })
+    def latest_export_summary(_current: Principal = Depends(permitted("exports:read"))) -> LatestExportSummaryResponse:
+        value = services.job_service.get_latest_export()
+        if not value: raise APIError(404, "export_not_found", "no validated export is available")
+        allowed = {key: value[key] for key in LatestExportSummaryResponse.model_fields if key in value}
+        return LatestExportSummaryResponse.model_validate(allowed)
 
     @app.get(f"{API_PREFIX}/reviews/latest", response_model=LatestReviewResponse, responses={
         404: {"model": IntegrationErrorResponse, "description": "No validated External Sources review artifact is available."},

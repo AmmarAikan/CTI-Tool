@@ -6,20 +6,23 @@ import os
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
 from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse
-from backend.app.pipeline.ingestion.external.common.logging import configure_file_logging
+from backend.app.pipeline.ingestion.external.common.logging import (
+    configure_file_logging,
+)
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.integration.api import API_PREFIX
 from backend.app.pipeline.ingestion.external.integration.jobs import InProcessJobRunner
 from backend.app.pipeline.ingestion.external.rss_connector import RSSConnector
 
-
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+FIXED_NOW = datetime(2026, 8, 23, 12, 0, tzinfo=timezone.utc)
 
 
 class FakeFeedClient:
@@ -54,7 +57,13 @@ class LocalSourceJobTests(unittest.TestCase):
         feed = (FIXTURES / "rss_feed.xml").read_bytes()
 
         def connector_factory(source, state):
-            return RSSConnector.from_source(source, state=state, http_client=FakeFeedClient(feed), crawler=FakeArticleCrawler())
+            return RSSConnector.from_source(
+                source,
+                state=state,
+                http_client=FakeFeedClient(feed),
+                crawler=FakeArticleCrawler(),
+                clock=lambda: FIXED_NOW,
+            )
 
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ, {
             "EXTERNAL_API_TOKEN": "local-regression-token",
@@ -69,19 +78,21 @@ class LocalSourceJobTests(unittest.TestCase):
                                         exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
                                         manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
                                         log_path=root / "logs" / "cti_tool.log")
-            client = TestClient(app)
-            headers = {"Authorization": "Bearer local-regression-token"}
-            accepted = client.post(f"{API_PREFIX}/sources/the-hacker-news/jobs", headers=headers)
-            self.assertEqual((accepted.status_code, accepted.json()["state"]), (202, "queued"))
-            terminal = self._wait(client, accepted.json()["job_id"], headers)
-            self.assertEqual(terminal["state"], "completed")
-            self.assertEqual(terminal["command_id"], accepted.json()["command_id"])
-            self.assertEqual(terminal["result"]["source_id"], "the-hacker-news")
-            self.assertGreaterEqual(terminal["result"]["accepted_records"], 1)
-            self.assertTrue((root / "state" / "rss_the-hacker-news.json").is_file())
-            self.assertTrue(any((root / "processed").glob("rss_the-hacker-news_*.json")))
-            app.state.services.job_runner.shutdown()
-            self._close_file_handler(root / "logs" / "cti_tool.log")
+            try:
+                client = TestClient(app)
+                headers = {"Authorization": "Bearer local-regression-token"}
+                accepted = client.post(f"{API_PREFIX}/sources/the-hacker-news/jobs", headers=headers)
+                self.assertEqual((accepted.status_code, accepted.json()["state"]), (202, "queued"))
+                terminal = self._wait(client, accepted.json()["job_id"], headers)
+                self.assertEqual(terminal["state"], "completed")
+                self.assertEqual(terminal["command_id"], accepted.json()["command_id"])
+                self.assertEqual(terminal["result"]["source_id"], "the-hacker-news")
+                self.assertGreaterEqual(terminal["result"]["accepted_records"], 1)
+                self.assertTrue((root / "state" / "rss_the-hacker-news.json").is_file())
+                self.assertTrue(any((root / "processed").glob("rss_the-hacker-news_*.json")))
+            finally:
+                app.state.services.job_runner.shutdown()
+                self._close_file_handler(root / "logs" / "cti_tool.log")
 
     def test_local_docs_environment_flag_is_default_off_and_explicitly_enabled(self) -> None:
         base_environment = {

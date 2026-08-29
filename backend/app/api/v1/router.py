@@ -29,12 +29,20 @@ from backend.app.db.models import (
     ThreatEvent,
     User,
 )
+from backend.app.integrations.external_control_client import (
+    ExternalControlClient,
+    ExternalControlError,
+    ExternalControlRemoteError,
+)
 from backend.app.integrations.misp_client import MISPClient
 from backend.app.integrations.stix_exporter import STIXExporter
 from backend.app.repositories.cti_repository import CTIRepository
 from backend.app.schemas.api import (
     BootstrapRequest,
     CorrelationRequest,
+    ExternalCollectionStartRequest,
+    ExternalManualSourceRequest,
+    ExternalSourceRunRequest,
     LoginRequest,
     MISPSendRequest,
     SourceCreate,
@@ -78,6 +86,38 @@ def require_roles(*roles: str):
         return user
 
     return dependency
+
+
+def external_control_client() -> ExternalControlClient:
+    settings = get_settings()
+    if not settings.external_control_configured:
+        raise HTTPException(status_code=503, detail="External Sources control API is not configured")
+    try:
+        return ExternalControlClient(
+            str(settings.external_control_api_url),
+            str(settings.external_control_api_token),
+            verify_tls=settings.external_control_verify_tls,
+            allow_http=settings.external_control_allow_http,
+            timeout_seconds=settings.external_control_timeout_seconds,
+            max_response_bytes=settings.external_control_max_bytes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail="External Sources control configuration is invalid") from exc
+
+
+def external_control_call(callback):
+    try:
+        return callback(external_control_client())
+    except ExternalControlRemoteError as exc:
+        status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+    except ExternalControlError as exc:
+        raise HTTPException(status_code=503, detail="External Sources control API is unreachable") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 def event_query():
@@ -327,6 +367,101 @@ def ml_status(_: CurrentUser) -> dict[str, Any]:
 @router.get("/integrations/external-feed/health", tags=["integrations"])
 def external_feed_health(_: CurrentUser) -> dict[str, Any]:
     return PipelineService.external_feed_health()
+
+
+@router.get("/integrations/external-control/health", tags=["external-control"])
+def external_control_health(_: CurrentUser) -> dict[str, Any]:
+    settings = get_settings()
+    if not settings.external_control_configured:
+        return {"configured": False, "reachable": False}
+    return external_control_client().healthcheck()
+
+
+@router.get("/integrations/external-control/sources", tags=["external-control"])
+def external_control_sources(_: CurrentUser) -> list[dict[str, Any]]:
+    return external_control_call(lambda client: client.list_sources())
+
+
+@router.post("/integrations/external-control/jobs", tags=["external-control"], status_code=202)
+def external_control_start_job(
+    payload: ExternalCollectionStartRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    result = external_control_call(
+        lambda client: client.start_collection(
+            source_ids=payload.source_ids,
+            scope=payload.scope,
+            force=payload.force,
+        )
+    )
+    audit(db, user, "start_external_collection", "external_collection_job", result["job_id"],
+          scope=payload.scope, source_count=len(payload.source_ids), force=payload.force)
+    db.commit()
+    return result
+
+
+@router.post(
+    "/integrations/external-control/sources/{source_id}/jobs",
+    tags=["external-control"],
+    status_code=202,
+)
+def external_control_source_job(
+    source_id: str,
+    payload: ExternalSourceRunRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.collect_source(source_id, force=payload.force))
+    audit(db, user, "collect_external_source", "external_collection_job", result["job_id"],
+          source_id=source_id, force=payload.force)
+    db.commit()
+    return result
+
+
+@router.get("/integrations/external-control/jobs/{job_id}", tags=["external-control"])
+def external_control_job(job_id: str, _: CurrentUser) -> dict[str, Any]:
+    return external_control_call(lambda client: client.get_job(job_id))
+
+
+@router.post(
+    "/integrations/external-control/manual-sources",
+    tags=["external-control"],
+    status_code=202,
+)
+def external_control_manual_source(
+    payload: ExternalManualSourceRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    result = external_control_call(
+        lambda client: client.add_manual_source(str(payload.url), force=payload.force)
+    )
+    audit(db, user, "add_external_manual_source", "external_collection_job", result["job_id"],
+          force=payload.force)
+    db.commit()
+    return result
+
+
+@router.post(
+    "/integrations/external-control/manual-sources/recheck",
+    tags=["external-control"],
+    status_code=202,
+)
+def external_control_manual_recheck(
+    payload: ExternalManualSourceRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.recheck_manual_source(str(payload.url)))
+    audit(db, user, "recheck_external_manual_source", "external_collection_job", result["job_id"])
+    db.commit()
+    return result
+
+
+@router.get("/integrations/external-control/exports/latest", tags=["external-control"])
+def external_control_latest_export(_: CurrentUser) -> dict[str, Any]:
+    return external_control_call(lambda client: client.latest_export_summary())
 
 
 @router.post("/integrations/external-feed/pull", tags=["integrations"])

@@ -1,0 +1,16 @@
+[Unit]
+Description=Apply bounded CTI sensor storage retention
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cti-maintain-storage
+User=root
+Group=root
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/docker/volumes/cti-vps_dionaea_data/_data /var/lib/docker/volumes/cti-vps_dionaea_logs/_data /var/lib/logrotate /run
+

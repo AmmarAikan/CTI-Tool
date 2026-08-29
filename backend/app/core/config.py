@@ -52,6 +52,14 @@ class Settings:
     external_feed_max_bytes: int = int(os.getenv("EXTERNAL_FEED_MAX_BYTES", str(20 * 1024 * 1024)))
     external_feed_max_pages: int = int(os.getenv("EXTERNAL_FEED_MAX_PAGES", "20"))
     external_feed_page_size: int = int(os.getenv("EXTERNAL_FEED_PAGE_SIZE", "250"))
+    external_control_api_url: str | None = os.getenv("EXTERNAL_CONTROL_API_URL")
+    external_control_api_token: str | None = os.getenv("EXTERNAL_CONTROL_API_TOKEN")
+    external_control_verify_tls: bool = _as_bool(os.getenv("EXTERNAL_CONTROL_VERIFY_TLS"), True)
+    external_control_allow_http: bool = _as_bool(os.getenv("EXTERNAL_CONTROL_ALLOW_HTTP"), False)
+    external_control_timeout_seconds: int = int(os.getenv("EXTERNAL_CONTROL_TIMEOUT_SECONDS", "30"))
+    external_control_max_bytes: int = int(
+        os.getenv("EXTERNAL_CONTROL_MAX_BYTES", str(2 * 1024 * 1024))
+    )
     wazuh_indexer_url: str | None = os.getenv("WAZUH_INDEXER_URL")
     wazuh_indexer_username: str | None = os.getenv("WAZUH_INDEXER_USERNAME")
     wazuh_indexer_password: str | None = os.getenv("WAZUH_INDEXER_PASSWORD")
@@ -106,6 +114,10 @@ class Settings:
     @property
     def external_feed_configured(self) -> bool:
         return bool(self.external_feed_url and self.external_feed_token)
+
+    @property
+    def external_control_configured(self) -> bool:
+        return bool(self.external_control_api_url and self.external_control_api_token)
 
     @property
     def wazuh_indexer_configured(self) -> bool:

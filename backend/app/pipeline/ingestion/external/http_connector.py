@@ -51,7 +51,7 @@ class ExternalFeedResult:
 
 
 class ExternalFeedAPIConnector(ExternalConnector):
-    """Pull a paginated, authenticated JSON feed from the collaborator/VPS API."""
+    """Pull a paginated, authenticated JSON feed from the private VPS Gateway."""
 
     SIGNATURE_HEADER = "X-CTI-Signature"
 

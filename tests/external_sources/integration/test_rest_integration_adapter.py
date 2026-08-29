@@ -1,30 +1,49 @@
 from __future__ import annotations
 
 import inspect
+import json
 import unittest
+from pathlib import Path
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-import json
-from pathlib import Path
 
-from backend.app.pipeline.ingestion.external.application.collection_service import AllEnabledRunActiveError, CollectionService, JobAccepted
-from backend.app.pipeline.ingestion.external.application.job_service import JobService
-from backend.app.pipeline.ingestion.external.application.manual_source_service import ManualSourceService
-from backend.app.pipeline.ingestion.external.application.source_management_service import SourceManagementService, SourceView
-from backend.app.pipeline.ingestion.external.integration.api import API_PREFIX, AdapterServices, create_app
-from backend.app.pipeline.ingestion.external.integration.auth import Principal, RoleAuthorizer
-from backend.app.pipeline.ingestion.external.integration.idempotency import InMemoryIdempotencyStore
-from backend.app.pipeline.ingestion.external.integration.jobs import IntegrationJob
 import backend.app.pipeline.ingestion.external.integration.api as api_module
+from backend.app.pipeline.ingestion.external.application.collection_service import (
+    AllEnabledRunActiveError,
+    CollectionService,
+    JobAccepted,
+)
+from backend.app.pipeline.ingestion.external.application.job_service import JobService
+from backend.app.pipeline.ingestion.external.application.manual_source_service import (
+    ManualSourceService,
+)
+from backend.app.pipeline.ingestion.external.application.source_management_service import (
+    SourceView,
+)
+from backend.app.pipeline.ingestion.external.integration.api import (
+    API_PREFIX,
+    AdapterServices,
+    create_app,
+)
+from backend.app.pipeline.ingestion.external.integration.auth import (
+    Principal,
+    RoleAuthorizer,
+)
+from backend.app.pipeline.ingestion.external.integration.idempotency import (
+    InMemoryIdempotencyStore,
+)
+from backend.app.pipeline.ingestion.external.integration.jobs import IntegrationJob
 
 
 class TokenAuth:
     def authenticate(self, token):
         roles = {"viewer-token": {"viewer"}, "operator-token": {"operator"}, "dark-token": {"dark_web_approver"}, "admin-token": {"admin"}}
         if token not in roles:
-            from backend.app.pipeline.ingestion.external.integration.auth import AuthenticationError
+            from backend.app.pipeline.ingestion.external.integration.auth import (
+                AuthenticationError,
+            )
             raise AuthenticationError()
         return Principal(token.removesuffix("-token"), frozenset(roles[token]))
 
@@ -107,6 +126,7 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         export_responses = schema["paths"][f"{API_PREFIX}/exports/latest"]["get"]["responses"]
         self.assertIn("404", export_responses)
         self.assertIn("IntegrationErrorResponse", str(export_responses["404"]))
+        self.assertIn(f"{API_PREFIX}/exports/latest/summary", schema["paths"])
         self.assertEqual(client.get(f"{API_PREFIX}/sources").status_code, 401)
 
     def test_authorization_boundaries(self):
@@ -156,6 +176,9 @@ class RestIntegrationAdapterTests(unittest.TestCase):
             "accepted_records": 2, "review_records": 1, "completed_at": "2026-08-24T00:00:00Z", "dataset_file": "C:\\private\\file.json"}
         export = self.client.get(f"{API_PREFIX}/exports/latest", headers=self.auth("viewer-token")).json()
         self.assertNotIn("dataset_file", export); self.assertNotIn("private", str(export).lower())
+        summary = self.client.get(f"{API_PREFIX}/exports/latest/summary", headers=self.auth("viewer-token")).json()
+        self.assertEqual(summary["accepted_records"], 2)
+        self.assertNotIn("dataset", summary); self.assertNotIn("manifest", summary)
 
     def test_authenticated_review_read_returns_only_safe_contract_fields(self):
         self.assertEqual(self.client.get(f"{API_PREFIX}/reviews/latest").status_code, 401)

@@ -1,0 +1,13 @@
+[Unit]
+Description=Run CTI sensor storage maintenance daily
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=1d
+RandomizedDelaySec=15min
+Persistent=true
+Unit=cti-storage-maintenance.service
+
+[Install]
+WantedBy=timers.target
+

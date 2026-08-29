@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 TEST_DIRECTORY = Path(tempfile.mkdtemp(prefix="cti_backend_test_"))
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_DIRECTORY / 'test.db').as_posix()}"
@@ -57,9 +58,48 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(integrations.status_code, 200)
         self.assertIn("wazuh_indexer", integrations.json())
         self.assertIn("dionaea_sensor_api", integrations.json())
+        self.assertIn("external_control_api", integrations.json())
         self.assertEqual(model.status_code, 200)
         self.assertEqual(model.json()["model_priority"]["primary"], "dnrti_bert_ner")
         self.assertGreater(model.json()["held_out_test"]["bert"]["f1"], 0.75)
+
+    def test_external_control_routes_are_authenticated_and_frontend_ready(self) -> None:
+        sources = [
+            {
+                "source_id": "cisa-kev",
+                "name": "CISA KEV",
+                "source_type": "vulnerability",
+                "status": "enabled",
+                "metadata": {},
+            }
+        ]
+        job = {
+            "schema_version": "1.0",
+            "job_id": "job-1234567890",
+            "command_id": "cmd-1234567890",
+            "state": "queued",
+            "created_at": "2026-08-29T00:00:00Z",
+            "updated_at": "2026-08-29T00:00:00Z",
+            "progress": {},
+            "result": None,
+            "error": None,
+        }
+        with patch("backend.app.api.v1.router.external_control_call", side_effect=[sources, job]):
+            unauthorized = self.client.get("/api/v1/integrations/external-control/sources")
+            listed = self.client.get(
+                "/api/v1/integrations/external-control/sources",
+                headers=self.headers,
+            )
+            started = self.client.post(
+                "/api/v1/integrations/external-control/jobs",
+                headers=self.headers,
+                json={"scope": "all_enabled", "force": False},
+            )
+
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(listed.json()[0]["source_id"], "cisa-kev")
+        self.assertEqual(started.status_code, 202)
+        self.assertEqual(started.json()["state"], "queued")
 
     def test_dionaea_upload_persists_sessions_and_outlier_event(self) -> None:
         with DIONAEA_SAMPLE_PATH.open("rb") as handle:

@@ -53,7 +53,7 @@ External Connector
 
 For unstructured external text, classification happens before NER. Trusted structured sources such as NVD can bypass the document classifier with explicit metadata.
 
-External input may arrive by file or through the collaborator's authenticated HTTPS JSON feed. The remote path validates versioned schema, stable IDs, size/page limits, pagination, ETag, and optional HMAC before persistence.
+External input may arrive by file or from the VPS-hosted External Sources service. Its scheduled publisher writes the validated JSON to the loopback Gateway; the backend then pulls it through an SSH tunnel using a scoped bearer token, HMAC, ETag, pagination, stable IDs, and strict size/page/schema checks before persistence. The private control path can list sources, start bounded jobs, add approved manual URLs, and read job/export summaries without exposing collector credentials or artifacts publicly.
 
 ## Pipeline C: Internal Runtime
 

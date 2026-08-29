@@ -21,6 +21,7 @@ This document intentionally omits the public IP, credentials, tokens, hostile so
 | Service | Deployment | Exposure | Acceptance |
 |---|---|---|---|
 | CTI Gateway | Project container | `127.0.0.1:8088` | Healthy; all three sensor streams ready |
+| External Sources | Canonical project container | `127.0.0.1:8090` | Private job control and scheduled validated JSON publish |
 | Dionaea | Project-built image | Selected public honeypot ports | Running; JSON returned through signed sensor API |
 | SSH collector | systemd timer | No network listener | Active; bounded JSONL with safe auth metadata |
 | MISP Core | Official slim image `v2.5.44` | `127.0.0.1:8080/8443` | Healthy; API version 2.5.44 |
@@ -33,13 +34,13 @@ The official MISP Docker repository is pinned to commit `223b675c4480730832f928e
 
 ## Deployment procedure
 
-1. Transfer the small versioned project release only.
+1. Transfer a versioned Git archive of the tracked project files; build large images directly on the VPS.
 2. Point `/opt/cti-platform/current` to the selected release.
 3. Run `bootstrap_host.sh`.
 4. Run `deploy_stack.sh` to build Gateway/Dionaea on the server and install systemd/firewall/logrotate policies.
 5. Run `deploy_misp.sh` to clone the pinned upstream repository, generate server-only secrets, pull slim images, start services, and wait for MISP heartbeat.
-6. Securely copy the least-privilege client fragments to their intended computers; keep them ignored by Git.
-7. Start local SSH tunnels and launch the local backend with the three env files.
+6. Securely copy Ammar's least-privilege backend fragment; keep it ignored by Git.
+7. Start the three local SSH tunnels and launch the local backend with `.env`, `.vps-client.env`, and `.misp-client.env`.
 
 Exact commands and layouts are in `infra/vps/README.md`.
 
@@ -51,6 +52,7 @@ Exact commands and layouts are in `infra/vps/README.md`.
 | Dionaea 21, 445, 1433, 3306, 5060, 11211/TCP | Public | Selected honeypot emulations |
 | Dionaea 5060/UDP | Public | SIP honeypot emulation |
 | Gateway 8088 | VPS loopback | Feed and sensor API through SSH tunnel |
+| External control 8090 | VPS loopback | Source/job control through SSH tunnel |
 | MISP 8080/8443 | VPS loopback | Browser/backend access through SSH tunnel |
 | MariaDB, Redis, PostgreSQL | Container/private only | Owning applications only |
 
@@ -60,10 +62,10 @@ Docker-published ports require a `DOCKER-USER` policy in addition to UFW. New ou
 
 - `/etc/cti-platform/vps.env`: Gateway/sensor server secrets, root-only.
 - `/etc/cti-platform/misp.env`: MISP/MariaDB/Redis/application secrets, root-only.
-- Ammar backend fragment: feed/sensor read tokens and HMAC keys only.
-- Collaborator fragment: External Feed publish URL/token only.
+- Ammar backend fragment: feed/sensor read keys plus External control token only.
+- External publishing uses the server-only publish token locally on the VPS; no second computer receives it.
 - MISP backend fragment: MISP URL/API key only.
-- `.vps-client.env`, `.vps-publisher.env`, and `.misp-client.env` are ignored by Git.
+- `.vps-client.env` and `.misp-client.env` are ignored by Git. The obsolete `.vps-publisher.env` pattern remains ignored defensively but is no longer used.
 
 No client receives another role's token.
 

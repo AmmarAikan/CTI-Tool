@@ -45,6 +45,49 @@ services:
       retries: 3
       start_period: 15s
 
+  external-sources:
+    build:
+      context: ../..
+      dockerfile: Dockerfile.external
+    image: cti-external-sources:1.0.0
+    environment:
+      EXTERNAL_API_TOKEN: ${EXTERNAL_CONTROL_TOKEN:?Set EXTERNAL_CONTROL_TOKEN}
+      EXTERNAL_API_ROLES: operator
+      EXTERNAL_API_DEV_WORKERS: ${EXTERNAL_API_DEV_WORKERS:-2}
+      EXTERNAL_API_DOCS_ENABLED: "false"
+      EXTERNAL_DARK_WEB_CONFIG_PATH: /run/secrets/dark_web_sources
+      NVD_API_KEY: ${NVD_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID:-}
+      REDDIT_CLIENT_SECRET: ${REDDIT_CLIENT_SECRET:-}
+      REDDIT_USER_AGENT: ${REDDIT_USER_AGENT:-}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
+    mem_limit: 2g
+    cpus: 2.0
+    ports:
+      - "127.0.0.1:8090:8000"
+    volumes:
+      - external_data:/app/data/external
+      - external_logs:/app/logs
+      - ${EXTERNAL_DARK_WEB_CONFIG_FILE:-../../config/dark_web_sources.example.json}:/run/secrets/dark_web_sources:ro
+    networks:
+      - external_egress
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/external-sources/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   dionaea:
     build:
       context: ../dionaea
@@ -102,8 +145,15 @@ networks:
     ipam:
       config:
         - subnet: 172.30.10.0/24
+  external_egress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.30.0/24
 
 volumes:
   gateway_data:
   dionaea_data:
   dionaea_logs:
+  external_data:
+  external_logs:

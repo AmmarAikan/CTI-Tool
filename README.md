@@ -11,7 +11,7 @@ This repository now contains the backend foundation of the graduation-project CT
 - [x] Authenticated Wazuh Indexer pull with bounded checkpointed pagination
 - [x] Dionaea `log_json` ingestion plus a live isolated VPS sensor and authenticated/HMAC API
 - [x] Lightweight VPS SSH-auth and gateway web-access JSON sensor ingestion
-- [x] Authenticated/HMAC external feed API contract for the collaborator hand-off
+- [x] VPS-hosted External Sources with private job control, scheduled JSON publish, and authenticated/HMAC pull
 - [x] 30-minute source-IP sessionization and session feature extraction
 - [x] Isolation Forest outlier detection with a clearly labeled small-sample fallback
 - [x] DNRTI BERT as the primary runtime NER model; DNRTI sklearn as the secondary fallback
@@ -20,7 +20,7 @@ This repository now contains the backend foundation of the graduation-project CT
 - [x] Cached/chunked BERT runtime and `/ml/status` held-out quality evidence
 - [x] Bearer authentication, admin/analyst/viewer roles, and audit logging
 
-The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. MISP 2.5.44, the CTI Gateway, Dionaea, and lightweight SSH/web sensors are live on the VPS but remain optional to local file ingestion, analysis, storage, API, and STIX export. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains available for a future larger or separate host. The current deployment and sanitized acceptance evidence are documented in `Parts Report/Hybrid_VPS_Backend_Deployment_Report.md`.
+The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. External Sources, MISP 2.5.44, the CTI Gateway, Dionaea, and lightweight SSH/web sensors run on the VPS; FastAPI, PostgreSQL, DNRTI BERT, and the sklearn fallback remain on Ammar's computer. No collaborator computer is required at runtime. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains available for a future larger or separate host. The current deployment and sanitized acceptance evidence are documented in `Parts Report/Hybrid_VPS_Backend_Deployment_Report.md`.
 
 ## Quick start — backend
 
@@ -59,6 +59,8 @@ The former top-level prototype has been retired. Do not create a parallel implem
 ## Capabilities
 
 The canonical package provides bounded connectors for RSS, CERT advisories, vulnerability databases, Reddit, Hacker News, Telegram public previews, and operator-approved onion sources. It also provides generic crawling, manual URL routing, cleaning, privacy review, relevance classification, incremental SHA-256 state, run-scoped export, and an internal FastAPI integration adapter.
+
+In the implemented two-node deployment, this same canonical package runs as a hardened VPS loopback service on `127.0.0.1:8090`. A systemd timer collects enabled sources and publishes the validated JSON to the loopback CTI Gateway every two hours. Ammar's central backend reaches job-control operations through an SSH tunnel and exposes only authenticated central API routes to the future frontend. See `docs/operations/vps_external_sources.md`.
 
 Accepted handoff artifacts are validated against the schemas in `contracts/`. Runtime state and outputs belong under `data/external/`; they are local operational files, not central storage.
 

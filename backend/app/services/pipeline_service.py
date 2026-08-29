@@ -54,6 +54,12 @@ class PipelineService:
                 "tls_verification": settings.external_feed_verify_tls,
                 "hmac_verification": bool(settings.external_feed_hmac_secret),
             },
+            "external_control_api": {
+                "configured": settings.external_control_configured,
+                "deployment_status": "vps_loopback",
+                "tls_verification": settings.external_control_verify_tls,
+                "transport": "ssh_tunnel" if settings.external_control_allow_http else "https",
+            },
             "wazuh_indexer": {
                 "configured": settings.wazuh_indexer_configured,
                 "deployment_status": "deferred_not_deployed",

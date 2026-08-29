@@ -1,0 +1,18 @@
+[Unit]
+Description=Collect External CTI and publish the validated JSON to the private Gateway
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/cti-external-collect-publish
+TimeoutStartSec=45min
+User=root
+Group=root
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/run
+

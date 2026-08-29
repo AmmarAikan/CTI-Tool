@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class BootstrapRequest(BaseModel):
@@ -35,3 +35,18 @@ class CorrelationRequest(BaseModel):
 
 class MISPSendRequest(BaseModel):
     dry_run: bool = True
+
+
+class ExternalCollectionStartRequest(BaseModel):
+    source_ids: list[str] = Field(default_factory=list, max_length=100)
+    scope: Literal["all_enabled"] | None = None
+    force: bool = False
+
+
+class ExternalSourceRunRequest(BaseModel):
+    force: bool = False
+
+
+class ExternalManualSourceRequest(BaseModel):
+    url: HttpUrl
+    force: bool = False
