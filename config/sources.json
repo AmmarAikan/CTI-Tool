@@ -88,7 +88,7 @@
       "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
       "enabled": true,
       "lookback_days": 7,
-      "results_per_page": 2000,
+      "results_per_page": 100,
       "max_pages": 5,
       "delay_seconds": 6
     },
