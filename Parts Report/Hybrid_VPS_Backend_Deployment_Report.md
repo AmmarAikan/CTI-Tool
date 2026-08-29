@@ -226,7 +226,38 @@ published: false
 
 تم حذف Event التشخيصي غير المنشور الذي احتوى 4 مؤشرات تجريبية، وإزالة blocklist الخاصة بمعرفه، ثم إنشاء Event القبول النهائي النظيف بمؤشرين. لم تُحذف بيانات حقيقية أو منشورة.
 
-## 10. ما لا ندعي أنه مكتمل
+## 10. إعادة التحقق بعد تغيير الشبكة
+
+بتاريخ 2026-08-29 فُحص الوصول بعد أن ظهرت في Chrome رسالة `ERR_NETWORK_CHANGED` ثم `ERR_CONNECTION_TIMED_OUT` عند فتح:
+
+```text
+https://<VPS_IP>/api/v1/integrations/status
+```
+
+هذا ليس عنوان الـBackend في المعمارية الحالية. الـVPS لا ينشر FastAPI المركزي أو Gateway/MISP على المنفذ العام 80/443. FastAPI يعمل محليًا على جهاز Ammar في `http://127.0.0.1:8000`، وGateway/MISP يصل إليهما عبر SSH tunnels فقط. كما أن `/api/v1/integrations/status` محمي ويتطلب JWT Bearer؛ لا يُختبر من شريط العنوان دون مصادقة. العنوان الصحيح للعرض والتجربة هو:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+نتيجة إعادة الفحص الحية:
+
+- PostgreSQL: healthy، و`/api/v1/health` أعاد `status=ok` و`database=true`.
+- External Feed وDionaea وSSH host-auth وGateway web-access: `configured=true` و`reachable=true` مع تحقق العقد وHMAC.
+- MISP: `reachable=true` وأعاد الإصدار `2.5.44`.
+- Wazuh: بقي `deferred_not_deployed` كما هو موثق، وليس فشلًا في الخدمة الحالية.
+- DNRTI BERT: الـruntime الفعلي `transformer`، والنموذج الأساسي محمّل، وكل quality gates المسجلة نجحت. بلغ held-out F1 للنموذج الأساسي `0.7812` مقابل `0.6379` للنموذج الاحتياطي، مع التنبيه أن هذه مقاييس dataset اختبار محفوظ وليست دقة production حية.
+
+أثناء الفحص علقت طلبات `/ml/status` اللاحقة لأن عملية Uvicorn داخل Docker دخلت حالة `zombie`، مع بقاء health العام مستجيبًا. رفض Docker إعادة تشغيل الحاوية منفردة، لذلك أُعيد تشغيل Docker Desktop ثم شُغلت حاويتا `db` و`backend` من جديد. بقيت بيانات PostgreSQL وملفات الرفع محفوظة في named volumes. بعد الاستعادة نجح `/ml/status` خلال نحو 21 ثانية في أول تحميل لـBERT. إذا تكررت الحالة بعد sleep أو network change، تكون خطوات الاستعادة:
+
+```powershell
+docker desktop restart
+docker compose --env-file .env --env-file .vps-client.env --env-file .misp-client.env up -d db backend
+```
+
+ثم يُعاد تشغيل نفق SSH إذا اختفت المنافذ المحلية `18088` و`18443`، ويُتحقق من `/api/v1/health` قبل أي pull أو MISP send.
+
+## 11. ما لا ندعي أنه مكتمل
 
 - Wazuh Manager/Indexer/Dashboard غير منشور عمدًا.
 - Dionaea على نفس kernel الخاص بالـVPS؛ VPS مستقل للحساس أفضل مستقبلًا.
@@ -248,6 +279,7 @@ published: false
 - `docs/architecture/cloud_distributed_architecture.md`
 - `docs/architecture/future_bound_work.md`
 - `docs/operations/vps_deployment_plan.md`
+- `docs/operations/external_collaborator_handoff.md`
 - `docs/api/external_feed_contract.md`
 - `docs/api/internal_sensor_contract.md`
 - `infra/vps/README.md`
