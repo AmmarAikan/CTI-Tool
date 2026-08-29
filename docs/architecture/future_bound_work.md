@@ -2,52 +2,75 @@
 
 ## Purpose
 
-This file defines the boundary between the completed graduation-project backend and heavier infrastructure that is intentionally postponed. The current system is a focused CTI prototype, not an enterprise SOC deployment. A postponed component is not required for the present ingestion, analysis, persistence, correlation, API, or STIX demonstration to work.
+This file separates the completed graduation-project backend from heavier enterprise work. A deferred item is not required for the present ingestion, ML extraction, persistence, correlation, API, STIX, or MISP demonstration.
 
-## Current backend boundary
+## Implemented boundary
 
-The implemented backend includes external file and authenticated API ingestion, Wazuh file and authenticated Indexer ingestion, direct local and remote Dionaea JSON ingestion, raw-data retention, normalization, 30-minute internal sessionization, Isolation Forest outlier detection, CTI event creation, PostgreSQL/SQLite persistence, NVD enrichment, correlation, unified explainable risk scoring, authentication, audit logging, STIX export, and a safe MISP client/dry-run/send path.
+The current system includes:
 
-The local Dionaea source is deliberately lightweight. It runs only when the `honeypot` Compose profile is selected, writes the official `log_json` JSONL format to a persistent volume, and publishes no host ports. It is part of the implemented backend, not future work.
+- External JSON file and authenticated/HMAC API ingestion with schema, bounds, ETag, pagination, stable identity, privacy filtering, and idempotent central storage.
+- Live Dionaea JSON, lightweight SSH-auth JSON, and gateway web-access JSON from the VPS.
+- Raw-record retention separate from unified processed CTI.
+- Thirty-minute internal sessionization, Isolation Forest, retained normal sessions, and outlier-only CTI promotion.
+- PostgreSQL central persistence, API authentication/roles/audit, NVD client, correlation, explainable risk, and STIX export.
+- DNRTI BERT NER as primary and DNRTI sklearn NER as secondary fallback, with saved held-out evidence and runtime quality gates.
+- Live MISP 2.5.44 on the VPS with unpublished, verified, idempotent event/attribute delivery.
+- Hardened VPS, loopback-only Gateway/MISP administration, SSH tunnels, scoped secrets, Dionaea egress controls, systemd collection, and log rotation.
 
 ## Deferred infrastructure
 
+### Wazuh Manager/Indexer/Dashboard
+
+Wazuh is intentionally not deployed on the current 12 GB VPS. Its file and authenticated Indexer connectors remain implemented and tested so a future larger or separate server can be integrated without redesigning the CTI schema.
+
+Future value would include endpoint agents, rules/decoders, a SIEM dashboard, centralized host telemetry, and a read-only `wazuh-alerts*` stream. Completion would require a separate capacity decision, certificates, agent enrollment, retention, a least-privilege reader, live alert evidence, and backup/restore testing. Historical Wazuh sample data in PostgreSQL is not evidence of a live Wazuh server.
+
 ### MongoDB
 
-MongoDB is not required by the current prototype because PostgreSQL JSON columns already retain semi-structured raw records alongside the relational CTI model. Adding MongoDB now would duplicate storage, credentials, backup procedures, and consistency handling without improving the graduation demonstration.
+MongoDB is not used. PostgreSQL relational tables plus JSON columns already preserve semi-structured raw records and give one transactional source of truth. Adding MongoDB now would duplicate credentials, consistency logic, and backup work without improving the graduation demonstration.
 
-A future high-volume deployment may use MongoDB for immutable raw telemetry and long-lived baseline sessions while retaining PostgreSQL for sources, users, events, indicators, correlations, and audit records. That change would require a retention policy, authenticated connections, encryption, backup/restore tests, and a clear source of truth.
+A future high-volume design may place immutable telemetry or long-lived baselines in object storage/MongoDB while keeping PostgreSQL authoritative for users, sources, events, indicators, correlations, runs, and audit records.
 
-### MISP cloud deployment and synchronization
+### Celery/Redis/Kafka workers
 
-The backend maps events to stable MISP event/attribute UUIDs, provides a dry run, checks connectivity, and can send an unpublished event when `MISP_URL` and `MISP_API_KEY` are configured. Deploying the real MISP server is now part of the planned VPS phase, but remains uncompleted until SSH deployment and live acceptance evidence exist. It adds MariaDB, Redis, MISP modules, TLS certificates, administrator lifecycle, upgrades, backups, and its own security boundary.
+Current ingestion is bounded and synchronous. This keeps execution traceable and simple for the graduation scope. Celery/Redis or Kafka would add background scheduling, retries, backpressure, dead-letter handling, and horizontal workers when feeds grow. It would also require idempotent task keys, retry budgets, monitoring, recovery tests, and operational ownership.
 
-After the server is accepted, later extensions may add bidirectional synchronization, richer taxonomy/galaxy mapping, publishing workflows, retry queues, verified repeat-send/upsert behavior, and scheduled pulls. MISP remains a sharing copy; PostgreSQL remains the central application database.
+MISP's internal Redis/Valkey is owned only by MISP and is not the backend task queue.
 
-### Wazuh cloud platform
+### Risk model
 
-The Wazuh connectors accept actual `alerts.json`, JSONL, and NDJSON exports and can pull bounded, checkpointed pages from an authenticated Wazuh Indexer. Deploying Manager, Indexer, Dashboard, certificates, agents, least-privilege reader, and retention policy is part of the planned VPS phase, but is not complete before live health and end-to-end tests.
+Risk is an explainable rule-based score using severity/CVSS, confidence, source diversity, correlations, and internal-outlier evidence. This supports transparent demonstrations and analyst review. It is not presented as a trained AI risk model.
 
-The VPS phase will place a Wazuh agent beside Dionaea and may add custom decoders/rules. The separate authenticated Dionaea sensor API remains useful because it preserves the original honeypot record before SIEM transformation.
+A future learned scorer requires labelled outcomes, leakage-safe splits, calibration, class-imbalance handling, threshold policy, drift monitoring, explanations, and comparison against the current rules baseline.
 
-### Public Dionaea deployment
+### Relationship extraction
 
-The local isolated Dionaea profile remains implemented and safe for deterministic demonstration. A public Dionaea sensor is planned but not deployed. It should use a separate disposable VPS/VM; placing it beside Wazuh/MISP on one kernel is a documented residual risk, not the recommended architecture. Completion requires segmentation, controlled egress, log rotation, Wazuh monitoring, raw sensor API health, and verified absence of sensitive routes/secrets.
+Relationship extraction remains a rule-based prototype. It produces auditable relationships from supported patterns but is not a general semantic relation model.
 
-### Background workers and streaming
+Future work may add a trained relation classifier, ontology constraints, negative examples, confidence calibration, and held-out evaluation before replacing the prototype.
 
-The prototype processes a bounded upload or configured API pull synchronously. Redis/Celery, Kafka, dead-letter queues, continuous scheduling, and automatic model retraining are deferred until ingestion volume requires them. A future worker design must include idempotency, bounded retries, backpressure, observability, and safe recovery after partial failure.
+### Stronger honeypot isolation
 
-### Other future integrations
+Dionaea currently runs in a constrained Docker network on the same physical VPS as loopback-only MISP. It has no MISP/backend secrets or shared data volumes and new outbound traffic is blocked, but all containers share one kernel.
 
-TAXII server/client synchronization, live Suricata, Zeek, Sysmon and firewall connectors, production secrets management, Alembic migration operations, multi-node deployment, and a full analyst frontend are future extensions. The API already supplies the data needed by a later dashboard.
+The preferred future architecture moves Dionaea to a separate disposable VPS/VM, connects only its signed evidence path, adds independent snapshots/retention, and treats compromise of that host as expected. WireGuard or mTLS and a second provider/account boundary may be added.
 
-## Resource and safety reason
+### Production TLS, secrets, and availability
 
-The development computer retains PostgreSQL, the backend, and the BERT runtime. Wazuh and MISP are multi-service platforms and will move to adequately sized cloud infrastructure instead of competing with the model and development tools locally. The linked 8 GB VPS tier is also insufficient for all cloud components; capacity and separation requirements are recorded in `docs/operations/vps_deployment_plan.md`.
+Current private services use SSH forwarding and lab self-signed MISP TLS. Future production work includes DNS, public-key infrastructure, mTLS or WireGuard, a secrets manager, key rotation automation, rate limiting at a reverse proxy, high availability, alerting, and tested disaster recovery.
 
-No local honeypot port in this repository is bound to the host, LAN, or a public interface. The planned internet-facing sensor must run on a separate disposable VM/host where possible, with network segmentation, no personal credentials, no development-LAN access, controlled egress, monitoring, retention, and documented legal/ethical scope.
+### MISP extensions
 
-## Future completion criteria
+MISP is live, but automatic publishing is deliberately disabled. Future work includes team browser access through a controlled network, richer taxonomies/galaxies, analyst approval workflows, bidirectional synchronization, scheduled export, and a dedicated least-privilege automation user instead of the bootstrap automation key.
 
-A deferred component should be called implemented only after its real service is deployed, secrets are protected, health checks pass, failure and retry behavior is tested, data is visible at the destination, an end-to-end test is recorded, and operating/backup instructions are documented. Configuration placeholders alone do not count as completed integration.
+### Other sources and frontend
+
+Live Suricata, Zeek, Sysmon, firewall, TAXII, and Onion sources; Alembic operational migrations; model retraining automation; and the analyst frontend remain future work. The existing FastAPI endpoints are the contract for the frontend phase.
+
+## Not claimed
+
+The project does not claim enterprise SOC scale, high availability, real-time streaming, a trained AI risk model, a trained relationship model, live Wazuh, live Onion coverage, a physically separate honeypot kernel, or completed off-host restore evidence.
+
+## Completion rule
+
+A future component becomes “implemented” only when the real service is deployed, secrets and network boundaries are protected, positive and negative tests pass, destination data is verified, repeat/retry behavior is measured, backup restoration succeeds, and the result is documented with sanitized evidence. Configuration placeholders alone do not count.

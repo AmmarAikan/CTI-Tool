@@ -1,0 +1,40 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    HOME=/home/external
+
+WORKDIR /app
+
+RUN groupadd --system --gid 10001 external \
+    && useradd --system --uid 10001 --gid external \
+       --home-dir /home/external --create-home external
+
+COPY requirements.txt ./
+RUN python -m pip install --upgrade pip \
+    && python -m pip install --requirement requirements.txt
+
+COPY backend ./backend
+COPY contracts ./contracts
+COPY config/sources.json \
+     config/collection_settings.json \
+     config/preprocessing_rules.json \
+     config/privacy_rules.json \
+     config/dark_web_sources.example.json \
+     ./config/
+
+RUN mkdir -p \
+      /app/data/external/raw \
+      /app/data/external/state \
+      /app/data/external/processed \
+      /app/data/external/review \
+      /app/data/external/exports \
+      /app/logs \
+    && chown -R 10001:10001 /app/data/external /app/logs
+
+USER 10001:10001
+
+EXPOSE 8000
+
+CMD ["python", "-m", "uvicorn", "backend.app.pipeline.ingestion.external.integration.local:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,9 @@
+{
+  "hitsPerPage": 2,
+  "page": 0,
+  "nbPages": 1,
+  "hits": [
+    {"objectID": "44000001", "title": "Ask HN: analyzing a sanitized vulnerability", "story_text": "A detailed community post analyzes a sanitized vulnerability, technical impact, detection evidence, and practical remediation guidance for system administrators.", "url": null, "author": "example_author", "created_at": "2026-08-22T10:00:00Z", "created_at_i": 1787392800, "points": 35, "num_comments": 12},
+    {"objectID": "44000002", "title": "New public security research", "story_text": null, "url": "https://example.test/security/article?utm_source=hn", "author": "example_linker", "created_at": "2026-08-22T09:00:00Z", "created_at_i": 1787389200, "points": 18, "num_comments": 4}
+  ]
+}

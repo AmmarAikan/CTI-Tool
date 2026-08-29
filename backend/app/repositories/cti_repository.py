@@ -35,6 +35,14 @@ def parse_datetime(value: Any) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+def normalize_time_bounds(first_seen: Any, last_seen: Any) -> tuple[datetime | None, datetime | None]:
+    first = parse_datetime(first_seen)
+    last = parse_datetime(last_seen)
+    if first is not None and last is not None and first > last:
+        return last, first
+    return first, last
+
+
 class CTIRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -149,8 +157,10 @@ class CTIRepository:
         event.risk_score = round(max(0.0, min(100.0, risk_score)), 2)
         event.confidence = cti_object.confidence
         event.tags = cti_object.tags
-        event.first_seen = parse_datetime(cti_object.first_seen)
-        event.last_seen = parse_datetime(cti_object.last_seen)
+        event.first_seen, event.last_seen = normalize_time_bounds(
+            cti_object.first_seen,
+            cti_object.last_seen,
+        )
         event.processing_status = cti_object.processing_status
         event.raw_reference = cti_object.raw_reference
         self._sync_indicators(event, cti_object)

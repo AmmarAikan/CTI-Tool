@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/command.schema.json",
+  "title": "External Sources Command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "command_id", "command_type", "requested_at", "requested_by", "parameters"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "command_id": {"type": "string", "minLength": 10},
+    "command_type": {"enum": ["start_collection", "collect_source", "add_manual_source", "recheck_url", "request_source_enable", "disable_source", "cancel_job"]},
+    "requested_at": {"type": "string", "pattern": "Z$"},
+    "requested_by": {"type": "string", "minLength": 1},
+    "idempotency_key": {"type": ["string", "null"]},
+    "parameters": {"type": "object"}
+  }
+}

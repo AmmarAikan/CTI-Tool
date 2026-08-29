@@ -1,104 +1,181 @@
 {
+  "schema_version": "1.0",
   "rss_sources": [
     {
+      "source_id": "the-hacker-news",
       "name": "The Hacker News",
       "url": "https://feeds.feedburner.com/TheHackersNews",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "bleepingcomputer",
       "name": "BleepingComputer",
       "url": "https://www.bleepingcomputer.com/feed/",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "cisco-talos",
       "name": "Cisco Talos",
       "url": "https://blog.talosintelligence.com/rss/",
-      "category": "research"
+      "category": "research",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 14
     },
     {
+      "source_id": "sans-isc",
       "name": "SANS Internet Storm Center",
       "url": "https://isc.sans.edu/rssfeed_full.xml",
-      "category": "advisory"
+      "category": "advisory",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 7
     },
     {
+      "source_id": "krebs-on-security",
       "name": "Krebs on Security",
       "url": "https://krebsonsecurity.com/feed/",
-      "category": "news"
+      "category": "news",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 14
     }
   ],
   "cert_sources": [
     {
+      "source_id": "cisa-advisories",
       "name": "CISA",
       "url": "https://www.cisa.gov/news-events/cybersecurity-advisories",
       "category": "advisory",
-      "method": "scrape"
+      "method": "official_listing",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30,
+      "detail_path_pattern": "^/news-events/cybersecurity-advisories/[a-z0-9][a-z0-9-]+$"
     },
     {
+      "source_id": "cert-eu-advisories",
       "name": "CERT-EU",
       "url": "https://cert.europa.eu/publications/security-advisories-rss",
       "category": "advisory",
-      "method": "rss"
+      "method": "rss",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30
     },
     {
+      "source_id": "cert-at-warnings",
       "name": "CERT-AT",
       "url": "https://www.cert.at/cert-at.de.warnings.rss_2.0.xml",
       "category": "advisory",
-      "method": "rss"
+      "method": "rss",
+      "enabled": true,
+      "max_items": 50,
+      "lookback_days": 30
     }
   ],
   "vulnerability_sources": [
     {
+      "source_id": "nvd-cve-api",
       "name": "NVD",
       "type": "nvd",
       "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
-      "days_back": 3,
-      "results_per_page": 20,
-      "max_pages": 3
+      "enabled": true,
+      "lookback_days": 7,
+      "results_per_page": 2000,
+      "max_pages": 5,
+      "delay_seconds": 6
     },
     {
+      "source_id": "cve-program-records",
       "name": "MITRE CVE",
-      "type": "mitre",
-      "base_url": "https://cveawg.mitre.org/api/cve"
+      "type": "cve",
+      "base_url": "https://cveawg.mitre.org/api/cve",
+      "enabled": true,
+      "results_per_page": 100,
+      "max_pages": 5,
+      "lookback_days": 7,
+      "delay_seconds": 0.2
+    },
+    {
+      "source_id": "github-global-advisories",
+      "name": "GitHub Global Security Advisories",
+      "type": "github_advisories",
+      "base_url": "https://api.github.com/advisories",
+      "enabled": true,
+      "lookback_days": 7,
+      "results_per_page": 100,
+      "max_pages": 5,
+      "delay_seconds": 1
+    },
+    {
+      "source_id": "cisa-kev",
+      "name": "CISA Known Exploited Vulnerabilities",
+      "type": "cisa_kev",
+      "url": "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json",
+      "enabled": true,
+      "lookback_days": 120,
+      "results_per_page": 2000,
+      "max_pages": 1,
+      "delay_seconds": 0
     }
   ],
   "social_media_sources": [
     {
+      "source_id": "reddit-netsec",
       "name": "Reddit - r/netsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/netsec/",
+      "subreddit": "netsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-cybersecurity",
       "name": "Reddit - r/cybersecurity",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/cybersecurity/",
+      "subreddit": "cybersecurity",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-blueteamsec",
       "name": "Reddit - r/blueteamsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/blueteamsec/",
+      "subreddit": "blueteamsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     },
     {
+      "source_id": "reddit-asknetsec",
       "name": "Reddit - r/AskNetsec",
       "platform": "reddit",
       "url": "https://www.reddit.com/r/AskNetsec/",
+      "subreddit": "AskNetsec",
+      "method": "oauth_api",
+      "enabled": false,
       "category": "social",
-      "max_scrolls": 6,
-      "target_count": 30
+      "limit": 30
     }
   ],
   "hackernews_sources": [
-  { "name": "Hacker News - CVE", "query": "CVE", "category": "social", "limit": 30 },
-  { "name": "Hacker News - vulnerability", "query": "vulnerability", "category": "social", "limit": 30 },
-  { "name": "Hacker News - data breach", "query": "data breach", "category": "social", "limit": 30 }
+  { "source_id": "hackernews-cve", "name": "Hacker News - CVE", "query": "CVE", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 },
+  { "source_id": "hackernews-vulnerability", "name": "Hacker News - vulnerability", "query": "vulnerability", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 },
+  { "source_id": "hackernews-data-breach", "name": "Hacker News - data breach", "query": "data breach", "category": "social", "enabled": true, "limit": 30, "max_pages": 3 }
 ],
   "github_sources": [
     {
@@ -109,14 +186,20 @@
   ],
   "telegram_sources": [
     {
+      "source_id": "telegram-thehackernews",
       "name": "Telegram - The Hacker News",
       "channel": "thehackernews",
+      "method": "public_preview",
+      "enabled": true,
       "category": "social",
       "max_pages": 3
     },
     {
+      "source_id": "telegram-cvefeed",
       "name": "Telegram - CVEFeed",
       "channel": "cvefeed",
+      "method": "public_preview",
+      "enabled": true,
       "category": "vulnerability",
       "max_pages": 3
     }

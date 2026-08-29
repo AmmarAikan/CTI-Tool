@@ -1,0 +1,15 @@
+# Local-only port remapping for Windows, where SMB already owns TCP/445.
+# Production must use compose.yaml alone so the intended honeypot ports remain public.
+services:
+  gateway:
+    ports: !override
+      - "127.0.0.1:18088:8080"
+  dionaea:
+    ports: !override
+      - "127.0.0.1:21021:21/tcp"
+      - "127.0.0.1:10445:445/tcp"
+      - "127.0.0.1:11433:1433/tcp"
+      - "127.0.0.1:13306:3306/tcp"
+      - "127.0.0.1:15060:5060/tcp"
+      - "127.0.0.1:15060:5060/udp"
+      - "127.0.0.1:21211:11211/tcp"

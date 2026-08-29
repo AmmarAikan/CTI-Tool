@@ -77,6 +77,20 @@ class Settings:
     dionaea_api_max_pages: int = int(os.getenv("DIONAEA_API_MAX_PAGES", "20"))
     dionaea_api_page_size: int = int(os.getenv("DIONAEA_API_PAGE_SIZE", "500"))
     dionaea_sensor_name: str = os.getenv("DIONAEA_SENSOR_NAME", "Dionaea VPS")
+    internal_sensor_api_token: str | None = os.getenv("INTERNAL_SENSOR_API_TOKEN")
+    internal_sensor_api_hmac_secret: str | None = os.getenv("INTERNAL_SENSOR_API_HMAC_SECRET")
+    internal_sensor_verify_tls: bool = _as_bool(os.getenv("INTERNAL_SENSOR_VERIFY_TLS"), True)
+    internal_sensor_allow_http: bool = _as_bool(os.getenv("INTERNAL_SENSOR_ALLOW_HTTP"), False)
+    internal_sensor_timeout_seconds: int = int(os.getenv("INTERNAL_SENSOR_TIMEOUT_SECONDS", "30"))
+    internal_sensor_max_bytes: int = int(
+        os.getenv("INTERNAL_SENSOR_MAX_BYTES", str(20 * 1024 * 1024))
+    )
+    internal_sensor_max_pages: int = int(os.getenv("INTERNAL_SENSOR_MAX_PAGES", "20"))
+    internal_sensor_page_size: int = int(os.getenv("INTERNAL_SENSOR_PAGE_SIZE", "500"))
+    host_auth_api_url: str | None = os.getenv("HOST_AUTH_API_URL")
+    host_auth_sensor_name: str = os.getenv("HOST_AUTH_SENSOR_NAME", "VPS SSH Authentication")
+    web_access_api_url: str | None = os.getenv("WEB_ACCESS_API_URL")
+    web_access_sensor_name: str = os.getenv("WEB_ACCESS_SENSOR_NAME", "VPS Gateway Access")
     ner_min_confidence: float = float(os.getenv("NER_MIN_CONFIDENCE", "0.50"))
     ner_chunk_chars: int = int(os.getenv("NER_CHUNK_CHARS", "600"))
     ner_chunk_overlap_chars: int = int(os.getenv("NER_CHUNK_OVERLAP_CHARS", "100"))
@@ -101,6 +115,14 @@ class Settings:
     @property
     def dionaea_api_configured(self) -> bool:
         return bool(self.dionaea_api_url and self.dionaea_api_token)
+
+    @property
+    def host_auth_api_configured(self) -> bool:
+        return bool(self.host_auth_api_url and self.internal_sensor_api_token)
+
+    @property
+    def web_access_api_configured(self) -> bool:
+        return bool(self.web_access_api_url and self.internal_sensor_api_token)
 
 
 @lru_cache(maxsize=1)

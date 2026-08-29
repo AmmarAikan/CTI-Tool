@@ -384,6 +384,50 @@ def pull_dionaea_api(
     return result
 
 
+@router.get("/integrations/host-auth/health", tags=["integrations"])
+def host_auth_api_health(_: CurrentUser) -> dict[str, Any]:
+    return PipelineService.security_sensor_health("linux_auth")
+
+
+@router.post("/integrations/host-auth/pull", tags=["integrations"])
+def pull_host_auth_api(
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    try:
+        result = PipelineService(db).run_security_sensor_api("linux_auth")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Host authentication sensor pull failed: {type(exc).__name__}",
+        ) from exc
+    audit(db, user, "pull_host_auth_sensor", "pipeline_run", result["run_id"], details=result["details"])
+    db.commit()
+    return result
+
+
+@router.get("/integrations/web-access/health", tags=["integrations"])
+def web_access_api_health(_: CurrentUser) -> dict[str, Any]:
+    return PipelineService.security_sensor_health("web_access")
+
+
+@router.post("/integrations/web-access/pull", tags=["integrations"])
+def pull_web_access_api(
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    try:
+        result = PipelineService(db).run_security_sensor_api("web_access")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Web access sensor pull failed: {type(exc).__name__}",
+        ) from exc
+    audit(db, user, "pull_web_access_sensor", "pipeline_run", result["run_id"], details=result["details"])
+    db.commit()
+    return result
+
+
 @router.post("/internal/dionaea/collect", tags=["internal"])
 def collect_dionaea_log(
     db: SessionDep,

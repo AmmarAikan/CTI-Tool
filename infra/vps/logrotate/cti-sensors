@@ -1,0 +1,9 @@
+/var/lib/cti-sensors/*.jsonl {
+    daily
+    rotate 14
+    compress
+    missingok
+    notifempty
+    copytruncate
+    create 0640 root cti-sensor-read
+}

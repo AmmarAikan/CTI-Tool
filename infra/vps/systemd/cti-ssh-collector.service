@@ -1,0 +1,16 @@
+[Unit]
+Description=CTI SSH journal JSON collector
+After=systemd-journald.service ssh.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 /opt/cti-sensors/ssh_journal_collector.py --output /var/lib/cti-sensors/host_auth.jsonl --cursor /var/lib/cti-sensors/ssh.cursor
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/cti-sensors
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true

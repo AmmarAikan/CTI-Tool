@@ -1,0 +1,13 @@
+{
+  "dataType": "CVE_RECORD",
+  "dataVersion": "5.2",
+  "cveMetadata": {"cveId": "CVE-2026-12345", "state": "PUBLISHED", "datePublished": "2026-08-20T10:00:00Z", "dateUpdated": "2026-08-22T12:00:00Z"},
+  "containers": {"cna": {
+    "title": "Example Widget Remote Code Execution",
+    "descriptions": [{"lang": "en", "value": "The Example Widget is affected by a sanitized remote code execution issue."}],
+    "metrics": [{"cvssV3_0": {"version": "3.0", "baseScore": 9.8, "baseSeverity": "CRITICAL", "vectorString": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}],
+    "problemTypes": [{"descriptions": [{"lang": "en", "cweId": "CWE-787", "description": "Out-of-bounds Write"}]}],
+    "affected": [{"vendor": "Example", "product": "Widget", "packageName": "widget", "packageURL": "pkg:pypi/widget", "versions": [{"version": "0", "lessThan": "2.0", "status": "affected", "versionType": "semver"}]}],
+    "references": [{"url": "https://vendor.example/advisories/12345"}]
+  }}
+}

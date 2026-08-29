@@ -1,0 +1,14 @@
+<article>
+<h1>Incident Analysis</h1>
+<p>Observed CVE-2026-12345 at https://evil.example/path?q=1 from 203.0.113.42.</p>
+<p>SHA-256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa</p>
+</article>
+
+Share this article on Twitter
+Subscribe to our newsletter today
+
+```bash
+  curl -H "X-Test:  value" https://evil.example/path?q=1
+```
+
+Copyright 2026 Example

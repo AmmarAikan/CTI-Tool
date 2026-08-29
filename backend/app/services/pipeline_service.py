@@ -26,6 +26,9 @@ from backend.app.pipeline.ingestion.internal.dionaea_connector import (
 from backend.app.pipeline.ingestion.internal.dionaea_http_connector import (
     DionaeaAPIConnector,
 )
+from backend.app.pipeline.ingestion.internal.security_sensor_http_connector import (
+    SecuritySensorAPIConnector,
+)
 from backend.app.pipeline.ingestion.internal.wazuh_connector import WazuhFileConnector
 from backend.app.pipeline.ingestion.internal.wazuh_indexer_connector import (
     WazuhIndexerConnector,
@@ -53,6 +56,7 @@ class PipelineService:
             },
             "wazuh_indexer": {
                 "configured": settings.wazuh_indexer_configured,
+                "deployment_status": "deferred_not_deployed",
                 "tls_verification": settings.wazuh_indexer_verify_tls,
                 "authentication": "bearer" if settings.wazuh_indexer_token else "basic",
             },
@@ -60,6 +64,16 @@ class PipelineService:
                 "configured": settings.dionaea_api_configured,
                 "tls_verification": settings.dionaea_api_verify_tls,
                 "hmac_verification": bool(settings.dionaea_api_hmac_secret),
+            },
+            "host_auth_sensor_api": {
+                "configured": settings.host_auth_api_configured,
+                "tls_verification": settings.internal_sensor_verify_tls,
+                "hmac_verification": bool(settings.internal_sensor_api_hmac_secret),
+            },
+            "web_access_sensor_api": {
+                "configured": settings.web_access_api_configured,
+                "tls_verification": settings.internal_sensor_verify_tls,
+                "hmac_verification": bool(settings.internal_sensor_api_hmac_secret),
             },
             "misp": {
                 "configured": settings.misp_configured,
@@ -122,6 +136,26 @@ class PipelineService:
             max_bytes=settings.dionaea_api_max_bytes,
             max_pages=settings.dionaea_api_max_pages,
             page_size=settings.dionaea_api_page_size,
+        ).healthcheck()
+
+    @staticmethod
+    def security_sensor_health(source_type: str) -> dict[str, Any]:
+        settings = get_settings()
+        url, source_name, configured = PipelineService._security_sensor_profile(settings, source_type)
+        if not configured:
+            return {"configured": False, "reachable": False}
+        return SecuritySensorAPIConnector(
+            str(url),
+            str(settings.internal_sensor_api_token),
+            source_name=source_name,
+            source_type=source_type,
+            hmac_secret=settings.internal_sensor_api_hmac_secret,
+            verify_tls=settings.internal_sensor_verify_tls,
+            allow_http=settings.internal_sensor_allow_http,
+            timeout=settings.internal_sensor_timeout_seconds,
+            max_bytes=settings.internal_sensor_max_bytes,
+            max_pages=settings.internal_sensor_max_pages,
+            page_size=settings.internal_sensor_page_size,
         ).healthcheck()
 
     def run_external_files(self, paths: list[str | Path]) -> dict[str, Any]:
@@ -280,6 +314,68 @@ class PipelineService:
         }
         self.session.commit()
         return summary
+
+    def run_security_sensor_api(
+        self,
+        source_type: str,
+        connector: SecuritySensorAPIConnector | None = None,
+    ) -> dict[str, Any]:
+        settings = get_settings()
+        url, source_name, configured = self._security_sensor_profile(settings, source_type)
+        state_source = self.repository.get_or_create_source(source_name, source_type, "internal")
+        state = dict(state_source.config or {})
+        if connector is None:
+            if not configured:
+                raise RuntimeError(f"{source_type} sensor URL and INTERNAL_SENSOR_API_TOKEN must be configured")
+            connector = SecuritySensorAPIConnector(
+                str(url),
+                str(settings.internal_sensor_api_token),
+                source_name=source_name,
+                source_type=source_type,
+                hmac_secret=settings.internal_sensor_api_hmac_secret,
+                verify_tls=settings.internal_sensor_verify_tls,
+                allow_http=settings.internal_sensor_allow_http,
+                timeout=settings.internal_sensor_timeout_seconds,
+                max_bytes=settings.internal_sensor_max_bytes,
+                max_pages=settings.internal_sensor_max_pages,
+                page_size=settings.internal_sensor_page_size,
+                checkpoint=state.get("checkpoint"),
+            )
+        records = list(connector.collect())
+        result = connector.last_result
+        if result is None:
+            raise RuntimeError(f"{source_type} sensor connector returned no collection result")
+        summary = self._run_internal_records(
+            records,
+            source_name=source_name,
+            source_type=source_type,
+            details=result.details(),
+            source=state_source,
+        )
+        state_source.config = {
+            **state,
+            "checkpoint": result.checkpoint,
+            "last_generated_at": result.generated_at,
+            "last_run_id": summary["run_id"],
+        }
+        self.session.commit()
+        return summary
+
+    @staticmethod
+    def _security_sensor_profile(settings, source_type: str):
+        if source_type == "linux_auth":
+            return (
+                settings.host_auth_api_url,
+                settings.host_auth_sensor_name,
+                settings.host_auth_api_configured,
+            )
+        if source_type == "web_access":
+            return (
+                settings.web_access_api_url,
+                settings.web_access_sensor_name,
+                settings.web_access_api_configured,
+            )
+        raise ValueError("source_type must be linux_auth or web_access")
 
     def run_wazuh_indexer(self, connector: WazuhIndexerConnector | None = None) -> dict[str, Any]:
         settings = get_settings()

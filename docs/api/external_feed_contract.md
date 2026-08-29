@@ -23,6 +23,20 @@ Production rules:
 - Return at most the requested `limit`, with a server-side upper bound.
 - Do not expose the collaborator's computer directly to the internet. Synchronize the JSON to the VPS feed service, or reach the collaborator through a private WireGuard tunnel.
 
+The implemented graduation lab binds the Gateway to VPS loopback and carries both publish and read traffic through SSH forwarding. Cleartext HTTP is therefore confined inside the encrypted SSH tunnel; a future public endpoint must use valid HTTPS.
+
+## Collaborator publish endpoint
+
+The collaborator sends the completed JSON artifact with a publish-only credential:
+
+```http
+POST /api/v1/external-feed/publish
+Authorization: Bearer <feed-publish-token>
+Content-Type: application/json
+```
+
+The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. The Gateway applies byte/item bounds, stable identity/content checks, timestamp validation, metadata secret-key removal, and an atomic write. The publish token cannot read sensors or access MISP. The response contains only acceptance status, feed identity, item count, and ETag.
+
 ## Response envelope
 
 ```json

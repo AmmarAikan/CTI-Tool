@@ -35,10 +35,11 @@ class DionaeaAPIResult:
     checkpoint: str | None = None
     response_bytes: int = 0
     duplicate_events: int = 0
+    transport: str = "dionaea_https_json_api"
 
     def details(self) -> dict[str, Any]:
         return {
-            "transport": "dionaea_https_json_api",
+            "transport": self.transport,
             "sensor_id": self.sensor_id,
             "generated_at": self.generated_at,
             "pages": self.pages,
@@ -85,11 +86,11 @@ class DionaeaAPIConnector(InternalConnector):
         yield from self.last_result.records
 
     def fetch(self) -> DionaeaAPIResult:
-        result = DionaeaAPIResult()
+        result = DionaeaAPIResult(transport=self._transport_name())
         cursor = self.checkpoint
         seen_cursors: set[str] = set()
         seen_ids: set[str] = set()
-        normalizer = DionaeaFileConnector([], source_name=self.source_name)
+        normalizer = self._normalizer()
 
         for page_number in range(1, self.max_pages + 1):
             response = self.session.get(
@@ -236,6 +237,13 @@ class DionaeaAPIConnector(InternalConnector):
             "Authorization": f"Bearer {self.token}",
             "User-Agent": "graduation-cti-backend/2.0",
         }
+
+    def _normalizer(self):
+        return DionaeaFileConnector([], source_name=self.source_name)
+
+    @staticmethod
+    def _transport_name() -> str:
+        return "dionaea_https_json_api"
 
     def _validate_url(self, allow_http: bool) -> None:
         parsed = urlparse(self.url)

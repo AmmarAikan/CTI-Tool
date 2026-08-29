@@ -94,7 +94,10 @@ class ExternalFeedAPIConnector(ExternalConnector):
 
     def fetch(self) -> ExternalFeedResult:
         result = ExternalFeedResult()
-        cursor = self.checkpoint
+        # A checkpoint identifies the completed dataset version; it is not a
+        # pagination cursor for a new request. Conditional revalidation uses
+        # the ETag, while next_cursor is used only inside the current run.
+        cursor: str | None = None
         seen_cursors: set[str] = set()
         seen_records: set[tuple[str, str]] = set()
         normalizer = ExternalJsonFileConnector([])

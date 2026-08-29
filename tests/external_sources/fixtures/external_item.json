@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "record_id": "ext-fixture-record-0001",
+  "source_item_id": "fixture-1",
+  "source": "Sanitized Security Feed",
+  "source_type": "rss",
+  "category": "advisory",
+  "title": "Sanitized vulnerability advisory",
+  "link": "https://example.test/advisories/fixture-1",
+  "content": "A sanitized vulnerability advisory describes a security update.",
+  "summary": "A sanitized advisory.",
+  "published": "2026-08-20T10:00:00Z",
+  "updated_at": null,
+  "author": null,
+  "tags": ["advisory"],
+  "language": "en",
+  "collected_at": "2026-08-20T10:05:00Z",
+  "content_hash": "sha256:46952357146c28a9bd77b50e385490cadd6712a553151245fc5e5a6a7a3ab5b8",
+  "classification": {
+    "status": "not_required",
+    "label": null,
+    "score": null,
+    "model_version": null
+  },
+  "metadata": {}
+}

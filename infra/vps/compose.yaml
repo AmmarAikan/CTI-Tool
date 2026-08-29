@@ -1,0 +1,109 @@
+name: cti-vps
+
+services:
+  gateway:
+    build:
+      context: ./gateway
+    image: cti-vps-gateway:1.0.0
+    environment:
+      FEED_PUBLISH_TOKEN: ${FEED_PUBLISH_TOKEN:?Set FEED_PUBLISH_TOKEN}
+      FEED_READ_TOKEN: ${FEED_READ_TOKEN:?Set FEED_READ_TOKEN}
+      FEED_RESPONSE_HMAC_SECRET: ${FEED_RESPONSE_HMAC_SECRET:?Set FEED_RESPONSE_HMAC_SECRET}
+      SENSOR_READ_TOKEN: ${SENSOR_READ_TOKEN:?Set SENSOR_READ_TOKEN}
+      SENSOR_RESPONSE_HMAC_SECRET: ${SENSOR_RESPONSE_HMAC_SECRET:?Set SENSOR_RESPONSE_HMAC_SECRET}
+      CURSOR_HMAC_SECRET: ${CURSOR_HMAC_SECRET:?Set CURSOR_HMAC_SECRET}
+      EXTERNAL_FEED_ID: ${EXTERNAL_FEED_ID:-external-team-feed}
+      SENSOR_ID: ${SENSOR_ID:-cti-vps}
+      MAX_PUBLISH_BYTES: ${MAX_PUBLISH_BYTES:-20971520}
+      MAX_SENSOR_BYTES: ${MAX_SENSOR_BYTES:-52428800}
+      MAX_FEED_ITEMS: ${MAX_FEED_ITEMS:-20000}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    group_add:
+      - "${SENSOR_READ_GID:-31002}"
+    mem_limit: 512m
+    cpus: 1.0
+    ports:
+      - "127.0.0.1:8088:8080"
+    volumes:
+      - gateway_data:/data
+      - dionaea_data:/sensors/dionaea:ro
+      - /var/lib/cti-sensors:/sensors/host:ro
+    networks:
+      - gateway_private
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  dionaea:
+    build:
+      context: ../dionaea
+    image: cti-dionaea:0.11.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+      - /run:size=16m,nosuid
+      - /opt/dionaea/etc:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - NET_BIND_SERVICE
+      - SETGID
+      - SETUID
+    mem_limit: 1g
+    cpus: 1.5
+    environment:
+      # A named volume already makes the target directory exist, so the stock
+      # entrypoint's existence check alone cannot detect a new empty volume.
+      DIONAEA_FORCE_INIT_DATA: "1"
+    ports:
+      - "21:21/tcp"
+      - "445:445/tcp"
+      - "1433:1433/tcp"
+      - "3306:3306/tcp"
+      - "5060:5060/tcp"
+      - "5060:5060/udp"
+      - "11211:11211/tcp"
+    volumes:
+      - dionaea_data:/opt/dionaea/var/lib/dionaea
+      - dionaea_logs:/opt/dionaea/var/log/dionaea
+    networks:
+      - honeypot_isolated
+
+networks:
+  gateway_private:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.30.20.0/24
+  honeypot_isolated:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+volumes:
+  gateway_data:
+  dionaea_data:
+  dionaea_logs:

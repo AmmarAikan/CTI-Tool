@@ -24,10 +24,14 @@ from backend.app.pipeline.ingestion.external.http_connector import (
 from backend.app.pipeline.ingestion.internal.dionaea_http_connector import (
     DionaeaAPIConnector,
 )
+from backend.app.pipeline.ingestion.internal.security_sensor_http_connector import (
+    SecuritySensorAPIConnector,
+)
 from backend.app.pipeline.ingestion.internal.wazuh_indexer_connector import (
     WazuhIndexerConnector,
 )
 from backend.app.pipeline.scoring.risk_scorer import RiskScorer
+from backend.app.repositories.cti_repository import normalize_time_bounds
 from backend.app.services.model_evidence_service import ModelEvidenceService
 from backend.app.services.pipeline_service import PipelineService
 
@@ -84,6 +88,87 @@ def temporary_database_engine():
 
 
 class BackendEnhancementTests(unittest.TestCase):
+    def test_lightweight_security_sensor_maps_auth_and_web_streams(self) -> None:
+        secret = "sensor-response-secret"
+        auth_payload = {
+            "schema_version": "1.0",
+            "sensor_id": "vps:host-auth",
+            "generated_at": "2026-08-29T00:00:00Z",
+            "events": [
+                {
+                    "id": "ssh:failed-1",
+                    "timestamp": "2026-08-29T00:00:00Z",
+                    "event": {"action": "ssh_login", "outcome": "failure"},
+                    "source": {"ip": "198.51.100.23", "port": 51000},
+                    "rule": {"id": "ssh_login_failure", "level": 6},
+                    "credentials": [{"username": "invalid-user"}],
+                    "message": "Failed password for invalid user from 198.51.100.23",
+                }
+            ],
+            "has_more": False,
+            "checkpoint": "auth-offset-1",
+        }
+        connector = SecuritySensorAPIConnector(
+            "https://sensor.example.test/api/v1/sensors/host-auth",
+            "read-token",
+            source_name="VPS SSH Authentication",
+            source_type="linux_auth",
+            hmac_secret=secret,
+            session=FakeSession([signed_response(auth_payload, secret)]),
+        )
+
+        result = connector.fetch()
+
+        self.assertEqual(result.records[0].source_type, "linux_auth")
+        self.assertEqual(result.records[0].external_id, "ssh:failed-1")
+        self.assertIn("198.51.100.23", result.records[0].content)
+        self.assertEqual(result.checkpoint, "auth-offset-1")
+        self.assertEqual(result.details()["transport"], "linux_auth_https_json_api")
+
+    def test_security_sensor_full_service_is_idempotent(self) -> None:
+        payload = {
+            "schema_version": "1.0",
+            "sensor_id": "vps:web-access",
+            "generated_at": "2026-08-29T00:00:00Z",
+            "events": [
+                {
+                    "id": "web:req-1",
+                    "timestamp": "2026-08-29T00:00:00Z",
+                    "event": {"action": "http_request", "outcome": "failure"},
+                    "source": {"ip": "203.0.113.44"},
+                    "http": {"request": {"method": "GET"}, "response": {"status_code": 404}},
+                    "url": {"original": "/wp-admin"},
+                    "rule": {"id": "gateway_http_404", "level": 3},
+                    "message": "GET /wp-admin returned HTTP 404",
+                }
+            ],
+            "has_more": False,
+            "checkpoint": "web-offset-1",
+        }
+        engine = temporary_database_engine()
+        with Session(engine) as session:
+            first = SecuritySensorAPIConnector(
+                "https://sensor.example.test/api/v1/sensors/web-access",
+                "read-token",
+                source_name="VPS Gateway Access",
+                source_type="web_access",
+                session=FakeSession([FakeResponse(payload)]),
+            )
+            second = SecuritySensorAPIConnector(
+                "https://sensor.example.test/api/v1/sensors/web-access",
+                "read-token",
+                source_name="VPS Gateway Access",
+                source_type="web_access",
+                session=FakeSession([FakeResponse(payload)]),
+            )
+            PipelineService(session).run_security_sensor_api("web_access", first)
+            PipelineService(session).run_security_sensor_api("web_access", second)
+            raw_count = session.scalar(select(func.count()).select_from(RawItem))
+            source = session.scalar(select(Source).where(Source.source_type == "web_access"))
+
+        self.assertEqual(raw_count, 1)
+        self.assertEqual(source.config["checkpoint"], "web-offset-1")
+
     def test_external_feed_validates_hmac_paginates_and_deduplicates(self) -> None:
         secret = "shared-test-secret"
         first = {
@@ -146,6 +231,23 @@ class BackendEnhancementTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ExternalFeedContractError, "stable external_id"):
             unsigned_connector.fetch()
+
+    def test_external_feed_304_uses_etag_without_reusing_checkpoint_as_cursor(self) -> None:
+        session = FakeSession([FakeResponse({}, status_code=304, headers={"ETag": '"dataset-v1"'})])
+        connector = ExternalFeedAPIConnector(
+            "https://feeds.example.test/v1/cti",
+            "token",
+            session=session,
+            if_none_match='"dataset-v1"',
+            checkpoint="dataset-v1",
+        )
+
+        result = connector.fetch()
+
+        self.assertTrue(result.not_modified)
+        self.assertEqual(result.etag, '"dataset-v1"')
+        self.assertNotIn("cursor", session.calls[0][2]["params"])
+        self.assertEqual(session.calls[0][2]["headers"]["If-None-Match"], '"dataset-v1"')
 
     def test_external_feed_full_service_is_idempotent_in_temporary_database(self) -> None:
         payload = {
@@ -456,6 +558,121 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertFalse(first["Event"]["published"])
         self.assertEqual(first["Event"]["Attribute"][0]["category"], "Payload delivery")
         self.assertEqual(first["Event"]["Attribute"][0]["first_seen"], seen.isoformat())
+
+    def test_time_bounds_are_normalized_before_persistence_and_misp_mapping(self) -> None:
+        later = datetime(2026, 8, 29, 0, 14, tzinfo=timezone.utc)
+        earlier = datetime(2026, 8, 28, 22, 13, tzinfo=timezone.utc)
+
+        persisted_first, persisted_last = normalize_time_bounds(later, earlier)
+        mapped_first, mapped_last = MISPClient._time_bounds(later, earlier)
+
+        self.assertEqual((persisted_first, persisted_last), (earlier, later))
+        self.assertEqual((mapped_first, mapped_last), (earlier.isoformat(), later.isoformat()))
+
+    def test_misp_send_adds_and_verifies_indicators_separately(self) -> None:
+        seen = datetime(2026, 8, 24, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            id="cti-live-misp-event",
+            title="Verified MISP delivery",
+            indicators=[
+                SimpleNamespace(
+                    indicator_type="ipv4",
+                    value="198.51.100.77",
+                    extractor="regex",
+                    confidence=1.0,
+                    first_seen=seen,
+                    last_seen=seen,
+                ),
+                SimpleNamespace(
+                    indicator_type="cve",
+                    value="CVE-2026-1234",
+                    extractor="regex",
+                    confidence=1.0,
+                    first_seen=seen,
+                    last_seen=seen,
+                ),
+            ],
+            severity="low",
+            tags=["external"],
+            source_pipeline="external",
+            first_seen=seen,
+        )
+        mapped = MISPClient().event_payload(event)["Event"]
+        stored = {
+            "id": "7",
+            "uuid": mapped["uuid"],
+            "published": False,
+            "Attribute": mapped["Attribute"],
+        }
+        session = FakeSession(
+            [
+                FakeResponse({"response": []}),
+                FakeResponse({"Event": {"id": "7", "uuid": mapped["uuid"], "Attribute": []}}),
+                FakeResponse({"Attribute": mapped["Attribute"][0]}),
+                FakeResponse({"Attribute": mapped["Attribute"][1]}),
+                FakeResponse({"Event": stored}),
+            ]
+        )
+
+        result = MISPClient(
+            base_url="https://misp.test",
+            api_key="test-only",
+            verify_tls=True,
+            session=session,
+        ).send_event(event, dry_run=False)
+
+        self.assertEqual(result["cti_delivery"]["attributes_requested"], 2)
+        self.assertEqual(result["cti_delivery"]["attributes_added"], 2)
+        self.assertEqual(result["cti_delivery"]["attributes_verified"], 2)
+        self.assertFalse(result["cti_delivery"]["published"])
+        self.assertEqual(session.calls[0][1], "https://misp.test/events/restSearch")
+        self.assertEqual(session.calls[2][1], "https://misp.test/attributes/add/7")
+        self.assertEqual(session.calls[3][1], "https://misp.test/attributes/add/7")
+        self.assertEqual(session.calls[2][2]["json"]["Attribute"]["type"], "ip-src")
+        self.assertEqual(session.calls[3][2]["json"]["Attribute"]["type"], "vulnerability")
+
+    def test_misp_send_is_idempotent_when_event_and_indicators_exist(self) -> None:
+        seen = datetime(2026, 8, 24, tzinfo=timezone.utc)
+        indicator = SimpleNamespace(
+            indicator_type="domain",
+            value="example.test",
+            extractor="regex",
+            confidence=1.0,
+            first_seen=seen,
+            last_seen=seen,
+        )
+        event = SimpleNamespace(
+            id="cti-idempotent-misp",
+            title="Idempotent MISP delivery",
+            indicators=[indicator],
+            severity="low",
+            tags=[],
+            source_pipeline="external",
+            first_seen=seen,
+        )
+        mapped = MISPClient().event_payload(event)["Event"]
+        stored = {
+            "id": "8",
+            "uuid": mapped["uuid"],
+            "published": False,
+            "Attribute": mapped["Attribute"],
+        }
+        session = FakeSession(
+            [
+                FakeResponse({"response": [{"Event": stored}]}),
+                FakeResponse({"Event": stored}),
+            ]
+        )
+
+        result = MISPClient(
+            base_url="https://misp.test",
+            api_key="test-only",
+            session=session,
+        ).send_event(event, dry_run=False)
+
+        self.assertFalse(result["cti_delivery"]["created"])
+        self.assertEqual(result["cti_delivery"]["attributes_added"], 0)
+        self.assertEqual([call[0] for call in session.calls], ["POST", "GET"])
 
     def test_model_evidence_quality_gates_use_saved_test_reports(self) -> None:
         fake_runtime = SimpleNamespace(diagnostics=lambda: {"backend": "transformer"})

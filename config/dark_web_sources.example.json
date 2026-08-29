@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "proxy": {
+    "host": "set-in-local-file-or-TOR_PROXY_HOST",
+    "port": null
+  },
+  "sources": [
+    {
+      "id": "replace-with-approved-source",
+      "name": "Disabled placeholder",
+      "url": "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion/advisories/",
+      "enabled": false,
+      "category": "dark_web_cti",
+      "allowed_paths": ["/advisories/"],
+      "max_items": 20,
+      "rate_limit_seconds": 2.0,
+      "trusted_curated": false
+    }
+  ]
+}

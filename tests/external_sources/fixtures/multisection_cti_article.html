@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Distinct Sanitized Clusters | Example Research</title>
+  <meta property="og:type" content="article">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Distinct Sanitized Clusters",
+      "datePublished": "2026-08-20",
+      "author": {"@type": "Organization", "name": "Example Research Group"}
+    }
+  </script>
+</head>
+<body>
+  <header><a href="/contact">Contact sales</a></header>
+  <nav>Products Services Account</nav>
+  <article>
+    <h1>Going with the Flow(s): Distinct Sanitized Clusters</h1>
+    <time datetime="2026-08-20">August 20, 2026</time>
+    <p class="byline">Written by: Avery Analyst, Riley Researcher</p>
+    <section>
+      <h3>Overview</h3>
+      <p>Researchers identified three independent intrusion clusters abusing legitimate authentication workflows against selected organizations. This sanitized overview establishes the campaign scope and defensive relevance before the detailed technical sections.</p>
+      <p>The clusters used targeted phishing, OAuth consent prompts, and carefully staged malware delivery. Defenders should correlate identity telemetry with endpoint and network observations rather than treating each signal independently.</p>
+    </section>
+    <section>
+      <h3>Cluster Alpha</h3>
+      <p>Cluster Alpha used a legitimate device authorization flow and instructed targets to provide a verification value. The activity was bounded, selective, and supported by infrastructure created shortly before each operation.</p>
+      <h4>OAuth activity</h4>
+      <p>Investigators observed consent requests followed by access from unfamiliar infrastructure. Review of cloud audit logs revealed token use that was inconsistent with the affected users' ordinary access patterns.</p>
+    </section>
+    <section>
+      <h3>Cluster Bravo</h3>
+      <p>Cluster Bravo delivered a sanitized malware family named RIVERSTONE. The sample contacted command-and-control infrastructure after collecting basic host metadata and browser configuration information.</p>
+      <p>The SHA-256 sample identifier was 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef and the observed C2 address was 198.51.100[.]42:8443.</p>
+    </section>
+    <section>
+      <h3>Cluster Charlie</h3>
+      <p>After authenticating, a target was redirected to an attacker-controlled application that attempted to collect an authorization token. Analysts disabled the project and documented the associated infrastructure.</p>
+      <p>Additional investigation connected the operation to a fake document-sharing service and a downloader named HEADWIND. These details remain sanitized and cannot be used as an operational payload.</p>
+    </section>
+    <section>
+      <h4>Network Indicators</h4>
+      <table>
+        <tr><th>Attribution</th><th>Indicator</th><th>Role</th></tr>
+        <tr><td>Cluster Bravo</td><td>control-example[.]test</td><td>C2 domain</td></tr>
+        <tr><td>Cluster Bravo</td><td>198.51.100[.]42</td><td>C2 address</td></tr>
+      </table>
+      <h4>File Indicators</h4>
+      <table>
+        <tr><th>Malware</th><th>SHA-256</th><th>Attribution</th></tr>
+        <tr><td>RIVERSTONE</td><td>0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef</td><td>Cluster Bravo</td></tr>
+        <tr><td>HEADWIND</td><td>abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd</td><td>Cluster Charlie</td></tr>
+      </table>
+    </section>
+    <section>
+      <h3>Defensive considerations</h3>
+      <p>Organizations should review OAuth grants, device authorization events, suspicious redirect chains, and endpoint telemetry. The indicators are contextual observations and should not be treated as standalone proof of compromise.</p>
+    </section>
+    <section class="related-articles">
+      <h3>Related Articles</h3>
+      <p>Unrelated marketing article that must not be retained.</p>
+    </section>
+  </article>
+  <footer>Subscribe to product announcements</footer>
+  <script>window.trackingSecret = "must-not-appear";</script>
+</body>
+</html>

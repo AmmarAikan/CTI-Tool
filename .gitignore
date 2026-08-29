@@ -43,3 +43,16 @@ ml/models/**/checkpoint-*/
 !ml/models/dnrti_sklearn_ner/metadata.json
 
 *.lnk
+
+# External Sources local runtime and secrets
+.env.external.local
+.vps-client.env
+.vps-publisher.env
+.misp-client.env
+config/dark_web_sources.local.json
+data/external/raw/*
+data/external/processed/*
+data/external/review/*
+data/external/state/*
+data/external/exports/*
+!data/external/**/.gitkeep

@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cti-tool.local/contracts/external_cti_item.schema.json",
+  "title": "External CTI Item",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_id", "source_item_id", "source", "source_type", "category", "title", "link", "content", "summary", "published", "updated_at", "author", "tags", "language", "collected_at", "content_hash", "classification", "metadata"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "record_id": {"type": "string", "minLength": 16},
+    "source_item_id": {"type": ["string", "null"]},
+    "source": {"type": "string", "minLength": 1},
+    "source_type": {"type": "string", "minLength": 1},
+    "category": {"type": "string"},
+    "title": {"type": "string"},
+    "link": {"type": ["string", "null"], "format": "uri"},
+    "content": {"type": "string"},
+    "summary": {"type": "string"},
+    "published": {"type": ["string", "null"]},
+    "updated_at": {"type": ["string", "null"]},
+    "author": {"type": ["string", "null"]},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "language": {"type": "string", "minLength": 2},
+    "collected_at": {"type": "string", "pattern": "Z$"},
+    "content_hash": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "label", "score", "model_version"],
+      "properties": {
+        "status": {"enum": ["not_required", "not_run", "accepted", "rejected", "error"]},
+        "label": {"type": ["string", "null"]},
+        "score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "model_version": {"type": ["string", "null"]}
+      }
+    },
+    "metadata": {"type": "object"}
+  }
+}

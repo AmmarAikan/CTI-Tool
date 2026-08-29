@@ -2,18 +2,18 @@
 
 ## Purpose
 
-The cloud honeypot keeps Dionaea's official JSON incidents as raw evidence. Wazuh may also monitor and alert on the same sensor, but the raw Dionaea API is a separate input so SIEM transformation does not replace the original evidence.
+The cloud honeypot keeps Dionaea's official JSON incidents as raw evidence. The implemented CTI Gateway serves this stream separately from any future SIEM transformation.
 
 ```http
-GET /api/v1/dionaea/events?limit=500&cursor=<opaque-cursor>
+GET /api/v1/sensors/dionaea?limit=500&cursor=<opaque-cursor>
 Authorization: Bearer <sensor-read-token>
 Accept: application/json
 ```
 
-Production requirements:
+Implemented lab requirements:
 
-- Restrict the endpoint to the WireGuard network or a strict IP allow-list.
-- Use HTTPS, a read-only bearer token, response byte/page limits, and HMAC-SHA256.
+- Bind the Gateway to VPS loopback and reach it through the authenticated SSH tunnel.
+- Use a read-only bearer token, response byte/page limits, and HMAC-SHA256.
 - Read from a rotated, append-only Dionaea JSON log. The API must never expose arbitrary filesystem paths.
 - Never expose captured credentials through a public endpoint or browser UI.
 
@@ -22,9 +22,10 @@ Response contract:
 ```json
 {
   "schema_version": "1.0",
-  "sensor_id": "dionaea-vps-1",
+  "sensor_id": "cti-vps:dionaea",
+  "source_type": "dionaea",
   "generated_at": "2026-08-24T00:00:00Z",
-  "events": [
+  "items": [
     {
       "timestamp": "2026-08-24T00:00:00Z",
       "connection": {
