@@ -6,7 +6,13 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KeyPath,
 
-    [string]$SshUser = "ammar"
+    [string]$SshUser = "ammar",
+
+    [ValidateRange(1, 65535)]
+    [int]$RemotePort = 22,
+
+    [ValidateRange(5, 180)]
+    [int]$StartupTimeoutSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +28,7 @@ if ($listeners) {
 
 $sshArguments = @(
     "-i", $resolvedKey,
+    "-p", "$RemotePort",
     "-o", "IdentitiesOnly=yes",
     "-o", "BatchMode=yes",
     "-o", "ExitOnForwardFailure=yes",
@@ -40,18 +47,25 @@ $process = Start-Process `
     -WindowStyle Hidden `
     -PassThru
 
-Start-Sleep -Seconds 3
-if ($process.HasExited) {
-    throw "SSH tunnel process exited with code $($process.ExitCode)."
-}
+$deadline = [DateTime]::UtcNow.AddSeconds($StartupTimeoutSeconds)
+do {
+    if ($process.HasExited) {
+        throw "SSH tunnel process exited with code $($process.ExitCode)."
+    }
 
-$ready = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
-    Where-Object { $_.LocalPort -in $ports } |
-    Select-Object -ExpandProperty LocalPort -Unique
+    $ready = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -in $ports } |
+        Select-Object -ExpandProperty LocalPort -Unique
+    if (@($ready).Count -eq $ports.Count) {
+        break
+    }
+
+    Start-Sleep -Seconds 1
+} while ([DateTime]::UtcNow -lt $deadline)
 
 if (@($ready).Count -ne $ports.Count) {
     Stop-Process -Id $process.Id -ErrorAction SilentlyContinue
-    throw "SSH started but both local forwarding ports were not opened."
+    throw "SSH started but all three local forwarding ports were not opened."
 }
 
 [pscustomobject]@{
