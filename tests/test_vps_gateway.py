@@ -132,6 +132,39 @@ class VPSGatewayTests(unittest.TestCase):
         )
         self.assertEqual(tampered.status_code, 422)
 
+    def test_large_feed_page_is_gzip_compressed_without_breaking_hmac(self) -> None:
+        dataset = {
+            "run_id": "ext-run-gzip",
+            "completed_at": "2026-08-29T00:00:00Z",
+            "dataset": [
+                {
+                    "record_id": "ext-large",
+                    "source": "NVD",
+                    "source_type": "nvd",
+                    "title": "Large advisory",
+                    "content": "CVE-2026-1234 " * 500,
+                }
+            ],
+        }
+        published = self.client.post(
+            "/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json=dataset,
+        )
+        self.assertEqual(published.status_code, 202)
+
+        response = self.client.get(
+            "/api/v1/external-feed",
+            headers={
+                "Authorization": f"Bearer {self.settings.feed_read_token}",
+                "Accept-Encoding": "gzip",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Content-Encoding"), "gzip")
+        expected = hmac.new(self.settings.feed_hmac_secret.encode(), response.content, hashlib.sha256).hexdigest()
+        self.assertEqual(response.headers["X-CTI-Signature"], f"sha256={expected}")
+
 
 if __name__ == "__main__":
     unittest.main()

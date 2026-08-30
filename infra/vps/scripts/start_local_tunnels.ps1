@@ -34,6 +34,7 @@ $sshArguments = @(
     "-o", "ExitOnForwardFailure=yes",
     "-o", "ServerAliveInterval=30",
     "-o", "ServerAliveCountMax=3",
+    "-C",
     "-N",
     "-L", "18088:127.0.0.1:8088",
     "-L", "18090:127.0.0.1:8090",

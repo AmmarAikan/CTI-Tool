@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
+from starlette.middleware.gzip import GZipMiddleware
 
 SENSITIVE_KEY_PARTS = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
 STREAM_NAMES = frozenset({"dionaea", "host-auth", "web-access"})
@@ -68,6 +69,7 @@ class GatewaySettings:
 
 def create_app(settings: GatewaySettings) -> FastAPI:
     app = FastAPI(title="CTI VPS Gateway", version="1.0.0", docs_url=None, redoc_url=None)
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.state.settings = settings
     app.state.write_lock = threading.Lock()
 
