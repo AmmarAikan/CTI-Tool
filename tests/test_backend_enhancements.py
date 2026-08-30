@@ -283,14 +283,30 @@ class BackendEnhancementTests(unittest.TestCase):
                 "token",
                 session=FakeSession([FakeResponse(payload)]),
             )
+            changed_payload = json.loads(json.dumps(payload))
+            changed_payload["generated_at"] = "2026-08-25T00:00:00Z"
+            changed_payload["items"][0]["content"] += " Updated analysis."
+            changed_connector = ExternalFeedAPIConnector(
+                "https://feed.example.test/v1/cti",
+                "token",
+                session=FakeSession([FakeResponse(changed_payload)]),
+            )
 
             first = PipelineService(session).run_external_feed(first_connector)
             second = PipelineService(session).run_external_feed(second_connector)
+            changed = PipelineService(session).run_external_feed(changed_connector)
             raw_count = session.scalar(select(func.count()).select_from(RawItem))
             event_count = session.scalar(select(func.count()).select_from(ThreatEvent))
+            event = session.scalar(select(ThreatEvent))
 
         self.assertEqual(first["collected_count"], 1)
         self.assertEqual(second["collected_count"], 1)
+        self.assertEqual(first["processed_count"], 1)
+        self.assertEqual(second["processed_count"], 0)
+        self.assertEqual(second["stored_count"], 0)
+        self.assertEqual(second["details"]["database_unchanged_items"], 1)
+        self.assertEqual(changed["processed_count"], 1)
+        self.assertIn("Updated analysis", event.description)
         self.assertEqual(raw_count, 1)
         self.assertEqual(event_count, 1)
 

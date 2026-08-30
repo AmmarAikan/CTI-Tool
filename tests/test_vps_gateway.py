@@ -132,6 +132,81 @@ class VPSGatewayTests(unittest.TestCase):
         )
         self.assertEqual(tampered.status_code, 422)
 
+    def test_incremental_publishes_form_a_cumulative_deduplicated_snapshot(self) -> None:
+        headers = {"Authorization": f"Bearer {self.settings.feed_publish_token}"}
+        first = self.client.post(
+            "/api/v1/external-feed/publish",
+            headers=headers,
+            json={
+                "completed_at": "2026-08-29T00:00:00Z",
+                "dataset": [
+                    {"record_id": "ext-1", "title": "Old title", "content": "old"},
+                    {"record_id": "ext-2", "title": "Stable", "content": "same"},
+                ],
+            },
+        )
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(first.json()["item_count"], 2)
+        self.assertEqual(first.json()["inserted_items"], 2)
+
+        second = self.client.post(
+            "/api/v1/external-feed/publish",
+            headers=headers,
+            json={
+                "completed_at": "2026-08-30T00:00:00Z",
+                "dataset": [
+                    {"record_id": "ext-1", "title": "New title", "content": "new"},
+                    {"record_id": "ext-3", "title": "Added", "content": "fresh"},
+                ],
+            },
+        )
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(second.json()["item_count"], 3)
+        self.assertEqual(second.json()["inserted_items"], 1)
+        self.assertEqual(second.json()["updated_items"], 1)
+
+        snapshot = self.client.get(
+            "/api/v1/external-feed?limit=10",
+            headers={"Authorization": f"Bearer {self.settings.feed_read_token}"},
+        ).json()
+        self.assertEqual([item["external_id"] for item in snapshot["items"]], ["ext-1", "ext-2", "ext-3"])
+        self.assertEqual(snapshot["items"][0]["title"], "New title")
+
+    def test_cumulative_limit_failure_preserves_previous_snapshot(self) -> None:
+        limited = gateway.GatewaySettings(
+            feed_publish_token=self.settings.feed_publish_token,
+            feed_read_token=self.settings.feed_read_token,
+            feed_hmac_secret=self.settings.feed_hmac_secret,
+            sensor_read_token=self.settings.sensor_read_token,
+            sensor_hmac_secret=self.settings.sensor_hmac_secret,
+            cursor_secret=self.settings.cursor_secret,
+            data_dir=self.root / "limited-data",
+            dionaea_path=self.dionaea_path,
+            host_auth_path=self.auth_path,
+            max_feed_items=1,
+        )
+        client = TestClient(gateway.create_app(limited))
+        publish_headers = {"Authorization": f"Bearer {limited.feed_publish_token}"}
+        self.assertEqual(
+            client.post(
+                "/api/v1/external-feed/publish",
+                headers=publish_headers,
+                json={"dataset": [{"record_id": "ext-1", "title": "One"}]},
+            ).status_code,
+            202,
+        )
+        rejected = client.post(
+            "/api/v1/external-feed/publish",
+            headers=publish_headers,
+            json={"dataset": [{"record_id": "ext-2", "title": "Two"}]},
+        )
+        self.assertEqual(rejected.status_code, 413)
+        snapshot = client.get(
+            "/api/v1/external-feed",
+            headers={"Authorization": f"Bearer {limited.feed_read_token}"},
+        ).json()
+        self.assertEqual([item["external_id"] for item in snapshot["items"]], ["ext-1"])
+
     def test_large_feed_page_is_gzip_compressed_without_breaking_hmac(self) -> None:
         dataset = {
             "run_id": "ext-run-gzip",

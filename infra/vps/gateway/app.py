@@ -38,6 +38,7 @@ class GatewaySettings:
     feed_id: str = "external-team-feed"
     sensor_id: str = "cti-vps"
     max_publish_bytes: int = 20 * 1024 * 1024
+    max_feed_snapshot_bytes: int = 100 * 1024 * 1024
     max_sensor_bytes: int = 50 * 1024 * 1024
     max_feed_items: int = 20_000
 
@@ -62,6 +63,9 @@ class GatewaySettings:
             feed_id=os.getenv("EXTERNAL_FEED_ID", "external-team-feed"),
             sensor_id=os.getenv("SENSOR_ID", "cti-vps"),
             max_publish_bytes=int(os.getenv("MAX_PUBLISH_BYTES", str(20 * 1024 * 1024))),
+            max_feed_snapshot_bytes=int(
+                os.getenv("MAX_FEED_SNAPSHOT_BYTES", str(100 * 1024 * 1024))
+            ),
             max_sensor_bytes=int(os.getenv("MAX_SENSOR_BYTES", str(50 * 1024 * 1024))),
             max_feed_items=int(os.getenv("MAX_FEED_ITEMS", "20000")),
         )
@@ -111,14 +115,20 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=422, detail="publish body must be UTF-8 JSON") from exc
-        envelope = _normalize_publish(payload, settings)
-        encoded = _json_bytes(envelope)
-        digest = hashlib.sha256(encoded).hexdigest()
-        _atomic_write(_feed_path(settings), encoded)
+        incoming = _normalize_publish(payload, settings)
+        with app.state.write_lock:
+            envelope, merge_counts = _merge_feed_snapshot(
+                _feed_path(settings), incoming, settings
+            )
+            encoded = _json_bytes(envelope)
+            digest = hashlib.sha256(encoded).hexdigest()
+            _atomic_write(_feed_path(settings), encoded)
         return {
             "status": "accepted",
             "feed_id": settings.feed_id,
             "item_count": len(envelope["items"]),
+            "published_items": len(incoming["items"]),
+            **merge_counts,
             "etag": digest,
         }
 
@@ -133,7 +143,7 @@ def create_app(settings: GatewaySettings) -> FastAPI:
         path = _feed_path(settings)
         if not path.is_file():
             raise HTTPException(status_code=404, detail="no external feed has been published")
-        raw = _bounded_read(path, settings.max_publish_bytes)
+        raw = _bounded_read(path, settings.max_feed_snapshot_bytes)
         etag = hashlib.sha256(raw).hexdigest()
         quoted_etag = f'"{etag}"'
         if cursor is None and if_none_match and if_none_match.strip() in {etag, quoted_etag}:
@@ -207,6 +217,62 @@ def _normalize_publish(payload: Any, settings: GatewaySettings) -> dict[str, Any
         "feed_id": settings.feed_id,
         "generated_at": generated_at,
         "items": items,
+    }
+
+
+def _merge_feed_snapshot(
+    path: Path,
+    incoming: dict[str, Any],
+    settings: GatewaySettings,
+) -> tuple[dict[str, Any], dict[str, int]]:
+    """Merge incremental exports into a bounded snapshot so offline consumers miss no run."""
+    existing_items: list[dict[str, Any]] = []
+    if path.is_file():
+        try:
+            existing = json.loads(
+                _bounded_read(path, settings.max_feed_snapshot_bytes).decode("utf-8")
+            )
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=500, detail="stored external feed is invalid") from exc
+        if not isinstance(existing, dict) or not isinstance(existing.get("items"), list):
+            raise HTTPException(status_code=500, detail="stored external feed contract is invalid")
+        existing_items = existing["items"]
+
+    merged: dict[str, dict[str, Any]] = {}
+    for index, item in enumerate(existing_items):
+        if not isinstance(item, dict) or not str(item.get("external_id") or "").strip():
+            raise HTTPException(
+                status_code=500,
+                detail=f"stored external feed item {index} is invalid",
+            )
+        merged[str(item["external_id"])] = item
+
+    inserted = updated = unchanged = 0
+    for item in incoming["items"]:
+        external_id = str(item["external_id"])
+        previous = merged.get(external_id)
+        if previous is None:
+            inserted += 1
+        elif previous == item:
+            unchanged += 1
+        else:
+            updated += 1
+        merged[external_id] = item
+
+    if len(merged) > settings.max_feed_items:
+        raise HTTPException(status_code=413, detail="cumulative feed contains too many items")
+    envelope = {
+        "schema_version": "1.0",
+        "feed_id": settings.feed_id,
+        "generated_at": incoming["generated_at"],
+        "items": [merged[key] for key in sorted(merged)],
+    }
+    if len(_json_bytes(envelope)) > settings.max_feed_snapshot_bytes:
+        raise HTTPException(status_code=413, detail="cumulative feed exceeds configured limit")
+    return envelope, {
+        "inserted_items": inserted,
+        "updated_items": updated,
+        "unchanged_items": unchanged,
     }
 
 

@@ -222,18 +222,49 @@ class PipelineService:
     ) -> dict[str, Any]:
         records = list(records)
         run = self.repository.create_run("external", run_source, details=details)
-        stored = failed = 0
+        stored = failed = unchanged = 0
         try:
             raw_context = []
+            processable_records = []
+            source_cache = {}
+            record_sources = []
+            external_ids_by_source = {}
             for record in records:
-                source = self.repository.get_or_create_source(
-                    record.source_name,
-                    record.source_type,
-                    "external",
+                source = source_cache.get(record.source_name)
+                if source is None:
+                    source = self.repository.get_or_create_source(
+                        record.source_name,
+                        record.source_type,
+                        "external",
+                    )
+                    source_cache[record.source_name] = source
+                record_sources.append((record, source))
+                external_ids_by_source.setdefault(source.id, []).append(record.external_id)
+
+            existing_by_source = {
+                source.id: self.repository.get_raw_records(
+                    source, external_ids_by_source.get(source.id, [])
                 )
-                raw_item = self.repository.upsert_raw_record(source, record)
+                for source in source_cache.values()
+            }
+            for record, source in record_sources:
+                raw_item = existing_by_source.get(source.id, {}).get(record.external_id)
+                if raw_item is not None and self.repository.raw_record_is_unchanged(
+                    raw_item, source, record
+                ):
+                    unchanged += 1
+                    continue
+                raw_item = self.repository.upsert_raw_record(
+                    source, record, raw_item, flush=False
+                )
                 raw_context.append((source, raw_item))
-            objects = ExternalCTIPipeline().process_batch(records)
+                processable_records.append(record)
+            self.session.flush()
+            objects = (
+                ExternalCTIPipeline().process_batch(processable_records)
+                if processable_records
+                else []
+            )
             for (source, raw_item), cti_object in zip(raw_context, objects):
                 cti_object.raw_reference["source_severity"] = cti_object.severity or "unknown"
                 risk = self.risk_scorer.score(cti_object)
@@ -252,6 +283,12 @@ class PipelineService:
                 processed=len(objects),
                 stored=stored,
                 failed=failed,
+                details={
+                    "connector_duplicate_items": int(details.get("duplicate_items", 0)),
+                    "database_unchanged_items": unchanged,
+                    "changed_or_new_items": len(processable_records),
+                    "duplicate_items": int(details.get("duplicate_items", 0)) + unchanged,
+                },
             )
             self.session.commit()
             return self._run_summary(run)

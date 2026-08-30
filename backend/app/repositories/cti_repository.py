@@ -106,13 +106,72 @@ class CTIRepository:
         self.session.flush()
         return run
 
-    def upsert_raw_record(self, source: Source, record: RawRecord) -> RawItem:
-        raw_item = self.session.scalar(
+    def get_raw_record(self, source: Source, external_id: str) -> RawItem | None:
+        return self.session.scalar(
             select(RawItem).where(
                 RawItem.source_id == source.id,
-                RawItem.external_id == record.external_id,
+                RawItem.external_id == external_id,
             )
         )
+
+    def get_raw_records(self, source: Source, external_ids: list[str]) -> dict[str, RawItem]:
+        """Fetch existing records in bounded batches for incremental feed processing."""
+        records: dict[str, RawItem] = {}
+        unique_ids = list(dict.fromkeys(external_ids))
+        for start in range(0, len(unique_ids), 500):
+            batch = unique_ids[start : start + 500]
+            if not batch:
+                continue
+            for raw_item in self.session.scalars(
+                select(RawItem).where(
+                    RawItem.source_id == source.id,
+                    RawItem.external_id.in_(batch),
+                )
+            ):
+                records[raw_item.external_id] = raw_item
+        return records
+
+    def raw_record_is_unchanged(self, raw_item: RawItem, source: Source, record: RawRecord) -> bool:
+        """Compare only fields that affect CTI processing, excluding collection timestamps."""
+        previous = raw_item.raw_data if isinstance(raw_item.raw_data, dict) else {}
+        current = record.raw_data if isinstance(record.raw_data, dict) else {}
+        previous_metadata = previous.get("metadata") if isinstance(previous.get("metadata"), dict) else {}
+        current_metadata = current.get("metadata") if isinstance(current.get("metadata"), dict) else {}
+
+        def tags(value: Any) -> list[str]:
+            return sorted(str(item) for item in value) if isinstance(value, list) else []
+
+        previous_semantics = {
+            "source_type": previous.get("source_type") or source.source_type,
+            "title": raw_item.title,
+            "content": raw_item.content,
+            "url": previous.get("url") or previous.get("link"),
+            "published_at": previous.get("published_at") or previous.get("published"),
+            "category": previous.get("category"),
+            "tags": tags(previous.get("tags")),
+            "cvss": previous_metadata.get("cvss"),
+        }
+        current_semantics = {
+            "source_type": record.source_type,
+            "title": record.title,
+            "content": record.content,
+            "url": record.url or current.get("url") or current.get("link"),
+            "published_at": record.published_at,
+            "category": current.get("category"),
+            "tags": tags(current.get("tags")),
+            "cvss": current_metadata.get("cvss"),
+        }
+        return previous_semantics == current_semantics
+
+    def upsert_raw_record(
+        self,
+        source: Source,
+        record: RawRecord,
+        raw_item: RawItem | None = None,
+        *,
+        flush: bool = True,
+    ) -> RawItem:
+        raw_item = raw_item or self.get_raw_record(source, record.external_id)
         if raw_item is None:
             raw_item = RawItem(source_id=source.id, external_id=record.external_id)
             self.session.add(raw_item)
@@ -121,7 +180,8 @@ class CTIRepository:
         raw_item.content = record.content
         raw_item.raw_data = record.raw_data
         raw_item.observed_at = parse_datetime(record.published_at or record.collected_at)
-        self.session.flush()
+        if flush:
+            self.session.flush()
         return raw_item
 
     def upsert_cti_object(
