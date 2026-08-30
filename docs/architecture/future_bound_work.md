@@ -8,7 +8,7 @@ This file separates the completed graduation-project backend from heavier enterp
 
 The current system includes:
 
-- External JSON file and authenticated/HMAC API ingestion with schema, bounds, ETag, pagination, stable identity, privacy filtering, and idempotent central storage.
+- External JSON file and authenticated/HMAC API ingestion with schema, bounds, ETag, pagination, stable identity, privacy filtering, a cumulative VPS snapshot that survives missed collection windows, and idempotent central storage.
 - Live Dionaea JSON, lightweight SSH-auth JSON, and gateway web-access JSON from the VPS.
 - Raw-record retention separate from unified processed CTI.
 - Thirty-minute internal sessionization, Isolation Forest, retained normal sessions, and outlier-only CTI promotion.
@@ -17,6 +17,7 @@ The current system includes:
 - Live MISP 2.5.44 on the VPS with unpublished, verified, idempotent event/attribute delivery.
 - VPS-hosted External Sources with private job control, scheduled validated export, and no collaborator-computer availability dependency.
 - Hardened VPS, loopback-only Gateway/MISP administration, SSH tunnels, scoped secrets, Dionaea egress controls, systemd collection, and log rotation.
+- Incremental PostgreSQL comparison that skips semantically unchanged External records before BERT and bulk-prefetches existing identities.
 
 ## Deferred infrastructure
 
@@ -34,7 +35,7 @@ A future high-volume design may place immutable telemetry or long-lived baseline
 
 ### Celery/Redis/Kafka workers
 
-Current ingestion is bounded and synchronous. This keeps execution traceable and simple for the graduation scope. Celery/Redis or Kafka would add background scheduling, retries, backpressure, dead-letter handling, and horizontal workers when feeds grow. It would also require idempotent task keys, retry budgets, monitoring, recovery tests, and operational ownership.
+Current ingestion is bounded and synchronous. This keeps execution traceable and simple for the graduation scope. Large first-time snapshots can therefore occupy the request until BERT completes, although repeated snapshots use ETag and changed snapshots skip unchanged database records before the model. Celery/Redis or Kafka would add background scheduling, retries, backpressure, dead-letter handling, progress reporting, and horizontal workers when feeds grow. It would also require idempotent task keys, retry budgets, monitoring, recovery tests, and operational ownership.
 
 MISP's internal Redis/Valkey is owned only by MISP and is not the backend task queue.
 

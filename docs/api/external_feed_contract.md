@@ -25,7 +25,7 @@ Production rules:
 
 The implemented graduation lab binds the Gateway to VPS loopback and carries both publish and read traffic through SSH forwarding. Cleartext HTTP is therefore confined inside the encrypted SSH tunnel; a future public endpoint must use valid HTTPS.
 
-## Collaborator publish endpoint
+## VPS publisher endpoint
 
 The VPS systemd publisher sends the completed JSON artifact to the loopback Gateway with a publish-only credential:
 
@@ -35,7 +35,7 @@ Authorization: Bearer <feed-publish-token>
 Content-Type: application/json
 ```
 
-The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. The Gateway applies byte/item bounds, stable identity/content checks, timestamp validation, metadata secret-key removal, and an atomic write. The publish token cannot read sensors or access MISP. The response contains only acceptance status, feed identity, item count, and ETag.
+The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a cumulative snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. This prevents the local backend from missing a collection window while it is offline. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic write. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports the published, inserted, updated, unchanged, and total snapshot counts plus the ETag.
 
 ## Response envelope
 
@@ -119,7 +119,7 @@ If another page exists, return:
 }
 ```
 
-The final page returns `has_more=false`. The provider should return `ETag`; the backend sends `If-None-Match` on the next first-page request. A `304 Not Modified` response creates a completed zero-item run. The backend also saves the final checkpoint and ignores duplicate `(source, external_id)` items inside a pulled batch. Database upserts make repeated delivery idempotent.
+The final page returns `has_more=false`. The provider should return `ETag`; the backend sends `If-None-Match` on the next first-page request. A `304 Not Modified` response creates a completed zero-item run. The backend also saves the final checkpoint and ignores duplicate `(source, external_id)` items inside a pulled batch. Before BERT, PostgreSQL compares the stored processing-relevant fields and skips unchanged records; new or changed content is processed and upserted. Repeated delivery is therefore idempotent without paying the model cost again.
 
 ## Failure behavior
 
@@ -141,6 +141,9 @@ EXTERNAL_FEED_HMAC_SECRET=<separate-shared-secret>
 EXTERNAL_FEED_VERIFY_TLS=true
 EXTERNAL_FEED_ALLOW_HTTP=false
 EXTERNAL_FEED_REQUIRE_CONTRACT=true
+EXTERNAL_FEED_MAX_BYTES=104857600
+EXTERNAL_FEED_MAX_PAGES=100
+EXTERNAL_FEED_PAGE_SIZE=250
 ```
 
 After Swagger authorization:

@@ -76,7 +76,7 @@ No client receives another role's token.
 - Dionaea live pull collected 777 records in the later acceptance run, built 30 sessions, and promoted 3 outliers.
 - SSH-auth pull collected 53 records, built 11 sessions, and promoted one outlier.
 - Web-access pull collected 6 records, built 2 sessions, and promoted no outliers.
-- PostgreSQL contained 931 raw rows and 20 CTI events at the evidence snapshot; 57 sessions consisted of 7 outliers and 50 retained non-threat sessions.
+- PostgreSQL contained 9,832 raw rows and 4,216 CTI events at the final evidence snapshot; 169 sessions consisted of 19 outliers and 150 retained non-threat sessions.
 - The controlled External row appeared once and contained zero `api_token` keys after Gateway sanitization.
 - MISP event delivery requested, added, and re-read two indicators; `published=false`. A second send added zero attributes.
 - A time-ordering defect discovered during MISP acceptance was fixed in central persistence and MISP mapping. Existing controlled data was normalized and the database then reported zero invalid event/indicator time bounds.

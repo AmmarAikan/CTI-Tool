@@ -12,13 +12,28 @@ The VPS service is bound to `127.0.0.1:8090`. It is never a public collector API
 VPS External Sources
 -> validated run-scoped JSON export
 -> scheduled host publisher
--> VPS Gateway loopback
+-> VPS Gateway cumulative, deduplicated snapshot
 -> SSH tunnel + Bearer + HMAC
 -> Ammar FastAPI
 -> BERT / Regex / PostgreSQL / correlation / STIX / MISP
 ```
 
-The systemd timer runs an `all_enabled` collection every two hours. It polls the bounded job API, downloads Latest Export only after a completed or partial terminal state, and publishes it to the Gateway with the existing scoped publish credential. An unchanged backend pull uses ETag/HTTP 304 and creates no duplicate CTI records.
+The systemd timer runs an `all_enabled` collection every two hours. It polls the bounded job API, downloads Latest Export only after a completed or partial terminal state, and publishes it to the Gateway with the existing scoped publish credential. The Gateway merges that incremental export into a bounded snapshot by stable external identity, so a backend that was offline does not miss an earlier run. An unchanged backend pull uses ETag/HTTP 304 and creates no duplicate CTI records. If the snapshot changes, PostgreSQL skips semantically unchanged records before BERT and processes only new or changed content.
+
+Large feed pages are GZip-compressed by the Gateway while their HMAC continues to cover the canonical decompressed JSON body. The Windows SSH tunnel also enables transport compression. This matters because the first accepted live export contained thousands of records and an uncompressed tunnel was both slow and vulnerable to a transient network reset before the database transaction began.
+
+## Live source behavior
+
+The first VPS `all_enabled` acceptance run completed as `partial`, not failed: 14 of 17 enabled registered sources completed, 1,803 External-only deduplicated records were exported from 1,985 accepted source observations, 182 duplicates were removed, 68 records were routed to review, and the Gateway accepted the validated JSON. Per-source isolation kept the successful evidence when three providers failed.
+
+Two provider failures were corrected and verified through the central authenticated API:
+
+- GitHub Global Advisories rejected fractional-second `modified` filters with HTTP 422. The connector now sends whole-second ISO-8601 values; the live retry completed with 494 accepted, 6 review, and 0 errors.
+- NVD returned more than 6 MB for a 2,000-record page, correctly exceeding the 5 MB client bound. Pages are now limited to 100 and continued by checkpointed pagination; the live retry completed with 498 accepted, 2 review, and 0 errors.
+
+The CISA advisory HTML and RSS hosts return HTTP 403 from the current Contabo address, while the separate official CISA KEV JSON feed completes. The collector keeps this as an honest isolated provider failure; it does not bypass the provider WAF, impersonate a browser, or relay the request through an unapproved proxy.
+
+Historical run artifacts remain in the External volume. During cumulative-feed migration, five validated exports containing 1,803, 445, 410, 874, and 880 run-scoped records were replayed oldest-to-newest. Stable-identity merging produced 4,184 unique snapshot records; replaying the final 880-record export inserted zero new records, updated 119, and left 761 unchanged. This is acceptance evidence for both retention and cross-run deduplication, not a claim that every provider completed: CISA advisories remained the isolated failed source.
 
 ## Private service addresses
 
@@ -76,7 +91,7 @@ Never commit `/etc/cti-platform/vps.env`, `.vps-client.env`, any future real Oni
 
 ## Resource and retention policy
 
-The External container has a 2 GB memory limit, 2 CPU limit, read-only root filesystem, no Linux capabilities, `no-new-privileges`, and an independently persisted data volume.
+The External container has a 2 GB memory limit, 2 CPU limit, read-only root filesystem, no Linux capabilities, `no-new-privileges`, and an independently persisted data volume. A publish request is limited to 20 MB; the cumulative Gateway snapshot is limited to 100 MB and 20,000 items. The local reader uses matching bounded limits of 100 MB and 100 pages of at most 250 records.
 
 Dionaea JSON incidents remain the authoritative sensor evidence. The verbose upstream `dionaea.log` is restricted to warning/error and rotated at 25 MB with four compressed rotations. Bistreams older than seven days and captured binaries older than thirty days are deleted by `cti-storage-maintenance.timer`. Captured payloads are never executed.
 

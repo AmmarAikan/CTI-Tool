@@ -18,7 +18,7 @@ MISP, Gateway, and External control are never exposed directly. The local backen
 ## Repository layout
 
 - `compose.yaml`: Gateway, VPS External Sources, and Dionaea.
-- `gateway/`: authenticated feed/sensor API with HMAC, ETag, cursor, bounds, redaction, and structured web telemetry.
+- `gateway/`: authenticated feed/sensor API with HMAC, ETag, cursor, bounds, redaction, cumulative stable-identity feed merging, and structured web telemetry.
 - `collectors/`: lightweight SSH journal collector.
 - `misp/compose.override.yaml`: resource limits and loopback-only ports over the official MISP Compose project.
 - `scripts/bootstrap_host.sh`: host hardening and Docker prerequisites.
@@ -56,7 +56,7 @@ Forwarding is:
 - `127.0.0.1:18090` -> VPS `127.0.0.1:8090` for External source control/jobs.
 - `127.0.0.1:18443` -> VPS `127.0.0.1:8443` for MISP.
 
-After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port.
+After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port, waits up to 90 seconds for a slow SSH handshake, and enables SSH compression. `-RemotePort` exists for authorized recovery listeners; normal operation remains `ammar` on port `22`.
 
 ## Public and private ports
 
@@ -93,7 +93,7 @@ On Ammar's PC, use the authenticated FastAPI endpoints:
 /api/v1/events/{event_id}/misp
 ```
 
-An identical External Feed returns HTTP 304 and creates a completed zero-record run. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
+An identical External Feed returns HTTP 304 and creates a completed zero-record run. A changed snapshot skips unchanged PostgreSQL records before BERT and processes only new or changed content. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
 
 The External timer runs every two hours. Manual source addition and per-source collection are issued through the central FastAPI API, not by publishing the VPS adapter or enabling its Swagger UI.
 

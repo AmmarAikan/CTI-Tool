@@ -7,7 +7,7 @@ The graduation project uses a two-node, cost-aware hybrid architecture. Heavy ML
 ```mermaid
 flowchart LR
     Internet["Untrusted internet"] --> External["VPS External Sources\ncollect + privacy + versioned export"]
-    External -->|"scheduled validated JSON publish"| Gateway["VPS CTI Gateway\nFeed + sensor API"]
+    External -->|"scheduled validated JSON publish"| Gateway["VPS CTI Gateway\nCumulative feed + sensor API"]
     Internet --> Dionaea["VPS Dionaea\npublic honeypot ports"]
     Dionaea -->|"rotated JSON"| Gateway
     SSHLog["VPS SSH journal collector"] --> Gateway
@@ -25,7 +25,7 @@ flowchart LR
 | Component | Location | Role |
 |---|---|---|
 | External collectors | VPS loopback service | Collect, preprocess, privacy-filter, deduplicate within External scope, export versioned JSON, accept bounded private control jobs |
-| CTI Gateway | VPS loopback | Accept scoped publish, serve authenticated/HMAC feed and sensor pages, log safe web metadata |
+| CTI Gateway | VPS loopback | Merge run exports into a bounded stable-identity snapshot, serve authenticated/HMAC feed and sensor pages, log safe web metadata |
 | Dionaea | VPS public sensor network | Capture selected hostile service interactions into JSON; no backend/MISP secret |
 | SSH journal collector | VPS host | Convert accepted/failed SSH authentication metadata into bounded JSONL without passwords |
 | FastAPI backend | Ammar PC | Validate, normalize, sessionize, extract, score, correlate, audit, expose APIs |
@@ -40,15 +40,17 @@ VPS External collectors
 -> versioned JSON
 -> scheduled loopback publisher
 -> privacy and structural validation
+-> cumulative stable-identity snapshot
 -> ETag/HMAC authenticated backend pull
 -> raw_items
+-> skip database-unchanged records
 -> relevance classification
 -> BERT NER + Regex IoCs + prototype relationships
 -> unified threat_events
 -> correlations/risk/STIX/MISP/API
 ```
 
-The Gateway removes metadata keys containing token, secret, password, authorization, cookie, or API-key semantics before storing the exchange artifact. A repeated unchanged pull is answered with HTTP 304 and produces a completed zero-record pipeline run.
+The Gateway removes metadata keys containing token, secret, password, authorization, cookie, or API-key semantics before storing the exchange artifact. It retains previous run records when new incremental exports arrive, updating matching stable identities atomically. A repeated unchanged pull is answered with HTTP 304 and produces a completed zero-record pipeline run; a changed snapshot sends only new or semantically changed records through BERT after PostgreSQL comparison.
 
 ## Internal flow
 
@@ -63,7 +65,7 @@ Dionaea JSON / SSH auth JSON / Gateway web JSON
 -> promote outlier sessions only to threat_events
 ```
 
-The current acceptance database retained 57 sessions: 7 promoted outliers and 50 non-threat sessions. This proves the backend does not treat every log line as a threat.
+The final acceptance database retained 169 sessions: 19 promoted outliers and 150 non-threat sessions. This proves the backend does not treat every log line as a threat.
 
 ## MISP flow
 
