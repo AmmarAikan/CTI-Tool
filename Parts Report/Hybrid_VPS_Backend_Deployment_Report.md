@@ -62,13 +62,20 @@ PostgreSQL وGateway وExternal Control وMISP وDocker API ليست منافذ 
 الأمر:
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -v
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-النتيجة:
+نتيجة القبول الأولى:
 
 ```text
 Ran 241 tests in 107.793s
+OK
+```
+
+وأعيدت الحزمة كاملة قبل الرفع النهائي إلى GitHub على نفس الشجرة:
+
+```text
+Ran 241 tests in 41.021s
 OK
 ```
 
@@ -348,6 +355,7 @@ published: false
 - `DOCKER-USER` يمنع الاتصالات الصادرة الجديدة من شبكة الحساس والبوابة مع السماح بالردود القائمة.
 - MISP وDionaea يشتركان في kernel واحد لأن هذا مختبر منخفض التكلفة؛ Honeypot مستقل يبقى أفضل مستقبلًا.
 - أول نقل كبير كشف reset في نفق SSH العام. السبب كان ازدحام pre-auth و`MaxStartups` مع اختلاف عنوان خروج Codex عن جلسة المستخدم. استُخدم listener مؤقت بالمفتاح فقط وقاعدة UFW مقيّدة بعنوان المصدر أثناء العمل، ولم يُفتح للعامة.
+- بعد تغيّر شبكة جهاز Ammar توقف النفق المحلي كما هو متوقع. أعاد سكربت `start_local_tunnels.ps1` إنشاء الأنفاق الثلاثة عبر حساب التشغيل العادي، ثم نجح Backend health مع PostgreSQL، وGateway health مع المسارات الداخلية الثلاثة، وExternal Control health، ووصل MISP عبر نفقه الخاص. لذلك تغيّر الشبكة لا يتطلب إعادة نشر الخدمات؛ يتطلب فقط إعادة تشغيل سكربت النفق.
 
 حادثة تخزين موثقة: upstream Dionaea all-level text log وصل إلى نحو 106 GB. تم truncation لذلك text log فقط بعد التحقق، بينما بقيت JSON incidents وbistreams/binaries الأدلة المعتمدة. الصورة المشتقة الآن تقيد النص إلى warning/error، وlogrotate إلى 25 MB مع أربع نسخ مضغوطة، وretention يحذف bistreams بعد 7 أيام وcaptured binaries بعد 30 يومًا. لا تُشغّل captured payloads.
 
