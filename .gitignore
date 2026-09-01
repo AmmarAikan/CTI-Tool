@@ -32,6 +32,8 @@ data/dionaea/
 
 # Large BERT model files - do not upload to GitHub
 ml/models/dnrti_bert_ner/
+ml/models/dnrti_bert_ner_onnx_fp32/
+ml/models/dnrti_bert_ner_onnx_int8/
 
 # Hugging Face / checkpoints
 checkpoint-*/

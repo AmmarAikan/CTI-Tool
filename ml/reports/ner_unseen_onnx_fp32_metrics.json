@@ -1,0 +1,148 @@
+{
+  "scope": "unique test sentences absent from train; first duplicate retained",
+  "model_type": "bert",
+  "model_name": "dnrti_bert_ner_onnx_fp32",
+  "runtime": "onnx",
+  "original_test_sentences": 664,
+  "evaluated_sentences": 297,
+  "runtime_seconds": 19.740312800000538,
+  "samples_per_second": 15.045354296513068,
+  "batch_size": 16,
+  "max_length": 120,
+  "metrics": {
+    "micro": {
+      "entity_precision": 0.7203791469194313,
+      "entity_recall": 0.7747196738022426,
+      "entity_f1": 0.7465618860510806,
+      "entity_true_positives": 760,
+      "entity_false_positives": 295,
+      "entity_false_negatives": 221
+    },
+    "macro": {
+      "entity_macro_precision": 0.6432950938816426,
+      "entity_macro_recall": 0.7461030694061914,
+      "entity_macro_f1": 0.6798407149515149,
+      "entity_types_with_support": 11
+    },
+    "per_type": {
+      "Area": {
+        "precision": 0.8502994011976048,
+        "recall": 0.9102564102564102,
+        "f1": 0.8792569659442724,
+        "support": 156,
+        "true_positives": 142,
+        "false_positives": 25,
+        "false_negatives": 14
+      },
+      "Exp": {
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6666666666666666,
+        "support": 2,
+        "true_positives": 2,
+        "false_positives": 2,
+        "false_negatives": 0
+      },
+      "Features": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0,
+        "true_positives": 0,
+        "false_positives": 13,
+        "false_negatives": 0
+      },
+      "HackOrg": {
+        "precision": 0.6590909090909091,
+        "recall": 0.7474226804123711,
+        "f1": 0.7004830917874395,
+        "support": 194,
+        "true_positives": 145,
+        "false_positives": 75,
+        "false_negatives": 49
+      },
+      "Idus": {
+        "precision": 0.38461538461538464,
+        "recall": 0.45454545454545453,
+        "f1": 0.41666666666666663,
+        "support": 11,
+        "true_positives": 5,
+        "false_positives": 8,
+        "false_negatives": 6
+      },
+      "OffAct": {
+        "precision": 0.8539325842696629,
+        "recall": 0.8172043010752689,
+        "f1": 0.8351648351648352,
+        "support": 93,
+        "true_positives": 76,
+        "false_positives": 13,
+        "false_negatives": 17
+      },
+      "Org": {
+        "precision": 0.6333333333333333,
+        "recall": 0.5428571428571428,
+        "f1": 0.5846153846153846,
+        "support": 70,
+        "true_positives": 38,
+        "false_positives": 22,
+        "false_negatives": 32
+      },
+      "Purp": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "support": 0,
+        "true_positives": 0,
+        "false_positives": 17,
+        "false_negatives": 0
+      },
+      "SamFile": {
+        "precision": 0.391304347826087,
+        "recall": 0.4864864864864865,
+        "f1": 0.43373493975903615,
+        "support": 37,
+        "true_positives": 18,
+        "false_positives": 28,
+        "false_negatives": 19
+      },
+      "SecTeam": {
+        "precision": 0.859504132231405,
+        "recall": 0.9122807017543859,
+        "f1": 0.8851063829787233,
+        "support": 114,
+        "true_positives": 104,
+        "false_positives": 17,
+        "false_negatives": 10
+      },
+      "Time": {
+        "precision": 0.8648648648648649,
+        "recall": 0.9142857142857143,
+        "f1": 0.888888888888889,
+        "support": 105,
+        "true_positives": 96,
+        "false_positives": 15,
+        "false_negatives": 9
+      },
+      "Tool": {
+        "precision": 0.7043010752688172,
+        "recall": 0.6717948717948717,
+        "f1": 0.6876640419947506,
+        "support": 195,
+        "true_positives": 131,
+        "false_positives": 55,
+        "false_negatives": 64
+      },
+      "Way": {
+        "precision": 0.375,
+        "recall": 0.75,
+        "f1": 0.5,
+        "support": 4,
+        "true_positives": 3,
+        "false_positives": 5,
+        "false_negatives": 1
+      }
+    },
+    "token_accuracy": 0.9292149292149292
+  }
+}

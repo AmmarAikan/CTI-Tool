@@ -1,0 +1,20 @@
+{
+  "source_model": "ml/models/dnrti_bert_ner",
+  "fp32_model": "ml/models/dnrti_bert_ner_onnx_fp32/model.onnx",
+  "int8_model": "ml/models/dnrti_bert_ner_onnx_int8/model.onnx",
+  "fp32_bytes": 431171595,
+  "optimized_fp32_bytes": 430994641,
+  "int8_bytes": 108493720,
+  "int8_quantized_from": "exported_fp32_graph",
+  "size_reduction_ratio": 0.7483746117366568,
+  "timings": {
+    "export_seconds": 0.0,
+    "graph_optimization_seconds": 12.438910299999407,
+    "quantization_seconds": 21.41946789999929
+  },
+  "activation_status": "experimental_not_enabled",
+  "quality_gate": {
+    "maximum_absolute_unseen_f1_drop": 0.01,
+    "minimum_speedup": 1.5
+  }
+}

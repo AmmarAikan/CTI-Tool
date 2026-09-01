@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,16 @@ from backend.app.pipeline.preprocessing.normalizer import RecordNormalizer
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(slots=True)
+class _PreparedExternalRecord:
+    record: RawRecord
+    normalized_text: str
+    cti_object: CTIObject
+    classification: ClassificationResult
+    indicators: list[Any]
+    needs_ner: bool
+
+
 class ExternalCTIPipeline:
     """External runtime pipeline: normalize, classify, extract, transform."""
 
@@ -51,24 +62,67 @@ class ExternalCTIPipeline:
         self.relation_extractor = relation_extractor or RelationExtractor()
 
     def process_batch(self, records: Iterable[RawRecord]) -> list[CTIObject]:
-        objects: list[CTIObject] = []
-        for record in records:
+        materialized = list(records)
+        objects: list[CTIObject | None] = [None] * len(materialized)
+        pending: list[tuple[int, _PreparedExternalRecord]] = []
+        for index, record in enumerate(materialized):
             try:
-                cti_object = self.process_record(record)
+                prepared = self._prepare_record(record)
+                if isinstance(prepared, CTIObject):
+                    objects[index] = prepared
+                elif prepared.needs_ner:
+                    pending.append((index, prepared))
+                else:
+                    objects[index] = self._finalize_record(prepared, [])
             except Exception as exc:
-                LOGGER.exception(
-                    "external_pipeline_record_failed",
-                    extra={
-                        "source_record_id": getattr(record, "external_id", None),
-                        "connector_name": getattr(record, "source_name", None),
-                        "stage": "batch",
-                    },
+                self._log_record_failure(record)
+                objects[index] = self._failed_object(record, "batch", str(exc))
+
+        if pending:
+            texts = [prepared.normalized_text for _, prepared in pending]
+            try:
+                batch_method = getattr(self.ner_extractor, "extract_entities_batch", None)
+                raw_batches = (
+                    batch_method(texts)
+                    if callable(batch_method)
+                    else [self.ner_extractor.extract_entities(text) for text in texts]
                 )
-                cti_object = self._failed_object(record, "batch", str(exc))
-            objects.append(cti_object)
-        return objects
+                if len(raw_batches) != len(pending):
+                    raise RuntimeError("NER batch result count does not match input count")
+            except Exception:
+                LOGGER.exception("external_pipeline_ner_batch_failed_falling_back")
+                raw_batches = []
+                for text in texts:
+                    try:
+                        raw_batches.append(self.ner_extractor.extract_entities(text))
+                    except Exception as exc:  # noqa: BLE001
+                        raw_batches.append(exc)
+
+            for (index, prepared), raw_entities in zip(pending, raw_batches):
+                try:
+                    if isinstance(raw_entities, Exception):
+                        raise raw_entities
+                    entities = self._coerce_entities(raw_entities)
+                    objects[index] = self._finalize_record(prepared, entities)
+                except Exception as exc:
+                    self._log_record_failure(prepared.record)
+                    objects[index] = self._failed_object(prepared.record, "batch", str(exc))
+
+        return [
+            value
+            if value is not None
+            else self._failed_object(materialized[index], "batch", "missing pipeline result")
+            for index, value in enumerate(objects)
+        ]
 
     def process_record(self, record: RawRecord) -> CTIObject:
+        prepared = self._prepare_record(record)
+        if isinstance(prepared, CTIObject):
+            return prepared
+        entities = self._extract_entities(prepared.normalized_text) if prepared.needs_ner else []
+        return self._finalize_record(prepared, entities)
+
+    def _prepare_record(self, record: RawRecord) -> CTIObject | _PreparedExternalRecord:
         normalized_text = self.normalizer.normalize_text(record)
         cti_object = self._base_object(record, normalized_text)
 
@@ -93,29 +147,42 @@ class ExternalCTIPipeline:
             return cti_object
 
         indicators = self.ioc_extractor.extract(normalized_text)
-        entities = []
-        if classification.label == "cti_related":
-            entities = self._extract_entities(normalized_text)
-            cti_object.processing_status = "extracted"
-        else:
-            cti_object.processing_status = "classified"
+        return _PreparedExternalRecord(
+            record=record,
+            normalized_text=normalized_text,
+            cti_object=cti_object,
+            classification=classification,
+            indicators=indicators,
+            needs_ner=classification.label == "cti_related",
+        )
 
-        cti_object.indicators = indicators
+    def _finalize_record(
+        self,
+        prepared: _PreparedExternalRecord,
+        entities: list[Entity],
+    ) -> CTIObject:
+        cti_object = prepared.cti_object
+        cti_object.processing_status = "extracted" if prepared.needs_ner else "classified"
+        cti_object.indicators = prepared.indicators
         cti_object.entities = entities
         cti_object.relationships = self.relation_extractor.extract(
-            normalized_text,
+            prepared.normalized_text,
             entities,
-            indicators,
-            record.external_id,
+            prepared.indicators,
+            prepared.record.external_id,
         )
-        cti_object.confidence = self._object_confidence(classification, entities, indicators)
-        cti_object.severity = self._infer_severity(record)
-        cti_object.tags = self._tags(record, classification)
+        cti_object.confidence = self._object_confidence(
+            prepared.classification, entities, prepared.indicators
+        )
+        cti_object.severity = self._infer_severity(prepared.record)
+        cti_object.tags = self._tags(prepared.record, prepared.classification)
         cti_object.processing_status = "transformed"
         return cti_object
 
     def _extract_entities(self, normalized_text: str) -> list[Entity]:
-        raw_entities = self.ner_extractor.extract_entities(normalized_text)
+        return self._coerce_entities(self.ner_extractor.extract_entities(normalized_text))
+
+    def _coerce_entities(self, raw_entities: list[dict[str, object]]) -> list[Entity]:
         entities = []
         for item in raw_entities:
             text = str(item.get("text") or item.get("value") or "").strip()
@@ -134,6 +201,17 @@ class ExternalCTIPipeline:
                 )
             )
         return self._deduplicate_entities(entities)
+
+    @staticmethod
+    def _log_record_failure(record: RawRecord) -> None:
+        LOGGER.exception(
+            "external_pipeline_record_failed",
+            extra={
+                "source_record_id": getattr(record, "external_id", None),
+                "connector_name": getattr(record, "source_name", None),
+                "stage": "batch",
+            },
+        )
 
     def _base_object(self, record: RawRecord, normalized_text: str) -> CTIObject:
         return CTIObject(

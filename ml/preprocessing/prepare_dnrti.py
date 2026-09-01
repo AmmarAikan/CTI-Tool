@@ -12,6 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from ml.common.dnrti import (  # noqa: E402
     DEFAULT_DATA_DIR,
     DEFAULT_REPORTS_DIR,
+    audit_split_integrity,
     build_label_map,
     flatten,
     read_dnrti_splits,
@@ -55,6 +56,10 @@ def main() -> None:
     args.reports_dir.mkdir(parents=True, exist_ok=True)
     write_json(args.reports_dir / "label_map.json", label_map)
     write_json(args.reports_dir / "dataset_summary.json", summary)
+    write_json(
+        args.reports_dir / "dnrti_integrity_report.json",
+        audit_split_integrity(splits),
+    )
 
     label_counts = {}
     for split_name, split in splits.items():
@@ -87,4 +92,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

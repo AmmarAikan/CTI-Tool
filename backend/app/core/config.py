@@ -102,6 +102,8 @@ class Settings:
     ner_min_confidence: float = float(os.getenv("NER_MIN_CONFIDENCE", "0.50"))
     ner_chunk_chars: int = int(os.getenv("NER_CHUNK_CHARS", "600"))
     ner_chunk_overlap_chars: int = int(os.getenv("NER_CHUNK_OVERLAP_CHARS", "100"))
+    ner_inference_batch_size: int = int(os.getenv("NER_INFERENCE_BATCH_SIZE", "8"))
+    ner_cache_size: int = int(os.getenv("NER_CACHE_SIZE", "4096"))
 
     @property
     def is_production(self) -> bool:

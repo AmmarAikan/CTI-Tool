@@ -33,6 +33,27 @@ class FakeNERExtractor:
         ]
 
 
+class BatchNERExtractor(FakeNERExtractor):
+    def __init__(self) -> None:
+        super().__init__()
+        self.batch_calls = 0
+
+    def extract_entities_batch(self, texts: list[str]):
+        self.batch_calls += 1
+        self.calls += len(texts)
+        return [
+            [
+                {
+                    "value": "APT28" if "APT28" in text else "APT29",
+                    "type": "threat_actor",
+                    "confidence": 95.0,
+                    "source": "fake_dnrti",
+                }
+            ]
+            for text in texts
+        ]
+
+
 class FailingNormalizer(RecordNormalizer):
     def normalize_text(self, record: RawRecord) -> str:
         if record.external_id == "bad-record":
@@ -186,6 +207,29 @@ class ExternalPipelineTests(unittest.TestCase):
 
         self.assertEqual(results[0].processing_status, "failed")
         self.assertEqual(results[1].processing_status, "transformed")
+
+    def test_batch_processing_uses_one_ner_batch_and_preserves_order(self) -> None:
+        fake_ner = BatchNERExtractor()
+        pipeline = ExternalCTIPipeline(ner_extractor=fake_ner)
+        records = [
+            raw_record(
+                external_id="first",
+                url="https://example.test/first",
+                content="APT28 used malware to exploit CVE-2026-12345 in an intrusion.",
+            ),
+            raw_record(
+                external_id="second",
+                url="https://example.test/second",
+                content="APT29 used a loader to exploit CVE-2026-99999 against a government target.",
+            ),
+        ]
+
+        results = pipeline.process_batch(records)
+
+        self.assertEqual(fake_ner.batch_calls, 1)
+        self.assertEqual(fake_ner.calls, 2)
+        self.assertEqual([item.source_id for item in results], ["first", "second"])
+        self.assertEqual([item.entities[0].text for item in results], ["APT28", "APT29"])
 
 
 if __name__ == "__main__":

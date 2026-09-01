@@ -1,0 +1,57 @@
+{
+  "evaluation_scope": "unique test sentences absent from train; first duplicate retained",
+  "evaluated_sentences": 297,
+  "quality_gate": {
+    "maximum_f1_drop": 0.01
+  },
+  "speed_gate": {
+    "minimum_speedup": 1.5
+  },
+  "variants": {
+    "pytorch": {
+      "runtime": "pytorch",
+      "model_name": "dnrti_bert_ner",
+      "entity_f1": 0.7465618860510806,
+      "entity_precision": 0.7203791469194313,
+      "entity_recall": 0.7747196738022426,
+      "runtime_seconds": 22.330123699997785,
+      "samples_per_second": 13.300418931402044,
+      "f1_drop_from_pytorch": 0.0,
+      "speedup_over_pytorch": 1.0,
+      "quality_gate_passed": true,
+      "speed_gate_passed": false,
+      "activation_gate_passed": false
+    },
+    "onnx_fp32": {
+      "runtime": "onnx",
+      "model_name": "dnrti_bert_ner_onnx_fp32",
+      "entity_f1": 0.7465618860510806,
+      "entity_precision": 0.7203791469194313,
+      "entity_recall": 0.7747196738022426,
+      "runtime_seconds": 19.740312800000538,
+      "samples_per_second": 15.045354296513068,
+      "f1_drop_from_pytorch": 0.0,
+      "speedup_over_pytorch": 1.13119401532468,
+      "quality_gate_passed": true,
+      "speed_gate_passed": false,
+      "activation_gate_passed": false
+    },
+    "onnx_int8": {
+      "runtime": "onnx",
+      "model_name": "dnrti_bert_ner_onnx_int8",
+      "entity_f1": 0.7378735913767761,
+      "entity_precision": 0.710377358490566,
+      "entity_recall": 0.7675840978593272,
+      "runtime_seconds": 17.21881510000094,
+      "samples_per_second": 17.24857362571852,
+      "f1_drop_from_pytorch": 0.008688294674304542,
+      "speedup_over_pytorch": 1.2968443862316965,
+      "quality_gate_passed": true,
+      "speed_gate_passed": false,
+      "activation_gate_passed": false
+    }
+  },
+  "selected_runtime": "pytorch",
+  "production_change_recommended": false,
+  "decision": "keep PyTorch; ONNX candidates did not pass both activation gates"
+}

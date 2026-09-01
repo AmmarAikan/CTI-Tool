@@ -1,0 +1,55 @@
+{
+  "splits": {
+    "train": {
+      "sentences": 5251,
+      "unique_sentences": 3885,
+      "duplicate_rows": 1366,
+      "texts_with_conflicting_label_sequences": 17,
+      "malformed_lines": 179
+    },
+    "valid": {
+      "sentences": 662,
+      "unique_sentences": 619,
+      "duplicate_rows": 43,
+      "texts_with_conflicting_label_sequences": 1,
+      "malformed_lines": 7
+    },
+    "test": {
+      "sentences": 664,
+      "unique_sentences": 605,
+      "duplicate_rows": 59,
+      "texts_with_conflicting_label_sequences": 11,
+      "malformed_lines": 16
+    }
+  },
+  "cross_split_overlaps": {
+    "train_valid": {
+      "shared_unique_sentences": 271,
+      "percent_of_smaller_unique_split": 43.78,
+      "has_same_label_sequence": 270,
+      "only_conflicting_label_sequences": 1,
+      "mixed_label_sets": 3
+    },
+    "train_test": {
+      "shared_unique_sentences": 308,
+      "percent_of_smaller_unique_split": 50.91,
+      "has_same_label_sequence": 307,
+      "only_conflicting_label_sequences": 1,
+      "mixed_label_sets": 1
+    },
+    "valid_test": {
+      "shared_unique_sentences": 54,
+      "percent_of_smaller_unique_split": 8.93,
+      "has_same_label_sequence": 52,
+      "only_conflicting_label_sequences": 2,
+      "mixed_label_sets": 2
+    }
+  },
+  "unique_unseen_test_sentences": 297,
+  "quality_gates": {
+    "cross_split_overlap_zero": false,
+    "within_split_label_conflicts_zero": false,
+    "malformed_lines_zero": false
+  },
+  "all_quality_gates_passed": false
+}

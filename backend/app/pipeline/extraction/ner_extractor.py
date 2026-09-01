@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import OrderedDict
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,8 @@ class NERExtractor:
         min_confidence: float | None = None,
         chunk_chars: int | None = None,
         chunk_overlap_chars: int | None = None,
+        inference_batch_size: int | None = None,
+        cache_size: int | None = None,
     ) -> None:
         settings = get_settings()
         self.backend = "none"
@@ -49,6 +53,10 @@ class NERExtractor:
         self.metadata: dict[str, Any] = {}
         self.load_error: str | None = None
         self.last_chunk_count = 0
+        self.last_batch_input_count = 0
+        self.last_batch_chunk_count = 0
+        self.cache_hits = 0
+        self.cache_misses = 0
         self.min_confidence = max(
             0.0,
             min(1.0, settings.ner_min_confidence if min_confidence is None else min_confidence),
@@ -60,6 +68,20 @@ class NERExtractor:
             else chunk_overlap_chars
         )
         self.chunk_overlap_chars = max(0, min(configured_overlap, self.chunk_chars - 1))
+        self.inference_batch_size = max(
+            1,
+            min(
+                128,
+                settings.ner_inference_batch_size
+                if inference_batch_size is None
+                else inference_batch_size,
+            ),
+        )
+        self.cache_size = max(
+            0,
+            min(100_000, settings.ner_cache_size if cache_size is None else cache_size),
+        )
+        self._entity_cache: OrderedDict[str, list[dict[str, object]]] = OrderedDict()
 
         self.transformer_path = Path(transformer_model_path or ROOT / "ml/models/dnrti_bert_ner")
         self.sklearn_path = Path(
@@ -75,22 +97,102 @@ class NERExtractor:
             self.last_chunk_count = 0
             return []
 
+        cached = self._cache_get(text)
+        if cached is not None:
+            self.last_chunk_count = 0
+            self.last_batch_input_count = 1
+            self.last_batch_chunk_count = 0
+            return cached
+        self.cache_misses += 1
+
         if self.backend == "transformer" and self.ner_pipeline is not None:
             chunks = self._split_text(text)
             self.last_chunk_count = len(chunks)
+            self.last_batch_input_count = 1
+            self.last_batch_chunk_count = len(chunks)
             entities = [
                 entity
                 for chunk in chunks
                 for entity in self._extract_with_transformer(chunk)
             ]
-            return self._filter_and_deduplicate(entities)
+            result = self._filter_and_deduplicate(entities)
+            self._cache_set(text, result)
+            return result
 
         if self.backend == "sklearn" and self.sklearn_model is not None:
             self.last_chunk_count = 1
-            return self._filter_and_deduplicate(self._extract_with_sklearn(text))
+            self.last_batch_input_count = 1
+            self.last_batch_chunk_count = 1
+            result = self._filter_and_deduplicate(self._extract_with_sklearn(text))
+            self._cache_set(text, result)
+            return result
 
         self.last_chunk_count = 0
+        self.last_batch_input_count = 1
+        self.last_batch_chunk_count = 0
         return []
+
+    def extract_entities_batch(self, texts: list[str]) -> list[list[dict[str, object]]]:
+        """Extract entities with one bounded transformer pipeline batch per chunk set."""
+        outputs: list[list[dict[str, object]] | None] = [None] * len(texts)
+        pending: OrderedDict[str, dict[str, object]] = OrderedDict()
+        for index, text in enumerate(texts):
+            if not text:
+                outputs[index] = []
+                continue
+            cached = self._cache_get(text)
+            if cached is not None:
+                outputs[index] = cached
+                continue
+            key = self._cache_key(text)
+            item = pending.setdefault(key, {"text": text, "indexes": []})
+            indexes = item["indexes"]
+            if isinstance(indexes, list):
+                indexes.append(index)
+
+        self.cache_misses += len(pending)
+        self.last_batch_input_count = len(texts)
+        self.last_batch_chunk_count = 0
+        if not pending:
+            self.last_chunk_count = 0
+            return [value or [] for value in outputs]
+
+        pending_items = list(pending.values())
+        if self.backend == "transformer" and self.ner_pipeline is not None:
+            chunks: list[str] = []
+            chunk_owners: list[int] = []
+            for owner, item in enumerate(pending_items):
+                text_chunks = self._split_text(str(item["text"]))
+                chunks.extend(text_chunks)
+                chunk_owners.extend([owner] * len(text_chunks))
+            self.last_chunk_count = len(chunks)
+            self.last_batch_chunk_count = len(chunks)
+            raw_batches = self.ner_pipeline(chunks, batch_size=self.inference_batch_size)
+            if len(chunks) == 1 and raw_batches and isinstance(raw_batches[0], dict):
+                raw_batches = [raw_batches]
+            owner_entities: list[list[dict[str, object]]] = [
+                [] for _ in pending_items
+            ]
+            for chunk, owner, raw_results in zip(chunks, chunk_owners, raw_batches):
+                owner_entities[owner].extend(
+                    self._transformer_results_to_entities(chunk, raw_results)
+                )
+            for item, entities in zip(pending_items, owner_entities):
+                self._store_pending_result(item, self._filter_and_deduplicate(entities), outputs)
+        elif self.backend == "sklearn" and self.sklearn_model is not None:
+            self.last_chunk_count = len(pending_items)
+            self.last_batch_chunk_count = len(pending_items)
+            for item in pending_items:
+                result = self._filter_and_deduplicate(
+                    self._extract_with_sklearn(str(item["text"]))
+                )
+                self._store_pending_result(item, result, outputs)
+        else:
+            self.last_chunk_count = 0
+            for item in pending_items:
+                self._store_pending_result(item, [], outputs)
+
+        return [value or [] for value in outputs]
 
     def diagnostics(self) -> dict[str, object]:
         """Return non-secret runtime evidence for health and examiner checks."""
@@ -101,7 +203,14 @@ class NERExtractor:
             "minimum_confidence": self.min_confidence,
             "chunk_chars": self.chunk_chars,
             "chunk_overlap_chars": self.chunk_overlap_chars,
+            "inference_batch_size": self.inference_batch_size,
             "last_chunk_count": self.last_chunk_count,
+            "last_batch_input_count": self.last_batch_input_count,
+            "last_batch_chunk_count": self.last_batch_chunk_count,
+            "cache_limit": self.cache_size,
+            "cache_entries": len(self._entity_cache),
+            "cache_hits": self.cache_hits,
+            "cache_misses": self.cache_misses,
             "load_error": self.load_error,
         }
 
@@ -172,7 +281,13 @@ class NERExtractor:
         return chunks
 
     def _extract_with_transformer(self, text: str) -> list[dict[str, object]]:
-        results = self.ner_pipeline(text)
+        return self._transformer_results_to_entities(text, self.ner_pipeline(text))
+
+    def _transformer_results_to_entities(
+        self,
+        text: str,
+        results: list[dict[str, object]],
+    ) -> list[dict[str, object]]:
         entities: list[dict[str, object]] = []
 
         def coerce_offset(value: object) -> int | None:
@@ -296,6 +411,46 @@ class NERExtractor:
                 }
             )
         return self._deduplicate_entities(entities)
+
+    def _cache_key(self, text: str) -> str:
+        return sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _copy_entities(entities: list[dict[str, object]]) -> list[dict[str, object]]:
+        return [dict(entity) for entity in entities]
+
+    def _cache_get(self, text: str) -> list[dict[str, object]] | None:
+        if self.cache_size <= 0:
+            return None
+        key = self._cache_key(text)
+        cached = self._entity_cache.get(key)
+        if cached is None:
+            return None
+        self._entity_cache.move_to_end(key)
+        self.cache_hits += 1
+        return self._copy_entities(cached)
+
+    def _cache_set(self, text: str, entities: list[dict[str, object]]) -> None:
+        if self.cache_size <= 0:
+            return
+        key = self._cache_key(text)
+        self._entity_cache[key] = self._copy_entities(entities)
+        self._entity_cache.move_to_end(key)
+        while len(self._entity_cache) > self.cache_size:
+            self._entity_cache.popitem(last=False)
+
+    def _store_pending_result(
+        self,
+        item: dict[str, object],
+        result: list[dict[str, object]],
+        outputs: list[list[dict[str, object]] | None],
+    ) -> None:
+        text = str(item["text"])
+        self._cache_set(text, result)
+        indexes = item["indexes"]
+        if isinstance(indexes, list):
+            for index in indexes:
+                outputs[int(index)] = self._copy_entities(result)
 
     def _extract_with_sklearn(self, text: str) -> list[dict[str, object]]:
         tokens = simple_word_tokenize(text)

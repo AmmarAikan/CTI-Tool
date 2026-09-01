@@ -492,8 +492,10 @@ class BackendEnhancementTests(unittest.TestCase):
             def __init__(self) -> None:
                 self.calls = 0
 
-            def __call__(self, text: str):
+            def __call__(self, text: str, **_kwargs):
                 self.calls += 1
+                if isinstance(text, list):
+                    return [self(item) for item in text]
                 items = []
                 if "APT28" in text:
                     start = text.index("APT28")
@@ -525,6 +527,50 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertGreater(extractor.last_chunk_count, 1)
         self.assertEqual([(item["type"], item["value"]) for item in entities], [("threat_actor", "APT28")])
         self.assertGreaterEqual(float(entities[0]["confidence"]), 90.0)
+
+    def test_ner_batch_deduplicates_inputs_and_uses_bounded_cache(self) -> None:
+        extractor = NERExtractor(
+            transformer_model_path="missing",
+            sklearn_model_path="missing.joblib",
+            min_confidence=0.50,
+            inference_batch_size=4,
+            cache_size=2,
+        )
+
+        class FakeBatchPipeline:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.last_batch_size = None
+
+            def __call__(self, texts, batch_size=None):
+                self.calls += 1
+                self.last_batch_size = batch_size
+                return [
+                    [
+                        {
+                            "entity_group": "HackOrg",
+                            "word": text.split()[0],
+                            "score": 0.95,
+                            "start": 0,
+                            "end": len(text.split()[0]),
+                        }
+                    ]
+                    for text in texts
+                ]
+
+        fake_pipeline = FakeBatchPipeline()
+        extractor.backend = "transformer"
+        extractor.ner_pipeline = fake_pipeline
+
+        first = extractor.extract_entities_batch(["APT28 report", "APT28 report", "APT29 report"])
+        second = extractor.extract_entities_batch(["APT28 report", "APT29 report"])
+
+        self.assertEqual(fake_pipeline.calls, 1)
+        self.assertEqual(fake_pipeline.last_batch_size, 4)
+        self.assertEqual(first[0], first[1])
+        self.assertEqual([items[0]["value"] for items in second], ["APT28", "APT29"])
+        self.assertEqual(extractor.cache_hits, 2)
+        self.assertEqual(extractor.diagnostics()["cache_entries"], 2)
 
     def test_risk_score_is_explainable_and_does_not_compound_derived_severity(self) -> None:
         event = SimpleNamespace(
@@ -702,6 +748,8 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertGreater(status["held_out_test"]["bert"]["f1"], 0.75)
         self.assertTrue(status["quality_gates"]["bert_test_f1_at_least_0_75"])
         self.assertTrue(status["quality_gates"]["primary_outperforms_secondary_entity_f1"])
+        self.assertGreater(status["held_out_test"]["bert_unique_unseen"]["f1"], 0.73)
+        self.assertFalse(status["quality_gates"]["dataset_cross_split_overlap_zero"])
 
 
 if __name__ == "__main__":

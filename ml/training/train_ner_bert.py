@@ -15,7 +15,7 @@ import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
 from ml.common.dnrti import DEFAULT_DATA_DIR, DEFAULT_REPORTS_DIR, build_label_map, read_dnrti_splits, write_json  # noqa: E402
-from ml.common.metrics import entity_micro_metrics, token_accuracy  # noqa: E402
+from ml.common.metrics import detailed_entity_metrics  # noqa: E402
 
 
 DEFAULT_MODEL_DIR = Path("ml/models/dnrti_bert_ner")
@@ -124,14 +124,21 @@ def compute_metrics_builder(id2label):
             true_labels.append(sentence_labels)
             true_predictions.append(sentence_predictions)
 
-        entity_metrics = entity_micro_metrics(true_labels, true_predictions)
+        detailed = detailed_entity_metrics(true_labels, true_predictions)
+        entity_metrics = detailed["micro"]
+        macro_metrics = detailed["macro"]
+        compute_metrics.last_detailed = detailed
         return {
             "precision": entity_metrics["entity_precision"],
             "recall": entity_metrics["entity_recall"],
             "f1": entity_metrics["entity_f1"],
-            "accuracy": token_accuracy(true_labels, true_predictions),
+            "accuracy": detailed["token_accuracy"],
+            "macro_precision": macro_metrics["entity_macro_precision"],
+            "macro_recall": macro_metrics["entity_macro_recall"],
+            "macro_f1": macro_metrics["entity_macro_f1"],
         }
 
+    compute_metrics.last_detailed = None
     return compute_metrics
 
 
@@ -192,6 +199,7 @@ def main() -> None:
         label2id=label2id,
     )
 
+    metric_function = compute_metrics_builder(id2label)
     trainer = deps["Trainer"](
         model=model,
         args=training_arguments(deps["TrainingArguments"], args),
@@ -199,11 +207,18 @@ def main() -> None:
         eval_dataset=valid_dataset,
         tokenizer=tokenizer,
         data_collator=deps["DataCollatorForTokenClassification"](tokenizer=tokenizer),
-        compute_metrics=compute_metrics_builder(id2label),
+        compute_metrics=metric_function,
     )
 
     trainer.train()
     eval_result = trainer.evaluate(test_dataset)
+    detailed = metric_function.last_detailed
+    if isinstance(detailed, dict):
+        eval_result["entity_per_type"] = detailed["per_type"]
+    eval_result["evaluation_scope"] = (
+        "provided DNRTI test split; consult dnrti_integrity_report.json and "
+        "ner_unseen_test_metrics.json for leakage-aware evidence"
+    )
 
     args.model_dir.mkdir(parents=True, exist_ok=True)
     args.reports_dir.mkdir(parents=True, exist_ok=True)
