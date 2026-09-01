@@ -60,7 +60,7 @@ The former top-level prototype has been retired. Do not create a parallel implem
 
 The canonical package provides bounded connectors for RSS, CERT advisories, vulnerability databases, Reddit, Hacker News, Telegram public previews, and operator-approved onion sources. It also provides generic crawling, manual URL routing, cleaning, privacy review, relevance classification, incremental SHA-256 state, run-scoped export, and an internal FastAPI integration adapter.
 
-In the implemented two-node deployment, this same canonical package runs as a hardened VPS loopback service on `127.0.0.1:8090`. A systemd timer collects enabled sources and publishes the validated JSON to the loopback CTI Gateway every two hours. Ammar's central backend reaches job-control operations through an SSH tunnel and exposes only authenticated central API routes to the future frontend. See `docs/operations/vps_external_sources.md`.
+In the implemented two-node deployment, this same canonical package runs as a hardened VPS loopback service on `127.0.0.1:8090`. A systemd timer collects enabled sources and publishes the validated JSON to the loopback CTI Gateway every two hours. Ammar's central backend reaches the Gateway, job-control service, and MISP through tailnet-only Tailscale Serve HTTPS; SSH local forwarding remains an emergency fallback. The backend exposes only authenticated central API routes to the future frontend. See `docs/operations/vps_external_sources.md`.
 
 Accepted handoff artifacts are validated against the schemas in `contracts/`. Runtime state and outputs belong under `data/external/`; they are local operational files, not central storage.
 

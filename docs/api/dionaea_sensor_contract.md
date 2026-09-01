@@ -12,7 +12,7 @@ Accept: application/json
 
 Implemented lab requirements:
 
-- Bind the Gateway to VPS loopback and reach it through the authenticated SSH tunnel.
+- Bind the Gateway to VPS loopback and reach it through tailnet-only Tailscale Serve HTTPS; retain authenticated SSH forwarding only as a recovery fallback.
 - Use a read-only bearer token, response byte/page limits, and HMAC-SHA256.
 - Read from a rotated, append-only Dionaea JSON log. The API must never expose arbitrary filesystem paths.
 - Never expose captured credentials through a public endpoint or browser UI.

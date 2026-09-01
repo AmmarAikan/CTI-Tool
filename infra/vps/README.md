@@ -13,7 +13,7 @@ This directory contains the project-owned deployment for the graduation lab. Lar
 - Wazuh is not deployed in the current 12 GB VPS design. Its connector remains optional code only.
 - Live Onion collection is not enabled: the current VPS has no Tor proxy or approved operational Onion list, so no placeholder dark-web configuration is mounted.
 
-MISP, Gateway, and External control are never exposed directly. The local backend reaches them through SSH local forwarding.
+MISP, Gateway, and External control are never exposed publicly or bound to a public interface. Tailscale Serve terminates tailnet-only HTTPS and proxies to their VPS loopback listeners. SSH local forwarding remains an emergency fallback.
 
 ## Repository layout
 
@@ -24,7 +24,7 @@ MISP, Gateway, and External control are never exposed directly. The local backen
 - `scripts/bootstrap_host.sh`: host hardening and Docker prerequisites.
 - `scripts/deploy_stack.sh`: builds and starts Gateway/External Sources/Dionaea and installs their timers on the VPS.
 - `scripts/deploy_misp.sh`: pins and starts MISP and creates a least-privilege backend client fragment.
-- `scripts/start_local_tunnels.ps1`: starts the three required Windows SSH forwards.
+- `scripts/start_local_tunnels.ps1`: starts the three Windows SSH forwards for emergency fallback.
 - `systemd/`, `logrotate/`, `sysctl/`: timers, firewall persistence, log rotation, and the documented IPv4-only registry workaround.
 
 ## First deployment
@@ -41,7 +41,36 @@ The scripts generate secrets under `/etc/cti-platform/` with root-only permissio
 
 MISP is cloned directly on the VPS at pinned commit `223b675c4480730832f928e113b6f2e5260b450d` and uses `misp-core:v2.5.44-slim` and `misp-modules:v3.0.9-slim`. The images are pulled on the VPS, not uploaded from a personal computer.
 
-## Local tunnels and backend
+## Primary Tailscale path and backend
+
+Install Tailscale on the VPS and Ammar's Windows computer, join both to the same tailnet, and enable unattended mode on Windows. Keep Funnel disabled. On the VPS, expose only the existing loopback services to the tailnet:
+
+```bash
+tailscale serve --bg --https=443 http://127.0.0.1:8088
+tailscale serve --bg --https=8444 http://127.0.0.1:8090
+tailscale serve --bg --https=8443 https+insecure://127.0.0.1:8443
+tailscale serve status
+```
+
+The `https+insecure` target is limited to the VPS loopback hop to MISP's private certificate. Clients still validate the Tailscale-issued HTTPS certificate. Use the VPS MagicDNS name in ignored client fragments:
+
+```text
+EXTERNAL_FEED_URL=https://<VPS_TAILNET_DNS>/api/v1/external-feed
+EXTERNAL_CONTROL_API_URL=https://<VPS_TAILNET_DNS>:8444/api/v1/external-sources
+DIONAEA_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/dionaea
+HOST_AUTH_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/host-auth
+WEB_ACCESS_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/web-access
+MISP_URL=https://<VPS_TAILNET_DNS>:8443
+```
+
+Keep every `*_VERIFY_TLS=true` and every `*_ALLOW_HTTP=false`. Then start the local backend:
+
+```powershell
+tailscale ping <VPS_TAILNET_DNS>
+docker compose --env-file .env --env-file .vps-client.env --env-file .misp-client.env up -d --build db backend
+```
+
+## SSH recovery fallback
 
 From PowerShell:
 
@@ -56,7 +85,7 @@ Forwarding is:
 - `127.0.0.1:18090` -> VPS `127.0.0.1:8090` for External source control/jobs.
 - `127.0.0.1:18443` -> VPS `127.0.0.1:8443` for MISP.
 
-After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port, waits up to 90 seconds for a slow SSH handshake, and enables SSH compression. `-RemotePort` exists for authorized recovery listeners; normal operation remains `ammar` on port `22`.
+Use these forwards only if Tailscale is unavailable. After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port, waits up to 90 seconds for a slow SSH handshake, and enables SSH compression. `-RemotePort` exists for authorized recovery listeners; normal operation remains `ammar` on port `22`.
 
 ## Public and private ports
 

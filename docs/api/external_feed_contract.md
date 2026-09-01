@@ -21,9 +21,9 @@ Production rules:
 - Give this client read-only access.
 - Treat `cursor` and `checkpoint` as opaque strings; clients must not parse them.
 - Return at most the requested `limit`, with a server-side upper bound.
-- Do not expose the External control API or Gateway publicly. Both remain on VPS loopback and the backend reaches them through SSH forwarding.
+- Do not expose the External control API or Gateway publicly. Both remain on VPS loopback and the backend reaches them through tailnet-only Tailscale Serve HTTPS. SSH forwarding remains a recovery fallback.
 
-The implemented graduation lab binds the Gateway to VPS loopback and carries both publish and read traffic through SSH forwarding. Cleartext HTTP is therefore confined inside the encrypted SSH tunnel; a future public endpoint must use valid HTTPS.
+The implemented graduation lab binds the Gateway to VPS loopback. The scheduled publisher stays on loopback, while remote reads use a valid Tailscale-issued HTTPS certificate over an encrypted WireGuard data plane. The only cleartext hop is the same-host loopback proxy from Tailscale Serve to the Gateway. No public endpoint is enabled.
 
 ## VPS publisher endpoint
 

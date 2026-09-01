@@ -12,11 +12,11 @@ flowchart LR
     Dionaea -->|"rotated JSON"| Gateway
     SSHLog["VPS SSH journal collector"] --> Gateway
     WebLog["Gateway access telemetry"] --> Gateway
-    Gateway -->|"SSH tunnel + bearer + HMAC"| API["Ammar PC FastAPI"]
-    API -->|"SSH tunnel; source control and jobs"| External
+    Gateway -->|"Tailscale HTTPS + bearer + HMAC"| API["Ammar PC FastAPI"]
+    API -->|"Tailscale HTTPS; source control and jobs"| External
     API --> BERT["DNRTI BERT primary\nsklearn secondary fallback"]
     API --> PG["Local PostgreSQL\nraw + processed + audit"]
-    API -->|"SSH tunnel; unpublished first"| MISP["VPS MISP 2.5.44"]
+    API -->|"Tailscale HTTPS; unpublished first"| MISP["VPS MISP 2.5.44"]
     API --> STIX["STIX 2.1 / Frontend API"]
 ```
 
@@ -77,11 +77,13 @@ PostgreSQL remains authoritative. MISP contains a controlled sharing copy and fu
 
 ### Ammar computer to VPS
 
-- SSH key authentication only; password and keyboard-interactive login are disabled.
-- Gateway and MISP are bound to VPS loopback and reached through local SSH forwarding.
+- Tailscale/WireGuard is the primary private data path; the observed two-node route is direct UDP rather than a relay.
+- Tailscale Serve exposes valid HTTPS only inside the tailnet and Funnel remains disabled.
+- SSH key authentication only; password and keyboard-interactive login are disabled, and local forwarding remains a recovery fallback.
+- Gateway, External control, and MISP stay bound to VPS loopback behind the tailnet-only proxy.
 - Read, control, sensor, and MISP credentials remain independently scoped.
 - Client secret fragments are ignored by Git.
-- The External control API is bound to VPS `127.0.0.1:8090` and forwarded only to Ammar's local `127.0.0.1:18090`.
+- The External control API is bound to VPS `127.0.0.1:8090` and served to the tailnet on HTTPS `8444`; the recovery forward remains Ammar's local `127.0.0.1:18090`.
 
 ### Honeypot boundary
 

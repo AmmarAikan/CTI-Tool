@@ -40,7 +40,7 @@ The official MISP Docker repository is pinned to commit `223b675c4480730832f928e
 4. Run `deploy_stack.sh` to build Gateway/Dionaea on the server and install systemd/firewall/logrotate policies.
 5. Run `deploy_misp.sh` to clone the pinned upstream repository, generate server-only secrets, pull slim images, start services, and wait for MISP heartbeat.
 6. Securely copy Ammar's least-privilege backend fragment; keep it ignored by Git.
-7. Start the three local SSH tunnels and launch the local backend with `.env`, `.vps-client.env`, and `.misp-client.env`.
+7. Join the VPS and Ammar's Windows computer to one tailnet, enable tailnet-only Tailscale Serve HTTPS for the loopback services, update the ignored client fragments, and launch the local backend. Keep the three SSH tunnels as a recovery fallback.
 
 Exact commands and layouts are in `infra/vps/README.md`.
 
@@ -48,12 +48,12 @@ Exact commands and layouts are in `infra/vps/README.md`.
 
 | Port/service | Bind/exposure | Purpose |
 |---|---|---|
-| SSH 22/TCP | Public, key-only | Named administration and local forwarding |
+| SSH 22/TCP | Public, key-only | Named administration and recovery forwarding |
 | Dionaea 21, 445, 1433, 3306, 5060, 11211/TCP | Public | Selected honeypot emulations |
 | Dionaea 5060/UDP | Public | SIP honeypot emulation |
-| Gateway 8088 | VPS loopback | Feed and sensor API through SSH tunnel |
-| External control 8090 | VPS loopback | Source/job control through SSH tunnel |
-| MISP 8080/8443 | VPS loopback | Browser/backend access through SSH tunnel |
+| Gateway 8088 | VPS loopback | Feed and sensor API through tailnet-only HTTPS |
+| External control 8090 | VPS loopback | Source/job control through tailnet-only HTTPS `8444` |
+| MISP 8080/8443 | VPS loopback | Browser/backend access through tailnet-only HTTPS `8443` |
 | MariaDB, Redis, PostgreSQL | Container/private only | Owning applications only |
 
 Docker-published ports require a `DOCKER-USER` policy in addition to UFW. New outbound flows from the sensor and gateway Docker subnets are dropped; established replies remain allowed.
@@ -96,7 +96,7 @@ Counts are a dated evidence snapshot and will naturally grow while the public ho
 
 ## Operations and rollback
 
-- Re-run the tunnel script after Windows sleep/network changes.
+- Verify `tailscale status`, `tailscale ping`, and `tailscale serve status` after Windows or VPS network changes. Use the SSH tunnel script only for recovery.
 - Check containers, systemd timers, disk, memory, swap, and `/health` before pulling.
 - Rotate sensor JSON with the installed logrotate policy.
 - Pin versions; do not upgrade MISP or Docker blindly.
@@ -105,4 +105,4 @@ Counts are a dated evidence snapshot and will naturally grow while the public ho
 
 ## Remaining acceptance
 
-Off-host backup restoration, production DNS/TLS, a separate disposable honeypot VPS, sustained-load retention measurements, and automatic tunnel/service monitoring remain future work. They are not required to demonstrate the current backend but must be completed before calling this an enterprise deployment.
+Off-host backup restoration, a separate disposable honeypot VPS, sustained-load retention measurements, Tailscale key-expiry/service monitoring, and enterprise-grade high availability remain future work. They are not required to demonstrate the current backend but must be completed before calling this an enterprise deployment.

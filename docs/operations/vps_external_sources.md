@@ -4,7 +4,7 @@
 
 External Sources runs continuously on the VPS instead of depending on a collaborator computer. The canonical collectors, preprocessing, privacy checks, External-only deduplication, review records, and versioned export remain unchanged. The deployment changes only their runtime location and transport.
 
-The VPS service is bound to `127.0.0.1:8090`. It is never a public collector API. Ammar's authenticated FastAPI backend reaches it through SSH forwarding on local port `18090`, and the frontend uses only the central FastAPI routes.
+The VPS service is bound to `127.0.0.1:8090`. It is never a public collector API. Ammar's authenticated FastAPI backend reaches it through tailnet-only Tailscale Serve HTTPS on port `8444`; SSH forwarding on local port `18090` remains a recovery fallback. The frontend uses only the central FastAPI routes.
 
 ## Data flow
 
@@ -13,14 +13,14 @@ VPS External Sources
 -> validated run-scoped JSON export
 -> scheduled host publisher
 -> VPS Gateway cumulative, deduplicated snapshot
--> SSH tunnel + Bearer + HMAC
+-> Tailscale/WireGuard HTTPS + Bearer + HMAC
 -> Ammar FastAPI
 -> BERT / Regex / PostgreSQL / correlation / STIX / MISP
 ```
 
 The systemd timer runs an `all_enabled` collection every two hours. It polls the bounded job API, downloads Latest Export only after a completed or partial terminal state, and publishes it to the Gateway with the existing scoped publish credential. The Gateway merges that incremental export into a bounded snapshot by stable external identity, so a backend that was offline does not miss an earlier run. An unchanged backend pull uses ETag/HTTP 304 and creates no duplicate CTI records. If the snapshot changes, PostgreSQL skips semantically unchanged records before BERT and processes only new or changed content.
 
-Large feed pages are GZip-compressed by the Gateway while their HMAC continues to cover the canonical decompressed JSON body. The Windows SSH tunnel also enables transport compression. This matters because the first accepted live export contained thousands of records and an uncompressed tunnel was both slow and vulnerable to a transient network reset before the database transaction began.
+Large feed pages are GZip-compressed by the Gateway while their HMAC continues to cover the canonical decompressed JSON body. The primary client path is direct Tailscale/WireGuard UDP with automatic reconnection; SSH transport compression remains available only on the fallback path. This matters because the first accepted live export contained thousands of records and an uncompressed, transient tunnel was vulnerable to a network reset before the database transaction began.
 
 ## Live source behavior
 
@@ -37,11 +37,11 @@ Historical run artifacts remain in the External volume. During cumulative-feed m
 
 ## Private service addresses
 
-| Service | VPS loopback | Ammar local tunnel |
-|---|---|---|
-| Gateway feed/sensors | `127.0.0.1:8088` | `127.0.0.1:18088` |
-| External control API | `127.0.0.1:8090` | `127.0.0.1:18090` |
-| MISP | `127.0.0.1:8443` | `127.0.0.1:18443` |
+| Service | VPS loopback | Primary private client endpoint | SSH fallback |
+|---|---|---|---|
+| Gateway feed/sensors | `127.0.0.1:8088` | `https://<VPS_TAILNET_DNS>` | `127.0.0.1:18088` |
+| External control API | `127.0.0.1:8090` | `https://<VPS_TAILNET_DNS>:8444` | `127.0.0.1:18090` |
+| MISP | `127.0.0.1:8443` | `https://<VPS_TAILNET_DNS>:8443` | `127.0.0.1:18443` |
 
 No PostgreSQL, Gateway, External control, MISP, Docker API, or collector documentation port is public.
 

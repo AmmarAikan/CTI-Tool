@@ -8,7 +8,7 @@ The VPS Gateway exposes three read-only JSON sensor streams to the central backe
 - `GET /api/v1/sensors/host-auth`
 - `GET /api/v1/sensors/web-access`
 
-The Gateway is bound to VPS loopback and is reached through SSH forwarding. This contract does not make the sensor API public.
+The Gateway is bound to VPS loopback and is reached primarily through tailnet-only Tailscale Serve HTTPS. SSH forwarding remains a recovery fallback. This contract does not make the sensor API public.
 
 ## Authentication and integrity
 
