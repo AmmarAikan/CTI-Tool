@@ -1,0 +1,452 @@
+{
+  "policy_version": "dnrti-clean-v1",
+  "policy": {
+    "malformed_sentence": "exclude the complete sentence; never infer a missing token",
+    "conflicting_labels": "exclude the normalized text from every split",
+    "duplicate_text": "retain one occurrence",
+    "cross_split_priority": [
+      "train",
+      "valid",
+      "test"
+    ],
+    "source_files_modified": false
+  },
+  "source": {
+    "train": {
+      "accepted_sentences_after_strict_parse": 5100,
+      "malformed_lines": 179,
+      "rejected_malformed_sentences": 151
+    },
+    "valid": {
+      "accepted_sentences_after_strict_parse": 655,
+      "malformed_lines": 7,
+      "rejected_malformed_sentences": 7
+    },
+    "test": {
+      "accepted_sentences_after_strict_parse": 651,
+      "malformed_lines": 16,
+      "rejected_malformed_sentences": 13
+    }
+  },
+  "grouping": {
+    "unique_normalized_text_groups": 4383,
+    "cross_split_groups_collapsed": 543,
+    "duplicate_occurrences_removed": 1925,
+    "conflicting_text_groups_excluded": 23,
+    "conflicting_occurrences_excluded": 121,
+    "conflict_groups": [
+      {
+        "text_sha256": "d13fc7351a3335a12b282e28b80e1d51b155cf0e15624233750b58f0e1ba4ce3",
+        "occurrences": 2,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "06e4c2b7d4d0458df1a5eb05b2709faed0c2cc124e46dff58625f661eb4dc3ff",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "aa7261658ffe6520ee3dfde2278fe6e957b3509c62c8ca9f044717d85a9674d9",
+        "occurrences": 17,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "5535d8208e42a08b9095d60a5580dc11f333363c0a9e36660bd6c88e2e95b3a7",
+        "occurrences": 9,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "e32bcc4f76037ef2f0f55d1ddb2d527f2019436021de9ee8020ec8efd29376e3",
+        "occurrences": 9,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "45da153dd130af145c8f87b544489733321232265b6a25415c25aa6353170068",
+        "occurrences": 9,
+        "source_splits": [
+          "train",
+          "valid"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "324aa7e15fc44663138887de7d8917509d11f00e468010fa878e3d63421c88e8",
+        "occurrences": 7,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "91bc34dbfcfb3a9384cb24b3c5f044c58e2d218c23bcd506486f0cc5455c341a",
+        "occurrences": 2,
+        "source_splits": [
+          "train",
+          "valid"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "a64f1d9b7755fcd54cb45da3a37daa51d898f07eda2cbe413dea633643fa1ef6",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "9d32723b400a1f325a46a06dc780971718e1f4255d24fd1e0a6d52c8021c3275",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "c273751df85a75cda747311d4dde604ac5b90039d3bdb6a1f5394aac78d94680",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "9f8e99b66a3fc5b6ddede1305ec2fdc1912d99352beb73fcfe2e5cec0b1f64a7",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "9491dd8dedc0f2bdc64dc4816ac6ebe53e026c551505011aaf2520163b0fda62",
+        "occurrences": 2,
+        "source_splits": [
+          "train"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "74f1b25082a606a139f4f2eb895c885300b19607cb508d4013ab35da2355b476",
+        "occurrences": 4,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "61ea27643a7a7da188a9a0e21a9f7f2db9d2a637dc38ecd04770a8967fe0c9ba",
+        "occurrences": 4,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "cefe6194cb73b241f0940f501863da22addccb0999c4d2b846f6d632a93336d1",
+        "occurrences": 12,
+        "source_splits": [
+          "train",
+          "valid",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "af282485f668ee7d2996385e527af279544a2d0d5223e979ebfd652f0510f78a",
+        "occurrences": 10,
+        "source_splits": [
+          "train",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "a0b0291d7524ef74440d4dff9bb601af237c3707781b0d9fb41d5609330fbc46",
+        "occurrences": 8,
+        "source_splits": [
+          "train",
+          "valid",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "f0f4bafd995eb784d63d20069b88ed3fc081b710d81776493bc6a29d5dcfba77",
+        "occurrences": 8,
+        "source_splits": [
+          "train",
+          "valid",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "372fbcf2bc937ce2d3933f63264caf88954c65262de1810af428523aff003bd9",
+        "occurrences": 2,
+        "source_splits": [
+          "valid",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "58c4af7e6ef23a3ab2840fcc4933de96611c6d2d69a48dafae94c1388d35d5c4",
+        "occurrences": 2,
+        "source_splits": [
+          "valid",
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "016fbcd1da59a819e34ca3f19effec9eb804bd638b2b38753cda2c7eef620383",
+        "occurrences": 2,
+        "source_splits": [
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      },
+      {
+        "text_sha256": "5785cae96e2b7712be2bd4e608c94829905902eb886ae27d023bf4d07e882b31",
+        "occurrences": 2,
+        "source_splits": [
+          "test"
+        ],
+        "distinct_label_sequences": 2
+      }
+    ]
+  },
+  "output": {
+    "train": {
+      "sentences": 3746,
+      "tokens": 98398,
+      "min_sentence_length": 2,
+      "max_sentence_length": 82,
+      "avg_sentence_length": 26.27,
+      "malformed_lines": 0,
+      "rejected_malformed_sentences": 0,
+      "malformed_examples": [],
+      "label_distribution": {
+        "B-Area": 1696,
+        "B-Exp": 325,
+        "B-Features": 326,
+        "B-HackOrg": 2649,
+        "B-Idus": 943,
+        "B-OffAct": 1108,
+        "B-Org": 862,
+        "B-Purp": 393,
+        "B-SamFile": 508,
+        "B-SecTeam": 809,
+        "B-Time": 1051,
+        "B-Tool": 1818,
+        "B-Way": 574,
+        "I-Area": 653,
+        "I-Exp": 161,
+        "I-Features": 494,
+        "I-HackOrg": 772,
+        "I-Idus": 336,
+        "I-OffAct": 655,
+        "I-Org": 742,
+        "I-Purp": 651,
+        "I-SamFile": 222,
+        "I-SecTeam": 378,
+        "I-Time": 619,
+        "I-Tool": 1019,
+        "I-Way": 533,
+        "O": 78101
+      },
+      "entity_type_distribution": {
+        "Area": 2349,
+        "Exp": 486,
+        "Features": 820,
+        "HackOrg": 3421,
+        "Idus": 1279,
+        "OffAct": 1763,
+        "Org": 1604,
+        "Purp": 1044,
+        "SamFile": 730,
+        "SecTeam": 1187,
+        "Time": 1670,
+        "Tool": 2837,
+        "Way": 1107
+      }
+    },
+    "valid": {
+      "sentences": 342,
+      "tokens": 8826,
+      "min_sentence_length": 8,
+      "max_sentence_length": 56,
+      "avg_sentence_length": 25.81,
+      "malformed_lines": 0,
+      "rejected_malformed_sentences": 0,
+      "malformed_examples": [],
+      "label_distribution": {
+        "B-Area": 79,
+        "B-HackOrg": 244,
+        "B-Idus": 6,
+        "B-OffAct": 71,
+        "B-Org": 58,
+        "B-SamFile": 41,
+        "B-SecTeam": 133,
+        "B-Time": 122,
+        "B-Tool": 228,
+        "B-Way": 28,
+        "I-Area": 22,
+        "I-HackOrg": 88,
+        "I-OffAct": 43,
+        "I-Org": 29,
+        "I-SamFile": 13,
+        "I-SecTeam": 49,
+        "I-Time": 61,
+        "I-Tool": 98,
+        "I-Way": 20,
+        "O": 7393
+      },
+      "entity_type_distribution": {
+        "Area": 101,
+        "HackOrg": 332,
+        "Idus": 6,
+        "OffAct": 114,
+        "Org": 87,
+        "SamFile": 54,
+        "SecTeam": 182,
+        "Time": 183,
+        "Tool": 326,
+        "Way": 48
+      }
+    },
+    "test": {
+      "sentences": 272,
+      "tokens": 7108,
+      "min_sentence_length": 8,
+      "max_sentence_length": 68,
+      "avg_sentence_length": 26.13,
+      "malformed_lines": 0,
+      "rejected_malformed_sentences": 0,
+      "malformed_examples": [],
+      "label_distribution": {
+        "B-Area": 149,
+        "B-Exp": 2,
+        "B-HackOrg": 188,
+        "B-Idus": 11,
+        "B-OffAct": 87,
+        "B-Org": 64,
+        "B-SamFile": 4,
+        "B-SecTeam": 104,
+        "B-Time": 92,
+        "B-Tool": 181,
+        "B-Way": 4,
+        "I-Area": 32,
+        "I-Exp": 1,
+        "I-HackOrg": 89,
+        "I-OffAct": 53,
+        "I-Org": 54,
+        "I-SecTeam": 42,
+        "I-Time": 57,
+        "I-Tool": 83,
+        "O": 5811
+      },
+      "entity_type_distribution": {
+        "Area": 181,
+        "Exp": 3,
+        "HackOrg": 277,
+        "Idus": 11,
+        "OffAct": 140,
+        "Org": 118,
+        "SamFile": 4,
+        "SecTeam": 146,
+        "Time": 149,
+        "Tool": 264,
+        "Way": 4
+      }
+    }
+  },
+  "integrity": {
+    "splits": {
+      "train": {
+        "sentences": 3746,
+        "unique_sentences": 3746,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "valid": {
+        "sentences": 342,
+        "unique_sentences": 342,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "test": {
+        "sentences": 272,
+        "unique_sentences": 272,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      }
+    },
+    "cross_split_overlaps": {
+      "train_valid": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "train_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "valid_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      }
+    },
+    "unique_unseen_test_sentences": 272,
+    "quality_gates": {
+      "cross_split_overlap_zero": true,
+      "within_split_label_conflicts_zero": true,
+      "malformed_lines_zero": true
+    },
+    "all_quality_gates_passed": true
+  },
+  "source_files": {
+    "train.txt": "43f9b363ff30048b74b6166d380da08b2f8600bb31cd6190ee4712dda3326c1c",
+    "valid.txt": "d391ae2ed6fdaa0ebd208b0f434b8768f91b1c5c9bbfb8df067efbea07199dbd",
+    "test.txt": "f1e47afa172b5afa75815c330086064ec4544c1f663fec400c38e1b79cb5c633"
+  },
+  "output_files": {
+    "train.txt": "bf8f6e5fe8474ac641e743afda3bed2488eab37dbff9cf9fe7c46a0d6f956467",
+    "valid.txt": "34135f6bf27213d58f82d043c93f6c8a7ff4c6dbaebe70979bca935d8a439f9b",
+    "test.txt": "e4826983d1fe49b97fd27ad462d98f424f0d8c191d883ad68f5a65e2297c3cb7"
+  }
+}

@@ -5,9 +5,80 @@ import unittest
 from ml.common.dnrti import BioSplit, audit_split_integrity, unique_unseen_split
 from ml.common.metrics import detailed_entity_metrics, entity_metrics_by_type
 from ml.evaluation.compare_ner_runtimes import compare
+from ml.evaluation.compare_clean_ner_models import compare as compare_clean_models
+from ml.preprocessing.clean_dnrti import build_clean_splits
 
 
 class NEREvaluationTests(unittest.TestCase):
+    def test_clean_model_comparison_requires_micro_and_macro_improvement(self) -> None:
+        current = {
+            "metrics": {
+                "micro": {
+                    "entity_precision": 0.75,
+                    "entity_recall": 0.75,
+                    "entity_f1": 0.75,
+                },
+                "macro": {"entity_macro_f1": 0.60},
+                "token_accuracy": 0.93,
+            }
+        }
+
+        def candidate(micro_f1: float, macro_f1: float) -> dict[str, object]:
+            return {
+                "eval_precision": micro_f1,
+                "eval_recall": micro_f1,
+                "eval_f1": micro_f1,
+                "eval_macro_f1": macro_f1,
+                "eval_accuracy": 0.94,
+            }
+
+        result = compare_clean_models(
+            {
+                "current": current,
+                "clean_v1_stage1": candidate(0.76, 0.59),
+                "clean_v1_stage2": candidate(0.755, 0.61),
+            }
+        )
+
+        self.assertEqual(result["selected_model"], "clean_v1_stage2")
+        self.assertFalse(result["variants"]["clean_v1_stage1"]["activation_gate_passed"])
+        self.assertTrue(result["variants"]["clean_v1_stage2"]["activation_gate_passed"])
+
+    def test_clean_splits_remove_conflicts_duplicates_and_cross_split_leakage(self) -> None:
+        source = {
+            "train": BioSplit(
+                "train",
+                [["APT28"], ["APT28"], ["Conflict"]],
+                [["B-HackOrg"], ["B-HackOrg"], ["B-Org"]],
+                1,
+                [],
+                1,
+            ),
+            "valid": BioSplit(
+                "valid",
+                [["APT28"], ["ValidOnly"]],
+                [["B-HackOrg"], ["B-Tool"]],
+                0,
+                [],
+            ),
+            "test": BioSplit(
+                "test",
+                [["Conflict"], ["TestOnly"]],
+                [["B-Tool"], ["O"]],
+                0,
+                [],
+            ),
+        }
+
+        cleaned, report = build_clean_splits(source)
+
+        self.assertEqual(cleaned["train"].tokens, [["APT28"]])
+        self.assertEqual(cleaned["valid"].tokens, [["ValidOnly"]])
+        self.assertEqual(cleaned["test"].tokens, [["TestOnly"]])
+        self.assertEqual(report["grouping"]["conflicting_text_groups_excluded"], 1)
+        self.assertEqual(report["grouping"]["duplicate_occurrences_removed"], 2)
+        self.assertTrue(report["integrity"]["all_quality_gates_passed"])
+
     def test_runtime_comparison_requires_quality_and_speed_gates(self) -> None:
         def report(f1: float, samples_per_second: float) -> dict[str, object]:
             return {

@@ -34,6 +34,9 @@ data/dionaea/
 ml/models/dnrti_bert_ner/
 ml/models/dnrti_bert_ner_onnx_fp32/
 ml/models/dnrti_bert_ner_onnx_int8/
+ml/models/dnrti_bert_ner_clean_v1/
+ml/models/dnrti_bert_ner_clean_v1_stage2/
+ml/datasets/dnrti_clean_v1/
 
 # Hugging Face / checkpoints
 checkpoint-*/

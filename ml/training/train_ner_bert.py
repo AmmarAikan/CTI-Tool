@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import inspect
-import json
 import sys
 from pathlib import Path
 
@@ -14,7 +13,14 @@ if str(PROJECT_ROOT) not in sys.path:
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 
-from ml.common.dnrti import DEFAULT_DATA_DIR, DEFAULT_REPORTS_DIR, build_label_map, read_dnrti_splits, write_json  # noqa: E402
+from ml.common.dnrti import (  # noqa: E402
+    DEFAULT_DATA_DIR,
+    DEFAULT_REPORTS_DIR,
+    audit_split_integrity,
+    build_label_map,
+    read_dnrti_splits,
+    write_json,
+)
 from ml.common.metrics import detailed_entity_metrics  # noqa: E402
 
 
@@ -31,6 +37,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--max-length", type=int, default=120)
+    parser.add_argument("--report-name", default="ner_test_metrics.json")
+    parser.add_argument(
+        "--require-clean-data",
+        action="store_true",
+        help="Refuse training when duplicates, cross-split overlap, conflicts, or malformed rows remain.",
+    )
+    parser.add_argument(
+        "--overwrite-output",
+        action="store_true",
+        help="Allow replacing an existing model directory or metrics report.",
+    )
     return parser.parse_args()
 
 
@@ -169,9 +186,23 @@ def training_arguments(TrainingArguments, args: argparse.Namespace):
 
 def main() -> None:
     args = parse_args()
+    report_name = Path(args.report_name).name
+    if report_name != args.report_name or not report_name.endswith(".json"):
+        raise SystemExit("--report-name must be a JSON filename without directories")
+    report_path = args.reports_dir / report_name
+    model_has_files = args.model_dir.exists() and any(args.model_dir.iterdir())
+    if not args.overwrite_output and (model_has_files or report_path.exists()):
+        raise SystemExit(
+            "Training output already exists; choose new destinations or pass "
+            "--overwrite-output explicitly"
+        )
+
     deps = import_training_dependencies()
 
     splits = read_dnrti_splits(args.data_dir)
+    integrity = audit_split_integrity(splits)
+    if args.require_clean_data and not integrity["all_quality_gates_passed"]:
+        raise SystemExit("DNRTI integrity gates failed; refusing clean-data training run")
     all_label_sequences = [labels for split in splits.values() for labels in split.labels]
     label2id, id2label = build_label_map(all_label_sequences)
 
@@ -215,18 +246,31 @@ def main() -> None:
     detailed = metric_function.last_detailed
     if isinstance(detailed, dict):
         eval_result["entity_per_type"] = detailed["per_type"]
-    eval_result["evaluation_scope"] = (
-        "provided DNRTI test split; consult dnrti_integrity_report.json and "
-        "ner_unseen_test_metrics.json for leakage-aware evidence"
-    )
+    if args.require_clean_data:
+        eval_result["evaluation_scope"] = (
+            "clean DNRTI test split; dataset integrity gates passed with zero "
+            "duplicates, conflicts, malformed rows, and cross-split overlap"
+        )
+    else:
+        eval_result["evaluation_scope"] = (
+            "provided DNRTI test split; consult dnrti_integrity_report.json and "
+            "ner_unseen_test_metrics.json for leakage-aware evidence"
+        )
+    eval_result["dataset_integrity"] = integrity
+    eval_result["training_configuration"] = {
+        "base_model": args.base_model,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "learning_rate": args.learning_rate,
+        "max_length": args.max_length,
+    }
 
     args.model_dir.mkdir(parents=True, exist_ok=True)
     args.reports_dir.mkdir(parents=True, exist_ok=True)
     trainer.save_model(str(args.model_dir))
     tokenizer.save_pretrained(str(args.model_dir))
 
-    with (args.reports_dir / "ner_test_metrics.json").open("w", encoding="utf-8") as file:
-        json.dump(eval_result, file, indent=2)
+    write_json(report_path, eval_result)
 
     write_json(
         args.reports_dir / "label_map.json",

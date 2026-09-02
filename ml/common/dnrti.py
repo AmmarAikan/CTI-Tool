@@ -24,6 +24,7 @@ class BioSplit:
     labels: list[list[str]]
     malformed_count: int
     malformed_examples: list[dict[str, object]]
+    rejected_sentence_count: int = 0
 
     @property
     def sentence_count(self) -> int:
@@ -81,6 +82,63 @@ def read_bio_file(file_path: Path, split_name: str | None = None) -> BioSplit:
     )
 
 
+def read_bio_file_strict(file_path: Path, split_name: str | None = None) -> BioSplit:
+    """Read BIO data while rejecting every sentence containing a malformed row."""
+    sentences: list[list[str]] = []
+    labels: list[list[str]] = []
+    current_tokens: list[str] = []
+    current_labels: list[str] = []
+    current_is_malformed = False
+    malformed_count = 0
+    rejected_sentence_count = 0
+    malformed_examples: list[dict[str, object]] = []
+
+    def flush_sentence() -> None:
+        nonlocal current_tokens, current_labels, current_is_malformed
+        nonlocal rejected_sentence_count
+        if current_is_malformed:
+            rejected_sentence_count += 1
+        elif current_tokens:
+            sentences.append(current_tokens)
+            labels.append(current_labels)
+        current_tokens = []
+        current_labels = []
+        current_is_malformed = False
+
+    with file_path.open("r", encoding="utf-8") as file:
+        for line_number, raw_line in enumerate(file, start=1):
+            line = raw_line.strip()
+            if not line:
+                if current_tokens or current_is_malformed:
+                    flush_sentence()
+                continue
+
+            parts = line.split()
+            if len(parts) < 2:
+                malformed_count += 1
+                current_is_malformed = True
+                if len(malformed_examples) < 25:
+                    malformed_examples.append(
+                        {"line_number": line_number, "line": raw_line.rstrip("\n")}
+                    )
+                continue
+
+            current_tokens.append(" ".join(parts[:-1]))
+            current_labels.append(parts[-1])
+
+    if current_tokens or current_is_malformed:
+        flush_sentence()
+
+    return BioSplit(
+        name=split_name or file_path.stem,
+        tokens=sentences,
+        labels=labels,
+        malformed_count=malformed_count,
+        malformed_examples=malformed_examples,
+        rejected_sentence_count=rejected_sentence_count,
+    )
+
+
 def read_dnrti_splits(data_dir: Path = DEFAULT_DATA_DIR) -> dict[str, BioSplit]:
     missing = [name for name in SPLIT_FILES.values() if not (data_dir / name).exists()]
     if missing:
@@ -132,6 +190,7 @@ def summarize_split(split: BioSplit) -> dict[str, object]:
         "max_sentence_length": max(lengths) if lengths else 0,
         "avg_sentence_length": round(mean(lengths), 2) if lengths else 0,
         "malformed_lines": split.malformed_count,
+        "rejected_malformed_sentences": split.rejected_sentence_count,
         "malformed_examples": split.malformed_examples,
         "label_distribution": dict(sorted(label_distribution.items())),
         "entity_type_distribution": dict(sorted(entity_distribution.items())),

@@ -1,0 +1,45 @@
+{
+  "evaluation_scope": "272 clean-v1 test sentences with zero train overlap",
+  "activation_policy": "a candidate must meet or exceed both current micro-F1 and macro-F1",
+  "variants": {
+    "current": {
+      "precision": 0.7340980187695516,
+      "recall": 0.7945823927765236,
+      "micro_f1": 0.7631436314363143,
+      "macro_f1": 0.6880687646784726,
+      "token_accuracy": 0.9333145751266179,
+      "micro_f1_delta_from_current": 0.0,
+      "macro_f1_delta_from_current": 0.0,
+      "passes_current_micro_f1": true,
+      "passes_current_macro_f1": true,
+      "activation_gate_passed": true
+    },
+    "clean_v1_stage1": {
+      "precision": 0.6998992950654582,
+      "recall": 0.7844243792325056,
+      "micro_f1": 0.7397551889302819,
+      "macro_f1": 0.6837902930261183,
+      "token_accuracy": 0.9355655599324705,
+      "micro_f1_delta_from_current": -0.023388442506032336,
+      "macro_f1_delta_from_current": -0.004278471652354288,
+      "passes_current_micro_f1": false,
+      "passes_current_macro_f1": false,
+      "activation_gate_passed": false
+    },
+    "clean_v1_stage2": {
+      "precision": 0.6955223880597015,
+      "recall": 0.7889390519187359,
+      "micro_f1": 0.7392913802221047,
+      "macro_f1": 0.6725459005075455,
+      "token_accuracy": 0.9309229037703995,
+      "micro_f1_delta_from_current": -0.02385225121420953,
+      "macro_f1_delta_from_current": -0.015522864170927075,
+      "passes_current_micro_f1": false,
+      "passes_current_macro_f1": false,
+      "activation_gate_passed": false
+    }
+  },
+  "selected_model": "current",
+  "production_change_recommended": false,
+  "decision": "keep current production model; both clean-v1 candidates failed activation gates"
+}

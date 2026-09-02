@@ -1,0 +1,196 @@
+{
+  "eval_loss": 0.21114981174468994,
+  "eval_precision": 0.6998992950654582,
+  "eval_recall": 0.7844243792325056,
+  "eval_f1": 0.7397551889302819,
+  "eval_accuracy": 0.9355655599324705,
+  "eval_macro_precision": 0.6381464042468756,
+  "eval_macro_recall": 0.7591219772257404,
+  "eval_macro_f1": 0.6837902930261183,
+  "eval_runtime": 29.2202,
+  "eval_samples_per_second": 9.309,
+  "eval_steps_per_second": 0.582,
+  "epoch": 2.0,
+  "entity_per_type": {
+    "Area": {
+      "precision": 0.8074534161490683,
+      "recall": 0.87248322147651,
+      "f1": 0.8387096774193549,
+      "support": 149,
+      "true_positives": 130,
+      "false_positives": 31,
+      "false_negatives": 19
+    },
+    "Exp": {
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.6666666666666666,
+      "support": 2,
+      "true_positives": 2,
+      "false_positives": 2,
+      "false_negatives": 0
+    },
+    "Features": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0,
+      "true_positives": 0,
+      "false_positives": 3,
+      "false_negatives": 0
+    },
+    "HackOrg": {
+      "precision": 0.6223175965665236,
+      "recall": 0.7712765957446809,
+      "f1": 0.6888361045130642,
+      "support": 188,
+      "true_positives": 145,
+      "false_positives": 88,
+      "false_negatives": 43
+    },
+    "Idus": {
+      "precision": 0.2857142857142857,
+      "recall": 0.36363636363636365,
+      "f1": 0.32,
+      "support": 11,
+      "true_positives": 4,
+      "false_positives": 10,
+      "false_negatives": 7
+    },
+    "OffAct": {
+      "precision": 0.7333333333333333,
+      "recall": 0.7586206896551724,
+      "f1": 0.7457627118644068,
+      "support": 87,
+      "true_positives": 66,
+      "false_positives": 24,
+      "false_negatives": 21
+    },
+    "Org": {
+      "precision": 0.5737704918032787,
+      "recall": 0.546875,
+      "f1": 0.5599999999999999,
+      "support": 64,
+      "true_positives": 35,
+      "false_positives": 26,
+      "false_negatives": 29
+    },
+    "Purp": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0,
+      "true_positives": 0,
+      "false_positives": 14,
+      "false_negatives": 0
+    },
+    "SamFile": {
+      "precision": 0.75,
+      "recall": 0.75,
+      "f1": 0.75,
+      "support": 4,
+      "true_positives": 3,
+      "false_positives": 1,
+      "false_negatives": 1
+    },
+    "SecTeam": {
+      "precision": 0.8070175438596491,
+      "recall": 0.8846153846153846,
+      "f1": 0.8440366972477065,
+      "support": 104,
+      "true_positives": 92,
+      "false_positives": 22,
+      "false_negatives": 12
+    },
+    "Time": {
+      "precision": 0.8877551020408163,
+      "recall": 0.9456521739130435,
+      "f1": 0.9157894736842105,
+      "support": 92,
+      "true_positives": 87,
+      "false_positives": 11,
+      "false_negatives": 5
+    },
+    "Tool": {
+      "precision": 0.6772486772486772,
+      "recall": 0.7071823204419889,
+      "f1": 0.6918918918918918,
+      "support": 181,
+      "true_positives": 128,
+      "false_positives": 61,
+      "false_negatives": 53
+    },
+    "Way": {
+      "precision": 0.375,
+      "recall": 0.75,
+      "f1": 0.5,
+      "support": 4,
+      "true_positives": 3,
+      "false_positives": 5,
+      "false_negatives": 1
+    }
+  },
+  "evaluation_scope": "clean DNRTI test split; dataset integrity gates passed with zero duplicates, conflicts, malformed rows, and cross-split overlap",
+  "dataset_integrity": {
+    "splits": {
+      "train": {
+        "sentences": 3746,
+        "unique_sentences": 3746,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "valid": {
+        "sentences": 342,
+        "unique_sentences": 342,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "test": {
+        "sentences": 272,
+        "unique_sentences": 272,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      }
+    },
+    "cross_split_overlaps": {
+      "train_valid": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "train_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "valid_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      }
+    },
+    "unique_unseen_test_sentences": 272,
+    "quality_gates": {
+      "cross_split_overlap_zero": true,
+      "within_split_label_conflicts_zero": true,
+      "malformed_lines_zero": true
+    },
+    "all_quality_gates_passed": true
+  },
+  "training_configuration": {
+    "base_model": "bert-base-cased",
+    "epochs": 2.0,
+    "batch_size": 16,
+    "learning_rate": 3e-05,
+    "max_length": 120
+  }
+}

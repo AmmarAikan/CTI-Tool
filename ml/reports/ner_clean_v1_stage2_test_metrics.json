@@ -1,0 +1,196 @@
+{
+  "eval_loss": 0.22091495990753174,
+  "eval_precision": 0.6955223880597015,
+  "eval_recall": 0.7889390519187359,
+  "eval_f1": 0.7392913802221047,
+  "eval_accuracy": 0.9309229037703995,
+  "eval_macro_precision": 0.6123747685766034,
+  "eval_macro_recall": 0.7806242191582118,
+  "eval_macro_f1": 0.6725459005075455,
+  "eval_runtime": 30.126,
+  "eval_samples_per_second": 9.029,
+  "eval_steps_per_second": 0.564,
+  "epoch": 1.0,
+  "entity_per_type": {
+    "Area": {
+      "precision": 0.8074534161490683,
+      "recall": 0.87248322147651,
+      "f1": 0.8387096774193549,
+      "support": 149,
+      "true_positives": 130,
+      "false_positives": 31,
+      "false_negatives": 19
+    },
+    "Exp": {
+      "precision": 0.5,
+      "recall": 1.0,
+      "f1": 0.6666666666666666,
+      "support": 2,
+      "true_positives": 2,
+      "false_positives": 2,
+      "false_negatives": 0
+    },
+    "Features": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0,
+      "true_positives": 0,
+      "false_positives": 9,
+      "false_negatives": 0
+    },
+    "HackOrg": {
+      "precision": 0.6506550218340611,
+      "recall": 0.7925531914893617,
+      "f1": 0.7146282973621103,
+      "support": 188,
+      "true_positives": 149,
+      "false_positives": 80,
+      "false_negatives": 39
+    },
+    "Idus": {
+      "precision": 0.23529411764705882,
+      "recall": 0.36363636363636365,
+      "f1": 0.2857142857142857,
+      "support": 11,
+      "true_positives": 4,
+      "false_positives": 13,
+      "false_negatives": 7
+    },
+    "OffAct": {
+      "precision": 0.7272727272727273,
+      "recall": 0.735632183908046,
+      "f1": 0.7314285714285715,
+      "support": 87,
+      "true_positives": 64,
+      "false_positives": 24,
+      "false_negatives": 23
+    },
+    "Org": {
+      "precision": 0.5737704918032787,
+      "recall": 0.546875,
+      "f1": 0.5599999999999999,
+      "support": 64,
+      "true_positives": 35,
+      "false_positives": 26,
+      "false_negatives": 29
+    },
+    "Purp": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "support": 0,
+      "true_positives": 0,
+      "false_positives": 20,
+      "false_negatives": 0
+    },
+    "SamFile": {
+      "precision": 0.5714285714285714,
+      "recall": 1.0,
+      "f1": 0.7272727272727273,
+      "support": 4,
+      "true_positives": 4,
+      "false_positives": 3,
+      "false_negatives": 0
+    },
+    "SecTeam": {
+      "precision": 0.808695652173913,
+      "recall": 0.8942307692307693,
+      "f1": 0.8493150684931506,
+      "support": 104,
+      "true_positives": 93,
+      "false_positives": 22,
+      "false_negatives": 11
+    },
+    "Time": {
+      "precision": 0.8556701030927835,
+      "recall": 0.9021739130434783,
+      "f1": 0.8783068783068784,
+      "support": 92,
+      "true_positives": 83,
+      "false_positives": 14,
+      "false_negatives": 9
+    },
+    "Tool": {
+      "precision": 0.7058823529411765,
+      "recall": 0.7292817679558011,
+      "f1": 0.7173913043478262,
+      "support": 181,
+      "true_positives": 132,
+      "false_positives": 55,
+      "false_negatives": 49
+    },
+    "Way": {
+      "precision": 0.3,
+      "recall": 0.75,
+      "f1": 0.4285714285714285,
+      "support": 4,
+      "true_positives": 3,
+      "false_positives": 7,
+      "false_negatives": 1
+    }
+  },
+  "evaluation_scope": "clean DNRTI test split; dataset integrity gates passed with zero duplicates, conflicts, malformed rows, and cross-split overlap",
+  "dataset_integrity": {
+    "splits": {
+      "train": {
+        "sentences": 3746,
+        "unique_sentences": 3746,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "valid": {
+        "sentences": 342,
+        "unique_sentences": 342,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      },
+      "test": {
+        "sentences": 272,
+        "unique_sentences": 272,
+        "duplicate_rows": 0,
+        "texts_with_conflicting_label_sequences": 0,
+        "malformed_lines": 0
+      }
+    },
+    "cross_split_overlaps": {
+      "train_valid": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "train_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      },
+      "valid_test": {
+        "shared_unique_sentences": 0,
+        "percent_of_smaller_unique_split": 0.0,
+        "has_same_label_sequence": 0,
+        "only_conflicting_label_sequences": 0,
+        "mixed_label_sets": 0
+      }
+    },
+    "unique_unseen_test_sentences": 272,
+    "quality_gates": {
+      "cross_split_overlap_zero": true,
+      "within_split_label_conflicts_zero": true,
+      "malformed_lines_zero": true
+    },
+    "all_quality_gates_passed": true
+  },
+  "training_configuration": {
+    "base_model": "ml\\models\\dnrti_bert_ner_clean_v1",
+    "epochs": 1.0,
+    "batch_size": 16,
+    "learning_rate": 1e-05,
+    "max_length": 120
+  }
+}

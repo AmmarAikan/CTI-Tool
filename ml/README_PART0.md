@@ -38,6 +38,19 @@ directly (and fail CI when the source data has not yet been repaired) with:
 python ml/evaluation/audit_dnrti_integrity.py --fail-on-integrity-errors
 ```
 
+Build the reproducible clean derivative without editing the original dataset:
+
+```powershell
+.\.venv\Scripts\python.exe ml\preprocessing\clean_dnrti.py
+```
+
+This rejects complete sentences containing malformed rows, excludes every text
+with conflicting label sequences, collapses duplicates, and assigns consistent
+cross-split duplicates to `train`, then `valid`, then `test`. The derived files
+under `ml/datasets/dnrti_clean_v1/` are local generated data and are ignored by
+Git. The policy, hashes, counts, and conflict fingerprints are recorded in
+`ml/reports/dnrti_clean_v1_report.json`.
+
 ## Train Transformer Model
 
 Use the repository's single Python 3.12 environment and install the complete project requirements:
@@ -52,6 +65,31 @@ Then fine-tune BERT:
 ```bash
 python ml/training/train_ner_bert.py
 ```
+
+For the clean-v1 experiment, keep the current production model and report
+untouched by using separate destinations:
+
+```powershell
+.\.venv\Scripts\python.exe ml\training\train_ner_bert.py --data-dir ml\datasets\dnrti_clean_v1 --model-dir ml\models\dnrti_bert_ner_clean_v1 --report-name ner_clean_v1_test_metrics.json --require-clean-data --epochs 2 --learning-rate 3e-5
+```
+
+If the first clean run is still improving but does not pass the current-model
+baseline, one bounded continuation run can be kept separate as follows:
+
+```powershell
+.\.venv\Scripts\python.exe ml\training\train_ner_bert.py --data-dir ml\datasets\dnrti_clean_v1 --base-model ml\models\dnrti_bert_ner_clean_v1 --model-dir ml\models\dnrti_bert_ner_clean_v1_stage2 --report-name ner_clean_v1_stage2_test_metrics.json --require-clean-data --epochs 1 --learning-rate 1e-5
+```
+
+Compare both candidates against the unchanged current model before activation:
+
+```powershell
+.\.venv\Scripts\python.exe ml\evaluation\compare_clean_ner_models.py
+```
+
+A candidate is not eligible for activation unless it meets or exceeds both the
+current micro-F1 and macro-F1 on the same clean-v1 test set. Training refuses
+to replace an existing model or report unless `--overwrite-output` is supplied
+explicitly, preventing an accidental repeat of a long run.
 
 Outputs:
 
