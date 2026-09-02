@@ -17,6 +17,11 @@ services:
       MAX_PUBLISH_BYTES: ${MAX_PUBLISH_BYTES:-20971520}
       MAX_SENSOR_BYTES: ${MAX_SENSOR_BYTES:-52428800}
       MAX_FEED_ITEMS: ${MAX_FEED_ITEMS:-20000}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      EXTERNAL_CONTROL_API_URL: ${EXTERNAL_CONTROL_API_URL:-http://external-sources:8000/api/v1/external-sources}
+      EXTERNAL_CONTROL_API_TOKEN: ${EXTERNAL_CONTROL_TOKEN:?Set EXTERNAL_CONTROL_TOKEN}
+      EXTERNAL_CONTROL_TIMEOUT_SECONDS: ${EXTERNAL_CONTROL_TIMEOUT_SECONDS:-10}
+      EXTERNAL_CONTROL_MAX_BYTES: ${EXTERNAL_CONTROL_MAX_BYTES:-2097152}
     restart: unless-stopped
     init: true
     read_only: true
@@ -38,6 +43,7 @@ services:
       - /var/lib/cti-sensors:/sensors/host:ro
     networks:
       - gateway_private
+      - external_egress
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
       interval: 30s
