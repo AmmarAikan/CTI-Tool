@@ -1,0 +1,3 @@
+export function LoadingState({ label = 'جار التحميل...' }: { label?: string }) { return <div className="state-panel" role="status"><span className="spinner" aria-hidden="true" />{label}</div>; }
+export function EmptyState({ label }: { label: string }) { return <div className="state-panel muted-text">{label}</div>; }
+export function ErrorState({ onRetry }: { onRetry: () => void }) { return <div className="state-panel error-panel" role="alert"><strong>تعذر تحميل البيانات</strong><span>تحقق من الاتصال بالخدمة المركزية وحاول مرة أخرى.</span><button className="button button-secondary" onClick={onRetry}>إعادة المحاولة</button></div>; }
