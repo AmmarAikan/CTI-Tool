@@ -156,6 +156,77 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(summary["accepted_records"], 25)
         self.assertTrue(client.session.calls[0][1].endswith("/exports/latest/summary"))
 
+    def test_reviews_and_full_export_redact_sensitive_values(self) -> None:
+        client = self.client(
+            [
+                FakeResponse({
+                    "run_id": "run-1234567890",
+                    "records": [{
+                        "record_id": "record-1234567890",
+                        "canonical_url": "http://" + "a" * 56 + ".onion/report",
+                        "title": "token=" + self.token,
+                        "review_reason": "privacy",
+                    }],
+                }),
+                FakeResponse({
+                    "run_id": "run-1234567890",
+                    "status": "completed",
+                    "dataset_sha256": "a" * 64,
+                    "accepted_records": 1,
+                    "review_records": 1,
+                    "completed_at": "2026-08-30T00:00:00Z",
+                    "dataset": [{"url": "https://" + "b" * 56 + ".onion/x", "api_token": self.token}],
+                    "manifest": {"producer": "external-sources", "secret": self.token},
+                }),
+            ]
+        )
+
+        reviews = client.latest_reviews()
+        export = client.latest_export_full()
+
+        self.assertNotIn(".onion", json.dumps(reviews))
+        self.assertNotIn(self.token, json.dumps(reviews))
+        self.assertNotIn(".onion", json.dumps(export))
+        self.assertNotIn(self.token, json.dumps(export))
+        self.assertTrue(client.session.calls[0][1].endswith("/reviews/latest"))
+        self.assertTrue(client.session.calls[1][1].endswith("/exports/latest"))
+
+    def test_cancel_and_recheck_use_explicit_bounded_operations(self) -> None:
+        client = self.client(
+            [
+                FakeResponse({
+                    "schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+                    "state": "cancelled", "created_at": "2026-08-30T00:00:00Z",
+                    "updated_at": "2026-08-30T00:00:01Z", "progress": {}, "result": None, "error": None,
+                }),
+                FakeResponse({
+                    "schema_version": "1.0", "job_id": "job-1234567891", "command_id": "cmd-1234567891",
+                    "state": "queued", "created_at": "2026-08-30T00:00:00Z",
+                    "updated_at": "2026-08-30T00:00:00Z", "progress": {}, "result": None, "error": None,
+                }),
+            ]
+        )
+
+        client.cancel_job("job-1234567890")
+        client.recheck_manual_source("https://example.test/report")
+
+        self.assertEqual(client.session.calls[0][0], "POST")
+        self.assertTrue(client.session.calls[0][1].endswith("/jobs/job-1234567890/cancel"))
+        self.assertEqual(client.session.calls[0][2]["json"], {})
+        self.assertTrue(client.session.calls[1][1].endswith("/manual-sources/recheck"))
+        self.assertEqual(client.session.calls[1][2]["json"], {"url": "https://example.test/report", "force": True})
+
+    def test_remote_error_redacts_service_token(self) -> None:
+        client = self.client([
+            FakeResponse({"code": "upstream_" + self.token, "message": "failure token=" + self.token}, status_code=500)
+        ])
+
+        with self.assertRaises(ExternalControlRemoteError) as raised:
+            client.latest_reviews()
+
+        self.assertNotIn(self.token, raised.exception.code)
+        self.assertNotIn(self.token, raised.exception.message)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -101,6 +101,75 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.json()["state"], "queued")
 
+    def test_external_facade_routes_apply_roles_and_safe_contracts(self) -> None:
+        viewer_create = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "external-viewer", "password": "ViewerPassword123!", "role": "viewer"},
+        )
+        analyst_create = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "external-analyst", "password": "AnalystPassword123!", "role": "analyst"},
+        )
+        self.assertEqual(viewer_create.status_code, 201)
+        self.assertEqual(analyst_create.status_code, 201)
+
+        def login(username: str, password: str) -> dict[str, str]:
+            response = self.client.post("/api/v1/auth/login", json={"username": username, "password": password})
+            self.assertEqual(response.status_code, 200)
+            return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+        viewer = login("external-viewer", "ViewerPassword123!")
+        analyst = login("external-analyst", "AnalystPassword123!")
+        review = {
+            "run_id": "run-1234567890",
+            "records": [{"record_id": "record-1234567890", "review_reason": "privacy"}],
+        }
+        export = {
+            "run_id": "run-1234567890", "status": "completed", "dataset_sha256": "a" * 64,
+            "accepted_records": 1, "review_records": 1, "completed_at": "2026-08-30T00:00:00Z",
+            "dataset": [], "manifest": {},
+        }
+        job = {
+            "schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "cancelled", "created_at": "2026-08-30T00:00:00Z", "updated_at": "2026-08-30T00:00:01Z",
+            "progress": {}, "result": None, "error": None,
+        }
+        with patch("backend.app.api.v1.router.external_control_call", side_effect=[review, export, job, job, job, job]):
+            self.assertEqual(
+                self.client.get("/api/v1/integrations/external-control/reviews/latest").status_code,
+                401,
+            )
+            viewer_reviews = self.client.get("/api/v1/integrations/external-control/reviews/latest", headers=viewer)
+            viewer_export = self.client.get("/api/v1/integrations/external-control/exports/latest/full", headers=viewer)
+            viewer_cancel = self.client.post("/api/v1/integrations/external-control/jobs/job-1234567890/cancel", headers=viewer)
+            viewer_recheck = self.client.post(
+                "/api/v1/integrations/external-control/manual-sources/recheck",
+                headers=viewer,
+                json={"url": "https://example.test/report"},
+            )
+            analyst_cancel = self.client.post("/api/v1/integrations/external-control/jobs/job-1234567890/cancel", headers=analyst)
+            analyst_recheck = self.client.post(
+                "/api/v1/integrations/external-control/manual-sources/recheck",
+                headers=analyst,
+                json={"url": "https://example.test/report"},
+            )
+            admin_cancel = self.client.post(
+                "/api/v1/integrations/external-control/jobs/job-1234567890/cancel",
+                headers=self.headers,
+            )
+            admin_recheck = self.client.post(
+                "/api/v1/integrations/external-control/manual-sources/recheck",
+                headers=self.headers,
+                json={"url": "https://example.test/report"},
+            )
+
+        self.assertEqual((viewer_reviews.status_code, viewer_export.status_code), (200, 200))
+        self.assertEqual((viewer_cancel.status_code, viewer_recheck.status_code), (403, 403))
+        self.assertEqual((analyst_cancel.status_code, analyst_recheck.status_code), (200, 202))
+        self.assertEqual((admin_cancel.status_code, admin_recheck.status_code), (200, 202))
+
     def test_dionaea_upload_persists_sessions_and_outlier_event(self) -> None:
         with DIONAEA_SAMPLE_PATH.open("rb") as handle:
             response = self.client.post(

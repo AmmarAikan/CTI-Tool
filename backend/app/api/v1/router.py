@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from pydantic import ValidationError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -41,6 +42,9 @@ from backend.app.schemas.api import (
     BootstrapRequest,
     CorrelationRequest,
     ExternalCollectionStartRequest,
+    ExternalJobResponse,
+    ExternalLatestExportResponse,
+    ExternalLatestReviewResponse,
     ExternalManualSourceRequest,
     ExternalSourceRunRequest,
     LoginRequest,
@@ -424,6 +428,28 @@ def external_control_job(job_id: str, _: CurrentUser) -> dict[str, Any]:
     return external_control_call(lambda client: client.get_job(job_id))
 
 
+def external_control_typed_call(callback, model):
+    try:
+        return model.model_validate(external_control_call(callback))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": "external_control_invalid_response", "message": "External control response contract is invalid"},
+        ) from exc
+
+
+@router.post("/integrations/external-control/jobs/{job_id}/cancel", tags=["external-control"], response_model=ExternalJobResponse)
+def external_control_cancel_job(
+    job_id: str,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> ExternalJobResponse:
+    result = external_control_typed_call(lambda client: client.cancel_job(job_id), ExternalJobResponse)
+    audit(db, user, "cancel_external_collection", "external_collection_job", result.job_id)
+    db.commit()
+    return result
+
+
 @router.post(
     "/integrations/external-control/manual-sources",
     tags=["external-control"],
@@ -447,16 +473,30 @@ def external_control_manual_source(
     "/integrations/external-control/manual-sources/recheck",
     tags=["external-control"],
     status_code=202,
+    response_model=ExternalJobResponse,
 )
 def external_control_manual_recheck(
     payload: ExternalManualSourceRequest,
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
-) -> dict[str, Any]:
-    result = external_control_call(lambda client: client.recheck_manual_source(str(payload.url)))
-    audit(db, user, "recheck_external_manual_source", "external_collection_job", result["job_id"])
+) -> ExternalJobResponse:
+    result = external_control_typed_call(
+        lambda client: client.recheck_manual_source(str(payload.url)),
+        ExternalJobResponse,
+    )
+    audit(db, user, "recheck_external_manual_source", "external_collection_job", result.job_id)
     db.commit()
     return result
+
+
+@router.get("/integrations/external-control/reviews/latest", tags=["external-control"], response_model=ExternalLatestReviewResponse)
+def external_control_latest_reviews(_: CurrentUser) -> ExternalLatestReviewResponse:
+    return external_control_typed_call(lambda client: client.latest_reviews(), ExternalLatestReviewResponse)
+
+
+@router.get("/integrations/external-control/exports/latest/full", tags=["external-control"], response_model=ExternalLatestExportResponse)
+def external_control_latest_export_full(_: CurrentUser) -> ExternalLatestExportResponse:
+    return external_control_typed_call(lambda client: client.latest_export_full(), ExternalLatestExportResponse)
 
 
 @router.get("/integrations/external-control/exports/latest", tags=["external-control"])

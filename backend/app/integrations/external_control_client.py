@@ -12,6 +12,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+SENSITIVE_KEY_PARTS = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
+ONION_VALUE = re.compile(r"(?i)(?:https?://)?[a-z0-9.-]+\.onion(?:[^\s\"']*)")
+
+
 class ExternalControlError(RuntimeError):
     """Base error for the private VPS External Sources control API."""
 
@@ -137,6 +141,10 @@ class ExternalControlClient:
             )
         )
 
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        self._validate_job_id(job_id)
+        return self._job_response(self._request("POST", f"/jobs/{quote(job_id, safe='')}/cancel", payload={}))
+
     def get_job(self, job_id: str) -> dict[str, Any]:
         self._validate_job_id(job_id)
         return self._job_response(self._request("GET", f"/jobs/{quote(job_id, safe='')}"))
@@ -156,6 +164,31 @@ class ExternalControlClient:
                 "completed_at",
             )
         }
+
+    def latest_export_full(self) -> dict[str, Any]:
+        payload = self._request("GET", "/exports/latest")
+        if not isinstance(payload, dict):
+            raise ExternalControlTransportError("External export contract is invalid")
+        return self._redact_sensitive(payload)
+
+    def latest_reviews(self) -> dict[str, Any]:
+        payload = self._request("GET", "/reviews/latest")
+        if not isinstance(payload, dict):
+            raise ExternalControlTransportError("External review contract is invalid")
+        return self._redact_sensitive(payload)
+
+    def _redact_sensitive(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: "[REDACTED]" if any(part in key.lower() for part in SENSITIVE_KEY_PARTS)
+                else self._redact_sensitive(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._redact_sensitive(item) for item in value]
+        if isinstance(value, str):
+            return ONION_VALUE.sub("[REDACTED_ONION]", value).replace(self.token, "[REDACTED]")
+        return value
 
     def _request(
         self,
@@ -190,7 +223,9 @@ class ExternalControlClient:
         if response.status_code >= 400:
             code = str(value.get("code") or "external_control_error") if isinstance(value, dict) else "external_control_error"
             message = str(value.get("message") or "External control request failed") if isinstance(value, dict) else "External control request failed"
-            raise ExternalControlRemoteError(response.status_code, code[:100], message[:300])
+            safe_code = str(self._redact_sensitive(code))[:100]
+            safe_message = str(self._redact_sensitive(message))[:300]
+            raise ExternalControlRemoteError(response.status_code, safe_code, safe_message)
         return value
 
     def _bounded_body(self, response: requests.Response) -> bytes:
