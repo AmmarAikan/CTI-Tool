@@ -81,6 +81,7 @@ class DarkWebReadinessTests(unittest.TestCase):
 
         self.assertIn("tor", services)
         self.assertNotIn("ports", tor)
+        self.assertNotIn("command", tor)
         self.assertEqual(tor["image"], "dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6")
         self.assertIn("healthcheck", tor)
         self.assertEqual(external["environment"]["TOR_PROXY_HOST"], "tor")
