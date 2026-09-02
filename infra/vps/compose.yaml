@@ -105,6 +105,10 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
     healthcheck:
       test: ["CMD-SHELL", "tor --version >/dev/null 2>&1 && (nc -z 127.0.0.1 9050 || nc -vz 127.0.0.1 9050 || timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' >/dev/null 2>&1) || exit 1"]
       interval: 15s
