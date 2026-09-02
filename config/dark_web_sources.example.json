@@ -1,8 +1,8 @@
 {
   "schema_version": "1.0",
   "proxy": {
-    "host": "set-in-local-file-or-TOR_PROXY_HOST",
-    "port": null
+    "host": "tor",
+    "port": 9050
   },
   "sources": [
     {

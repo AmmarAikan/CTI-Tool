@@ -59,7 +59,8 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
     def _build(self, root: Path, client, *, connector_factory=None):
         config = root / "dark_web_sources.local.json"; self._config(config)
         environment = {"EXTERNAL_API_TOKEN": "dark-registry-token", "EXTERNAL_API_ROLES": "operator",
-                       "EXTERNAL_API_DEV_WORKERS": "1", "EXTERNAL_DARK_WEB_CONFIG_PATH": str(config)}
+                       "EXTERNAL_API_DEV_WORKERS": "1", "EXTERNAL_DARK_WEB_ENABLED": "true",
+                       "EXTERNAL_DARK_WEB_CONFIG_PATH": str(config)}
         with patch.dict(os.environ, environment):
             local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             return local.build_local_app(dark_web_config_path=config, dark_web_client=client,
@@ -156,6 +157,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
             sources_path = root / "sources.json"
             save_json({"rss_sources": [{"source_id": "collision", "name": "Public", "url": "https://example.test/feed", "enabled": True}]}, sources_path)
             with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "duplicate-test-token",
+                                         "EXTERNAL_DARK_WEB_ENABLED": "true",
                                          "EXTERNAL_DARK_WEB_CONFIG_PATH": str(root / "missing.json")}):
                 local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
             source = DarkWebSource("collision", "Private", FAKE_ONION, ("/advisories/",), True)
@@ -170,6 +172,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
                 "enabled": True, "allowed_paths": ["/reports/"],
             }]}, config)
             with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "startup-test-token",
+                                         "EXTERNAL_DARK_WEB_ENABLED": "true",
                                          "EXTERNAL_DARK_WEB_CONFIG_PATH": str(root / "missing.json")}):
                 local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
                 with self.assertRaises(DarkWebConfigurationError) as raised:

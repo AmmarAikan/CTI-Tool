@@ -55,7 +55,10 @@ services:
       EXTERNAL_API_ROLES: operator
       EXTERNAL_API_DEV_WORKERS: ${EXTERNAL_API_DEV_WORKERS:-2}
       EXTERNAL_API_DOCS_ENABLED: "false"
-      EXTERNAL_DARK_WEB_CONFIG_PATH: /run/secrets/dark_web_sources
+      EXTERNAL_DARK_WEB_ENABLED: ${EXTERNAL_DARK_WEB_ENABLED:-false}
+      EXTERNAL_DARK_WEB_CONFIG_PATH: /app/config/dark_web_sources.local.json
+      TOR_PROXY_HOST: tor
+      TOR_PROXY_PORT: "9050"
       NVD_API_KEY: ${NVD_API_KEY:-}
       GITHUB_TOKEN: ${GITHUB_TOKEN:-}
       REDDIT_CLIENT_ID: ${REDDIT_CLIENT_ID:-}
@@ -78,15 +81,43 @@ services:
     volumes:
       - external_data:/app/data/external
       - external_logs:/app/logs
-      - ${EXTERNAL_DARK_WEB_CONFIG_FILE:-../../config/dark_web_sources.example.json}:/run/secrets/dark_web_sources:ro
+      - ${EXTERNAL_DARK_WEB_CONFIG_FILE:-/etc/cti-platform/dark_web_sources.local.json}:/app/config/dark_web_sources.local.json:ro
     networks:
       - external_egress
+    depends_on:
+      tor:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/external-sources/health', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  tor:
+    image: dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - --SocksPort
+      - 0.0.0.0:9050
+      - --DNSPort
+      - 0.0.0.0:5353
+    healthcheck:
+      test: ["CMD-SHELL", "tor --version >/dev/null 2>&1 && (nc -z 127.0.0.1 9050 || nc -vz 127.0.0.1 9050 || timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' >/dev/null 2>&1) || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - external_egress
 
   dionaea:
     build:

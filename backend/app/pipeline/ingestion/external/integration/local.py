@@ -521,9 +521,16 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     roles = frozenset(value.strip() for value in os.environ.get("EXTERNAL_API_ROLES", "operator").split(",") if value.strip())
     if docs_enabled is None:
         docs_enabled = os.environ.get("EXTERNAL_API_DOCS_ENABLED", "").strip().lower() == "true"
-    dark_proxy, dark_sources = (load_dark_web_config(dark_web_config_path)
-                                if dark_web_config_path.exists() else (None, ()))
-    resolved_dark_client = dark_web_client or (TorHttpClient(dark_proxy) if dark_proxy is not None else None)
+    dark_web_enabled = os.environ.get("EXTERNAL_DARK_WEB_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    if dark_web_enabled:
+        if not dark_web_config_path.exists():
+            raise DarkWebConfigurationError(f"dark web runtime config is missing: {dark_web_config_path}")
+        dark_proxy, dark_sources = load_dark_web_config(dark_web_config_path)
+        resolved_dark_client = dark_web_client or (TorHttpClient(dark_proxy) if dark_proxy is not None else None)
+    else:
+        dark_proxy = None
+        dark_sources = ()
+        resolved_dark_client = None
     registry = load_collection_registry(dark_web_sources=dark_sources)
     configure_file_logging(log_path)
     runner = InProcessJobRunner(max_workers=int(os.environ.get("EXTERNAL_API_DEV_WORKERS", "2")))
@@ -560,4 +567,7 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
         docs_enabled=docs_enabled)
 
 
-app = build_local_app(dark_web_config_path=Path(os.environ.get("EXTERNAL_DARK_WEB_CONFIG_PATH", str(LOCAL_CONFIG))))
+if os.environ.get("EXTERNAL_API_TOKEN"):
+    app = build_local_app(dark_web_config_path=Path(os.environ.get("EXTERNAL_DARK_WEB_CONFIG_PATH", str(LOCAL_CONFIG))))
+else:
+    app = None
