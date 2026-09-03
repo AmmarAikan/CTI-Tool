@@ -1,0 +1,37 @@
+{
+  "dnrti_entities_flagged_for_review": 20504,
+  "dnrti_entities_flagged_for_review_by_type": {
+    "attack_method": 1455,
+    "exploit": 1930,
+    "objective": 1,
+    "sample_file": 13270,
+    "security_team": 5,
+    "technical_feature": 2,
+    "threat_actor": 3841
+  },
+  "dnrti_entities_removed": 0,
+  "dnrti_entities_removed_by_type": {},
+  "events_changed": 0,
+  "events_scanned": 9895,
+  "events_with_flagged_entities": 6627,
+  "mode": "preview",
+  "new_rule_relationships": 21462,
+  "new_rule_relationships_by_type": {
+    "EXPLOITS": 326,
+    "MENTIONS": 20739,
+    "TARGETS": 210,
+    "USES": 187
+  },
+  "observables_added": 0,
+  "observables_added_by_type": {},
+  "old_rule_relationships": 21462,
+  "old_rule_relationships_by_type": {
+    "EXPLOITS": 326,
+    "MENTIONS": 20739,
+    "TARGETS": 210,
+    "USES": 187
+  },
+  "rule_relationship_reduction": 0,
+  "rule_relationship_reduction_percent": 0.0,
+  "scope": "external events only; BERT and classification are not rerun"
+}

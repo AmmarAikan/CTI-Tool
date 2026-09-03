@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import json
 import unittest
+import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,6 +17,7 @@ from sqlalchemy.pool import StaticPool
 from backend.app.db.database import Base
 from backend.app.db.models import OutlierSessionRecord, RawItem, Source, ThreatEvent
 from backend.app.integrations.misp_client import MISPClient
+from backend.app.integrations.stix_exporter import STIXExporter
 from backend.app.pipeline.extraction.ner_extractor import NERExtractor
 from backend.app.pipeline.ingestion.external.http_connector import (
     ExternalFeedAPIConnector,
@@ -572,6 +574,56 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual(extractor.cache_hits, 2)
         self.assertEqual(extractor.diagnostics()["cache_entries"], 2)
 
+    def test_ner_quality_policy_rejects_generic_graph_nodes_and_non_files(self) -> None:
+        extractor = NERExtractor(
+            transformer_model_path="missing",
+            sklearn_model_path="missing.joblib",
+            min_confidence=0.50,
+        )
+        entities = [
+            {"type": "threat_actor", "value": "attacker", "confidence": 99.0},
+            {"type": "exploit", "value": "CVSS", "confidence": 99.0},
+            {"type": "sample_file", "value": "WordPress", "confidence": 99.0},
+            {"type": "sample_file", "value": "payload.dll", "confidence": 90.0},
+            {"type": "threat_actor", "value": "APT29", "confidence": 90.0},
+        ]
+
+        filtered = extractor._filter_and_deduplicate(entities)
+
+        self.assertEqual(
+            [(item["type"], item["value"]) for item in filtered],
+            [("sample_file", "payload.dll"), ("threat_actor", "APT29")],
+        )
+
+    def test_stix_exports_observables_without_asserting_maliciousness(self) -> None:
+        seen = datetime(2026, 9, 3, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            id="cti-observable-event",
+            title="Observable semantics",
+            description="A report observed an address.",
+            indicators=[
+                SimpleNamespace(indicator_type="ipv4", value="198.51.100.7", confidence=1.0)
+            ],
+            tags=["external"],
+            confidence=0.8,
+            first_seen=seen,
+            created_at=seen,
+        )
+
+        bundle = STIXExporter().export_event(event)
+        repeated_bundle = STIXExporter().export_event(event)
+        object_types = [item["type"] for item in bundle["objects"]]
+
+        self.assertIn("ipv4-addr", object_types)
+        self.assertNotIn("indicator", object_types)
+        observable = next(item for item in bundle["objects"] if item["type"] == "ipv4-addr")
+        repeated_observable = next(
+            item for item in repeated_bundle["objects"] if item["type"] == "ipv4-addr"
+        )
+        self.assertEqual(observable["value"], "198.51.100.7")
+        self.assertEqual(observable["id"], repeated_observable["id"])
+        self.assertEqual(uuid.UUID(observable["id"].split("--", 1)[1]).version, 5)
+
     def test_risk_score_is_explainable_and_does_not_compound_derived_severity(self) -> None:
         event = SimpleNamespace(
             severity="critical",
@@ -619,6 +671,8 @@ class BackendEnhancementTests(unittest.TestCase):
         )
         self.assertFalse(first["Event"]["published"])
         self.assertEqual(first["Event"]["Attribute"][0]["category"], "Payload delivery")
+        self.assertFalse(first["Event"]["Attribute"][0]["to_ids"])
+        self.assertIn("maliciousness-not-asserted", first["Event"]["Attribute"][0]["comment"])
         self.assertEqual(first["Event"]["Attribute"][0]["first_seen"], seen.isoformat())
 
     def test_time_bounds_are_normalized_before_persistence_and_misp_mapping(self) -> None:

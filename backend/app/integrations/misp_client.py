@@ -12,14 +12,18 @@ from backend.app.core.config import get_settings
 class MISPClient:
     NAMESPACE: ClassVar[uuid.UUID] = uuid.UUID("ef1932f8-50d6-4d34-b4d7-d4e2965706ac")
     ATTRIBUTE_TYPES: ClassVar[dict[str, tuple[str, str, bool]]] = {
-        "ipv4": ("ip-src", "Network activity", True),
-        "ipv6": ("ip-src", "Network activity", True),
-        "domain": ("domain", "Network activity", True),
-        "url": ("url", "Network activity", True),
-        "email": ("email-src", "Network activity", True),
-        "md5": ("md5", "Payload delivery", True),
-        "sha1": ("sha1", "Payload delivery", True),
-        "sha256": ("sha256", "Payload delivery", True),
+        # Extraction proves observation, not maliciousness. Analysts or an
+        # enrichment rule must opt in to IDS use after contextual validation.
+        "ipv4": ("ip-src", "Network activity", False),
+        "ipv6": ("ip-src", "Network activity", False),
+        "domain": ("domain", "Network activity", False),
+        "url": ("url", "Network activity", False),
+        "email": ("email-src", "Network activity", False),
+        "md5": ("md5", "Payload delivery", False),
+        "sha1": ("sha1", "Payload delivery", False),
+        "sha256": ("sha256", "Payload delivery", False),
+        "asn": ("AS", "Network activity", False),
+        "mac": ("mac-address", "Network activity", False),
         "cve": ("vulnerability", "External analysis", False),
     }
 
@@ -60,7 +64,11 @@ class MISPClient:
                 "category": category,
                 "value": indicator.value,
                 "to_ids": to_ids,
-                "comment": f"Extracted by {indicator.extractor}; confidence={indicator.confidence:.2f}",
+                "comment": (
+                    f"Observed by {indicator.extractor}; "
+                    f"extraction-confidence={indicator.confidence:.2f}; "
+                    "maliciousness-not-asserted"
+                ),
             }
             first_seen, last_seen = self._time_bounds(
                 getattr(indicator, "first_seen", None),

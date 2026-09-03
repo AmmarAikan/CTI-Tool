@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sys
 from collections import OrderedDict
 from functools import lru_cache
@@ -26,6 +27,43 @@ if str(ROOT) not in sys.path:
 from ml.common.token_features import (
     sentence_to_feature_dicts,
     simple_word_tokenize,
+)
+
+
+GENERIC_ENTITY_VALUES: dict[str, frozenset[str]] = {
+    "threat_actor": frozenset(
+        {
+            "apt",
+            "actor",
+            "actors",
+            "attacker",
+            "attackers",
+            "cyber",
+            "gang",
+            "group",
+            "hacker",
+            "hackers",
+            "operator",
+            "operators",
+            "threat",
+        }
+    ),
+    "exploit": frozenset(
+        {
+            "cve",
+            "cve-vendor-coordination",
+            "cvefeed",
+            "cveql",
+            "cvss",
+            "mitre-cve",
+            "vulnerability",
+            "vulnerabilities",
+        }
+    ),
+    "attack_method": frozenset({"activity", "attack", "attacks", "campaign", "email"}),
+}
+FILE_ARTIFACT_RE = re.compile(
+    r"(?:^|[\\/])[^\\/\s]{1,255}\.[A-Za-z0-9]{1,12}$"
 )
 
 
@@ -574,8 +612,22 @@ class NERExtractor:
             entity
             for entity in entities
             if float(entity.get("confidence", 0.0)) >= minimum_percent
+            and self._passes_quality_policy(entity)
         ]
         return self._deduplicate_entities(filtered)
+
+    @staticmethod
+    def _passes_quality_policy(entity: dict[str, object]) -> bool:
+        """Reject structurally invalid or semantically generic graph entities."""
+        entity_type = str(entity.get("type") or "").strip()
+        value = " ".join(str(entity.get("value") or "").split()).strip(".,;:")
+        if not entity_type or not value or not any(character.isalnum() for character in value):
+            return False
+        if value.casefold() in GENERIC_ENTITY_VALUES.get(entity_type, frozenset()):
+            return False
+        if entity_type == "sample_file" and FILE_ARTIFACT_RE.search(value) is None:
+            return False
+        return True
 
 
 @lru_cache(maxsize=1)

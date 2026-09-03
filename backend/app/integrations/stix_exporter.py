@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import ClassVar
@@ -9,6 +10,20 @@ def stix_id(object_type: str, _value: str = "") -> str:
     # STIX Domain Objects use UUIDv4 identifiers. The source event ID is kept in
     # the report content; it must not be converted into a non-conformant UUIDv5.
     return f"{object_type}--{uuid.uuid4()}"
+
+
+STIX_SCO_NAMESPACE = uuid.UUID("00abedb4-aa42-466c-9c01-fed23315a9b7")
+
+
+def stix_sco_id(object_type: str, contributing_properties: dict) -> str:
+    """Create the deterministic UUIDv5 identifier recommended for STIX SCOs."""
+    canonical = json.dumps(
+        contributing_properties,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"{object_type}--{uuid.uuid5(STIX_SCO_NAMESPACE, canonical)}"
 
 
 def stix_timestamp(value=None) -> str:
@@ -25,15 +40,18 @@ def stix_timestamp(value=None) -> str:
 
 
 class STIXExporter:
-    PATTERN_TYPES: ClassVar[dict[str, str]] = {
-        "ipv4": "ipv4-addr:value",
-        "ipv6": "ipv6-addr:value",
-        "domain": "domain-name:value",
-        "url": "url:value",
-        "email": "email-addr:value",
-        "md5": "file:hashes.'MD5'",
-        "sha1": "file:hashes.'SHA-1'",
-        "sha256": "file:hashes.'SHA-256'",
+    SIMPLE_OBSERVABLE_TYPES: ClassVar[dict[str, str]] = {
+        "ipv4": "ipv4-addr",
+        "ipv6": "ipv6-addr",
+        "domain": "domain-name",
+        "url": "url",
+        "email": "email-addr",
+        "mac": "mac-addr",
+    }
+    HASH_NAMES: ClassVar[dict[str, str]] = {
+        "md5": "MD5",
+        "sha1": "SHA-1",
+        "sha256": "SHA-256",
     }
 
     def export_event(self, event) -> dict:
@@ -67,27 +85,11 @@ class STIXExporter:
                 )
                 refs.append(object_id)
                 continue
-            pattern_path = self.PATTERN_TYPES.get(indicator.indicator_type)
-            if not pattern_path:
+            observable = self._observable(indicator)
+            if observable is None:
                 continue
-            escaped = indicator.value.replace("\\", "\\\\").replace("'", "\\'")
-            object_id = stix_id("indicator", f"{indicator.indicator_type}:{indicator.value}")
-            objects.append(
-                {
-                    "type": "indicator",
-                    "spec_version": "2.1",
-                    "id": object_id,
-                    "created": now,
-                    "modified": now,
-                    "created_by_ref": identity_id,
-                    "name": f"{indicator.indicator_type}: {indicator.value}",
-                    "pattern": f"[{pattern_path} = '{escaped}']",
-                    "pattern_type": "stix",
-                    "indicator_types": ["malicious-activity"],
-                    "valid_from": stix_timestamp(event.first_seen),
-                    "confidence": round(indicator.confidence * 100),
-                }
-            )
+            objects.append(observable)
+            object_id = observable["id"]
             refs.append(object_id)
         report_id = stix_id("report", event.id)
         objects.append(
@@ -112,3 +114,37 @@ class STIXExporter:
             "id": stix_id("bundle", event.id),
             "objects": objects,
         }
+
+    def _observable(self, indicator) -> dict | None:
+        """Map an extracted value to a STIX SCO without asserting maliciousness."""
+        observable_type = self.SIMPLE_OBSERVABLE_TYPES.get(indicator.indicator_type)
+        if observable_type:
+            contributing_properties = {"value": indicator.value}
+            return {
+                "type": observable_type,
+                "spec_version": "2.1",
+                "id": stix_sco_id(observable_type, contributing_properties),
+                "value": indicator.value,
+            }
+        hash_name = self.HASH_NAMES.get(indicator.indicator_type)
+        if hash_name:
+            contributing_properties = {"hashes": {hash_name: indicator.value}}
+            return {
+                "type": "file",
+                "spec_version": "2.1",
+                "id": stix_sco_id("file", contributing_properties),
+                **contributing_properties,
+            }
+        if indicator.indicator_type == "asn":
+            try:
+                number = int(str(indicator.value).upper().removeprefix("AS"))
+            except ValueError:
+                return None
+            contributing_properties = {"number": number}
+            return {
+                "type": "autonomous-system",
+                "spec_version": "2.1",
+                "id": stix_sco_id("autonomous-system", contributing_properties),
+                **contributing_properties,
+            }
+        return None

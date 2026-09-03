@@ -1,0 +1,48 @@
+{
+  "dnrti_entities_flagged_for_review": 20504,
+  "dnrti_entities_flagged_for_review_by_type": {
+    "attack_method": 1455,
+    "exploit": 1930,
+    "objective": 1,
+    "sample_file": 13270,
+    "security_team": 5,
+    "technical_feature": 2,
+    "threat_actor": 3841
+  },
+  "dnrti_entities_removed": 0,
+  "dnrti_entities_removed_by_type": {},
+  "events_changed": 6816,
+  "events_scanned": 9895,
+  "events_with_flagged_entities": 6627,
+  "mode": "apply",
+  "new_rule_relationships": 21462,
+  "new_rule_relationships_by_type": {
+    "EXPLOITS": 326,
+    "MENTIONS": 20739,
+    "TARGETS": 210,
+    "USES": 187
+  },
+  "observables_added": 545,
+  "observables_added_by_type": {
+    "asn": 3,
+    "domain": 66,
+    "email": 3,
+    "ipv4": 29,
+    "ipv6": 340,
+    "mac": 1,
+    "md5": 12,
+    "sha1": 2,
+    "sha256": 4,
+    "url": 85
+  },
+  "old_rule_relationships": 74173,
+  "old_rule_relationships_by_type": {
+    "EXPLOITS": 17043,
+    "MENTIONS": 40836,
+    "TARGETS": 7749,
+    "USES": 8545
+  },
+  "rule_relationship_reduction": 52711,
+  "rule_relationship_reduction_percent": 71.06,
+  "scope": "external events only; BERT and classification are not rerun"
+}

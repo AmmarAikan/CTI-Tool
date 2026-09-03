@@ -162,6 +162,7 @@ def event_dict(event: ThreatEvent, detail: bool = False) -> dict[str, Any]:
                         "value": item.value,
                         "confidence": item.confidence,
                         "extractor": item.extractor,
+                        "semantic_role": "observable",
                         "enrichments": [
                             {
                                 "provider": enrichment.provider,
@@ -645,6 +646,7 @@ def list_indicators(
             "value": item.value,
             "confidence": item.confidence,
             "extractor": item.extractor,
+            "semantic_role": "observable",
         }
         for item in db.scalars(query)
     ]
@@ -735,6 +737,7 @@ def dashboard_summary(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
     return {
         "events": db.scalar(select(func.count()).select_from(ThreatEvent)) or 0,
         "indicators": db.scalar(select(func.count()).select_from(IndicatorRecord)) or 0,
+        "observables": db.scalar(select(func.count()).select_from(IndicatorRecord)) or 0,
         "correlations": db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0,
         "sessions": db.scalar(select(func.count()).select_from(OutlierSessionRecord)) or 0,
         "outliers": db.scalar(

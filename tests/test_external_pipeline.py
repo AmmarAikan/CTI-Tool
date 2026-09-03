@@ -7,9 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from backend.app.pipeline.classification.relevance_classifier import RelevanceClassifier
-from backend.app.pipeline.common.cti_schema import RawRecord
+from backend.app.pipeline.common.cti_schema import Entity, Indicator, RawRecord
 from backend.app.pipeline.extraction.ioc_extractor import IoCExtractor
 from backend.app.pipeline.extraction.ner_extractor import NERExtractor
+from backend.app.pipeline.extraction.relation_extractor import RelationExtractor
 from backend.app.pipeline.ingestion.external.file_connector import ExternalJsonFileConnector
 from backend.app.pipeline.orchestrator import ExternalCTIPipeline
 from backend.app.pipeline.preprocessing.normalizer import RecordNormalizer
@@ -181,6 +182,39 @@ class ExternalPipelineTests(unittest.TestCase):
         self.assertIn(("md5", "d41d8cd98f00b204e9800998ecf8427e"), keys)
         self.assertIn(("email", "ops@example.com"), keys)
         self.assertEqual(sum(1 for indicator in indicators if indicator.type == "cve"), 1)
+
+    def test_ioc_extraction_refangs_and_validates_extended_observables(self) -> None:
+        text = (
+            "Callback hxxps://evil[.]example[.]com from 203[.]0[.]113[.]10, "
+            "IPv6 2001:0db8::1, ASN AS64512, and MAC AA-BB-CC-DD-EE-FF."
+        )
+
+        keys = {(item.type, item.value.lower()) for item in IoCExtractor().extract(text)}
+
+        self.assertIn(("url", "https://evil.example.com"), keys)
+        self.assertIn(("ipv4", "203.0.113.10"), keys)
+        self.assertIn(("ipv6", "2001:db8::1"), keys)
+        self.assertIn(("asn", "as64512"), keys)
+        self.assertIn(("mac", "aa:bb:cc:dd:ee:ff"), keys)
+
+    def test_relationships_require_same_sentence_mentions(self) -> None:
+        entities = [
+            Entity("APT29", "threat_actor", 0.9, "test"),
+            Entity("Cobalt Strike", "tool_or_malware", 0.9, "test"),
+            Entity("Mimikatz", "tool_or_malware", 0.9, "test"),
+        ]
+        indicators = [Indicator("CVE-2026-1234", "cve", 1.0, "test")]
+        text = (
+            "APT29 used Cobalt Strike to exploit CVE-2026-1234. "
+            "A separate appendix merely lists Mimikatz."
+        )
+
+        relationships = RelationExtractor().extract(text, entities, indicators, "record-1")
+        keys = {(item.subject, item.relation, item.object) for item in relationships}
+
+        self.assertIn(("APT29", "USES", "Cobalt Strike"), keys)
+        self.assertIn(("Cobalt Strike", "EXPLOITS", "CVE-2026-1234"), keys)
+        self.assertNotIn(("APT29", "USES", "Mimikatz"), keys)
 
     def test_external_cti_object_creation(self) -> None:
         result = ExternalCTIPipeline(ner_extractor=FakeNERExtractor()).process_record(raw_record())

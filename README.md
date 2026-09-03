@@ -16,11 +16,13 @@ This repository now contains the backend foundation of the graduation-project CT
 - [x] Isolation Forest outlier detection with a clearly labeled small-sample fallback
 - [x] DNRTI BERT as the primary runtime NER model; DNRTI sklearn as the secondary fallback
 - [x] Explainable risk scoring, exact-indicator correlation, and TF-IDF similarity correlation
-- [x] NVD CVE enrichment, STIX 2.1 bundle export, and live unpublished/verified MISP submission
+- [x] NVD CVE enrichment, observable-first STIX 2.1 export, and live unpublished/verified MISP submission
 - [x] Cached/chunked BERT runtime and `/ml/status` held-out quality evidence
+- [x] Refanged IPv4/domain/URL extraction plus validated IPv6, ASN, and MAC observables
+- [x] Sentence-aware, type-bounded relationship extraction and repeatable PostgreSQL quality backfill
 - [x] Bearer authentication, admin/analyst/viewer roles, and audit logging
 
-The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. External Sources, MISP 2.5.44, the CTI Gateway, Dionaea, and lightweight SSH/web sensors run on the VPS; FastAPI, PostgreSQL, DNRTI BERT, and the sklearn fallback remain on Ammar's computer. No collaborator computer is required at runtime. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains available for a future larger or separate host. The current deployment and sanitized acceptance evidence are documented in `Parts Report/Hybrid_VPS_Backend_Deployment_Report.md`.
+The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. External Sources, MISP 2.5.44, the CTI Gateway, Dionaea, and lightweight SSH/web sensors run on the VPS; FastAPI, PostgreSQL, DNRTI BERT, and the sklearn fallback remain on Ammar's computer. No collaborator computer is required at runtime. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains available for a future larger or separate host. The current deployment and sanitized acceptance evidence are documented in `Parts Report/Hybrid_VPS_Backend_Deployment_Report.md`; the live database result-quality audit and OpenCTI-inspired corrections are in `Parts Report/CTI_Result_Quality_Audit.md`.
 
 ## Quick start — backend
 
