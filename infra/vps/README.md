@@ -41,6 +41,94 @@ The scripts generate secrets under `/etc/cti-platform/` with root-only permissio
 
 MISP is cloned directly on the VPS at pinned commit `223b675c4480730832f928e113b6f2e5260b450d` and uses `misp-core:v2.5.44-slim` and `misp-modules:v3.0.9-slim`. The images are pulled on the VPS, not uploaded from a personal computer.
 
+## VPS-local Central Backend networks
+
+Gateway and External Sources use two independently provisioned internal bridge
+networks when Central Backend runs on the same VPS:
+
+- `cti-backend-gateway`: Central Backend (`cti-backend`) and Gateway
+  (`cti-gateway`) only.
+- `cti-backend-external`: Central Backend (`cti-backend`) and External Sources
+  (`cti-external-control`) only.
+
+Both Compose projects declare these networks as external. The dedicated
+`scripts/provision_backend_networks.sh` entry point creates them idempotently,
+rejects Docker inspection failures, refuses incompatible networks, and rejects
+unauthorized or duplicate attached service roles. `bootstrap_host.sh` calls this
+entry point for new hosts; existing hosts call it directly without rerunning host
+hardening. Database, Redis, Tor, Dionaea, MISP, and MISP
+Modules must never join either network.
+
+The generated Backend client fragment uses the service aliases and container
+ports directly. Feed, Dionaea, host-auth, and web-access remain mediated by
+Gateway on port 8080; External control uses External Sources on port 8000.
+Tokens, HMAC verification, request bounds, timeouts, and explicit internal-HTTP
+allow settings are unchanged.
+
+MISP is outside this migration. Its URL, certificate verification setting, and
+networks remain unchanged; if its existing route is unavailable, health must
+continue to report it as configured but disconnected. Wazuh remains
+unconfigured.
+
+The Tailscale and SSH sections below describe remote-client and recovery paths.
+They do not replace the VPS-local Gateway and External Sources pairwise path.
+
+### Existing-host narrow rollout
+
+Do not rerun the full bootstrap or full-stack deployment merely to apply these
+networks. From an immutable candidate release, provision and validate the two
+networks, regenerate the client fragment atomically, then reconcile only Gateway
+and External Sources:
+
+```bash
+sudo /opt/cti-platform/releases/<candidate>/infra/vps/scripts/provision_backend_networks.sh
+sudo /opt/cti-platform/releases/<candidate>/infra/vps/scripts/generate_backend_client_fragment.sh /etc/cti-platform/vps.env
+sudo docker compose --env-file /etc/cti-platform/vps.env \
+  -f /opt/cti-platform/releases/<candidate>/infra/vps/compose.yaml \
+  build gateway external-sources
+sudo docker compose --env-file /etc/cti-platform/vps.env \
+  -f /opt/cti-platform/releases/<candidate>/infra/vps/compose.yaml \
+  up -d --no-deps gateway external-sources
+```
+
+These commands do not select Dionaea, Tor, MISP, databases, or other services.
+The normal `deploy_stack.sh` remains the complete first-deployment/reconciliation
+entry point and is intentionally broader than this existing-host operation.
+
+### Restored transfer Backend experiment
+
+The currently restored experimental Backend is controlled by
+`/opt/cti-backend-transfers/20260903-v1/cti-backend-20260903-v1`, not by
+`/opt/cti-platform/current/compose.yaml`. Preserve Compose project
+`cti-backend-20260903-v1`, container service `backend`, its existing database
+volume, and host binding `127.0.0.1:18000`. Do not edit the transfer base Compose
+or private environment files. Add reviewed transfer-local Compose and environment
+overrides, render the complete model, and reconcile only the existing `backend`
+service with `-p cti-backend-20260903-v1 --no-deps`. Never start a second Backend
+project or bind another service to the existing host port. Do not advance
+`/opt/cti-platform/current` during the experiment. After creating reviewed
+transfer-local `compose.vps-local.override.yaml` and `vps-local.env`, render and
+reconcile the existing project with the original private env files discovered
+from its Compose provenance:
+
+```bash
+transfer_root=/opt/cti-backend-transfers/20260903-v1/cti-backend-20260903-v1
+sudo docker compose -p cti-backend-20260903-v1 \
+  --env-file <exact-original-backend-env> \
+  --env-file "${transfer_root}/vps-local.env" \
+  -f "${transfer_root}/compose.yaml" \
+  -f "${transfer_root}/compose.vps-local.override.yaml" config --quiet
+sudo docker compose -p cti-backend-20260903-v1 \
+  --env-file <exact-original-backend-env> \
+  --env-file "${transfer_root}/vps-local.env" \
+  -f "${transfer_root}/compose.yaml" \
+  -f "${transfer_root}/compose.vps-local.override.yaml" \
+  up -d --no-deps backend
+```
+
+The rendered model must retain `127.0.0.1:18000:8000` before the second command
+is authorized.
+
 ## Primary Tailscale path and backend
 
 Install Tailscale on the VPS and Ammar's Windows computer, join both to the same tailnet, and enable unattended mode on Windows. Keep Funnel disabled. On the VPS, expose only the existing loopback services to the tailnet:

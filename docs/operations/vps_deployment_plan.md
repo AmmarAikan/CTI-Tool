@@ -32,6 +32,23 @@ This document intentionally omits the public IP, credentials, tokens, hostile so
 
 The official MISP Docker repository is pinned to commit `223b675c4480730832f928e113b6f2e5260b450d`. Resource limits cap MISP Core at 4 GB, MariaDB at 2 GB, Modules at 1.5 GB, and Redis at 512 MB. The server had about 185 GB free before MISP and no swap pressure during acceptance.
 
+For VPS-local Central Backend deployment, the dedicated network-only provisioner
+creates the stable internal bridge networks `cti-backend-gateway` and `cti-backend-external`.
+Each network is external to Compose and contains exactly Central Backend plus
+its intended peer. Gateway mediates feed and sensor reads on its container port
+8080; External Sources serves control reads on container port 8000. No database,
+Redis, Tor, Dionaea, MISP, MISP Modules, or broad-egress service is attached to
+these pairwise networks. MISP is explicitly deferred from this topology change
+and Wazuh remains unconfigured. Existing hosts call the provisioner directly and
+use Compose `build gateway external-sources` followed by
+`up -d --no-deps gateway external-sources`; the full bootstrap and full-stack
+deployment are not used for this narrow change. The restored experimental Backend
+remains owned by transfer path
+`/opt/cti-backend-transfers/20260903-v1/cti-backend-20260903-v1`, project
+`cti-backend-20260903-v1`, and host binding `127.0.0.1:18000`; transfer-local
+overrides must preserve those values and `/opt/cti-platform/current` is not its
+controller.
+
 ## Deployment procedure
 
 1. Transfer a versioned Git archive of the tracked project files; build large images directly on the VPS.

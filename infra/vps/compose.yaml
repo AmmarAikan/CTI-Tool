@@ -38,7 +38,10 @@ services:
       - dionaea_data:/sensors/dionaea:ro
       - /var/lib/cti-sensors:/sensors/host:ro
     networks:
-      - gateway_private
+      gateway_private: {}
+      cti_backend_gateway:
+        aliases:
+          - cti-gateway
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3).read()"]
       interval: 30s
@@ -79,7 +82,10 @@ services:
       - external_data:/app/data/external
       - external_logs:/app/logs
     networks:
-      - external_egress
+      external_egress: {}
+      cti_backend_external:
+        aliases:
+          - cti-external-control
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/external-sources/health', timeout=3).read()"]
       interval: 30s
@@ -130,6 +136,12 @@ services:
       - honeypot_isolated
 
 networks:
+  cti_backend_gateway:
+    external: true
+    name: cti-backend-gateway
+  cti_backend_external:
+    external: true
+    name: cti-backend-external
   gateway_private:
     driver: bridge
     driver_opts:
