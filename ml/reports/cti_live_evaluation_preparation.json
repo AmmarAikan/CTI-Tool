@@ -1,0 +1,47 @@
+{
+  "schema_version": "cti-live-evaluation-v1",
+  "snapshot_created_at": "2026-09-03T11:04:24.813060Z",
+  "status": "awaiting_independent_human_annotations",
+  "scanned_external_events": 9895,
+  "eligible_unique_documents": 9887,
+  "duplicate_events_excluded": 8,
+  "other_exclusions": {},
+  "selected_documents": 400,
+  "strata": 39,
+  "pilot_documents": 10,
+  "sample_source_type_counts": {
+    "api": 13,
+    "cert": 1,
+    "hackernews": 122,
+    "rss": 70,
+    "telegram": 64,
+    "vulnerability": 130
+  },
+  "population_sha256": "98ce4cfcd3c0ad71a9cc97ed73884aeebbb0884f8c5b94db7c9a04faa2246945",
+  "sealed_files": {
+    "blind/documents.jsonl": "7f091ba6e8fef2b6ff186c8058bc34d7cf126bcbe1e18f116babe4b2a4d79d14",
+    "private/reference.jsonl": "fddf49afcd2b9db217272be9cf8aec98390795776513cc4b81cee3e24bbb1c85"
+  },
+  "human_completed_documents": {"annotator_a": 0, "annotator_b": 0, "adjudicated": 0},
+  "model_accuracy_metrics": null,
+  "post_export_database_counts": {
+    "threat_events": 9914,
+    "technical_values": 12010,
+    "entities": 41520,
+    "relationships": 21481,
+    "completed_pipeline_runs": 26
+  },
+  "database_counts_unchanged": true,
+  "live_model_inference_performed": false,
+  "temporary_worker_removed": true,
+  "live_export_verified": true,
+  "validation": {
+    "unit_and_integration_tests_passed": 264,
+    "annotation_tests_passed": 11,
+    "pending_labels_rejected_in_live_package": true,
+    "output_collision_refused": true,
+    "backend_health_after_recovery": "ok",
+    "backend_database_health": true
+  },
+  "scope": "Unique stored external threat-event texts, not ingestion recall or human-certified model accuracy"
+}

@@ -20,11 +20,18 @@ This repository now contains the backend foundation of the graduation-project CT
 - [x] Cached/chunked BERT runtime and `/ml/status` held-out quality evidence
 - [x] Refanged IPv4/domain/URL extraction plus validated IPv6, ASN, and MAC observables
 - [x] Sentence-aware, type-bounded relationship extraction and repeatable PostgreSQL quality backfill
+- [x] Read-only live evaluation sampling, blind two-reviewer annotation, and adjudication-gated quality metrics
 - [x] Bearer authentication, admin/analyst/viewer roles, and audit logging
 
 The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. External Sources, MISP 2.5.44, the CTI Gateway, Dionaea, and lightweight SSH/web sensors run on the VPS; FastAPI, PostgreSQL, DNRTI BERT, and the sklearn fallback remain on Ammar's computer. No collaborator computer is required at runtime. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains available for a future larger or separate host. The current deployment and sanitized acceptance evidence are documented in `Parts Report/Hybrid_VPS_Backend_Deployment_Report.md`; the live database result-quality audit and OpenCTI-inspired corrections are in `Parts Report/CTI_Result_Quality_Audit.md`.
 
 ## Quick start — backend
+
+Live result-quality evaluation is separate from model training. The private 400-document
+sampling workflow and human annotation protocol are documented in
+[`Parts Report/CTI_Live_Evaluation_Protocol.md`](Parts%20Report/CTI_Live_Evaluation_Protocol.md).
+Evaluation datasets stay under ignored `data/evaluation/`; empty annotation templates
+never produce accuracy claims or authorize a model replacement.
 
 Docker Desktop must be running for this path:
 

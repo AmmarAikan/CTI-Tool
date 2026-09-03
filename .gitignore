@@ -23,6 +23,7 @@ Thumbs.db
 .env
 data/cti_platform.db
 data/backups/
+data/evaluation/
 data/uploads/
 data/dionaea/
 
