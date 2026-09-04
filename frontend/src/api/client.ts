@@ -35,15 +35,9 @@ export class ApiError extends Error {
   }
 }
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '/api/v1').replace(/\/$/, '');
+const API_BASE_URL = '/api/v1';
 let memoryToken: string | null = null;
 
-function apiBaseUrl(value: string): string {
-  if (!value.startsWith('/') || value.startsWith('//') || value.includes('?') || value.includes('#')) return '/api/v1';
-  return value;
-}
-
-const SAFE_API_BASE_URL = apiBaseUrl(API_BASE_URL);
 const ONION_VALUE = /https?:\/\/[^\s"']*\.onion[^\s"']*/gi;
 
 export function getToken(): string | null {
@@ -67,7 +61,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const response = await fetch(`${SAFE_API_BASE_URL}${path}`, { ...options, headers });
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   if (response.status === 401) {
     clearToken();
     window.dispatchEvent(new Event('cti:unauthorized'));
