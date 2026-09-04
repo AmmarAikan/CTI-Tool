@@ -40,6 +40,38 @@ The scripts generate secrets under `/etc/cti-platform/` with root-only permissio
 
 MISP is cloned directly on the VPS at pinned commit `223b675c4480730832f928e113b6f2e5260b450d` and uses `misp-core:v2.5.44-slim` and `misp-modules:v3.0.9-slim`. The images are pulled on the VPS, not uploaded from a personal computer.
 
+## VPS-local Central Backend networks
+
+Gateway and External Sources use two independently provisioned internal bridge
+networks when Central Backend runs on the same VPS:
+
+- `cti-backend-gateway`: Central Backend (`cti-backend`) and Gateway
+  (`cti-gateway`) only.
+- `cti-backend-external`: Central Backend (`cti-backend`) and External Sources
+  (`cti-external-control`) only.
+
+Both Compose projects declare these networks as external. The dedicated
+`scripts/provision_backend_networks.sh` entry point creates them idempotently,
+rejects Docker inspection failures, refuses incompatible networks, and rejects
+unauthorized or duplicate attached service roles. `bootstrap_host.sh` calls this
+entry point for new hosts. Database, Redis, Tor, Dionaea, MISP, and MISP Modules
+must never join either network.
+
+The generated Backend client fragment uses the stable service aliases and
+container ports directly. Feed, Dionaea, host-auth, and web-access remain
+mediated by Gateway at `cti-gateway:8080`; External control uses
+`cti-external-control:8000`. Tokens, HMAC verification, request bounds, and
+timeouts are unchanged. Plain HTTP is explicitly allowed only for
+`EXTERNAL_CONTROL_API_URL` at
+`cti-external-control:8000` and for `EXTERNAL_FEED_URL` and `DIONAEA_API_URL` at
+`cti-gateway:8080`, plus the shared internal-sensor connector serving
+`HOST_AUTH_API_URL` and `WEB_ACCESS_API_URL` at that same gateway alias,
+because both hops are confined to the two internal pairwise Docker networks.
+The generated fragment sets exactly
+`EXTERNAL_CONTROL_ALLOW_HTTP=true`, `EXTERNAL_FEED_ALLOW_HTTP=true`, and
+`DIONAEA_API_ALLOW_HTTP=true`, and `INTERNAL_SENSOR_ALLOW_HTTP=true` for those
+targets. MISP and Wazuh remain deferred and unchanged.
+
 ## Local tunnels and backend
 
 From PowerShell:

@@ -81,39 +81,8 @@ docker compose --env-file "${secret_file}" -f "${vps_dir}/compose.yaml" up -d
 systemctl enable --now cti-docker-firewall.service
 systemctl enable --now cti-storage-maintenance.timer
 
-# Produce the least-privilege Ammar client fragment without exposing values in
-# command output. External publishing now occurs locally on the VPS host.
-set -a
-# shellcheck disable=SC1090
-source "${secret_file}"
-set +a
-install -d -o root -g ammar -m 0750 /opt/cti-platform/clients
-umask 027
-cat > /opt/cti-platform/clients/ammar-backend.env <<EOF
-EXTERNAL_FEED_URL=http://host.docker.internal:18088/api/v1/external-feed
-EXTERNAL_FEED_TOKEN=${FEED_READ_TOKEN}
-EXTERNAL_FEED_HMAC_SECRET=${FEED_RESPONSE_HMAC_SECRET}
-EXTERNAL_FEED_VERIFY_TLS=false
-EXTERNAL_FEED_ALLOW_HTTP=true
-DIONAEA_API_URL=http://host.docker.internal:18088/api/v1/sensors/dionaea
-DIONAEA_API_TOKEN=${SENSOR_READ_TOKEN}
-DIONAEA_API_HMAC_SECRET=${SENSOR_RESPONSE_HMAC_SECRET}
-DIONAEA_API_VERIFY_TLS=false
-DIONAEA_API_ALLOW_HTTP=true
-INTERNAL_SENSOR_API_TOKEN=${SENSOR_READ_TOKEN}
-INTERNAL_SENSOR_API_HMAC_SECRET=${SENSOR_RESPONSE_HMAC_SECRET}
-INTERNAL_SENSOR_VERIFY_TLS=false
-INTERNAL_SENSOR_ALLOW_HTTP=true
-HOST_AUTH_API_URL=http://host.docker.internal:18088/api/v1/sensors/host-auth
-WEB_ACCESS_API_URL=http://host.docker.internal:18088/api/v1/sensors/web-access
-EXTERNAL_CONTROL_API_URL=http://host.docker.internal:18090/api/v1/external-sources
-EXTERNAL_CONTROL_API_TOKEN=${EXTERNAL_CONTROL_TOKEN}
-EXTERNAL_CONTROL_VERIFY_TLS=false
-EXTERNAL_CONTROL_ALLOW_HTTP=true
-EOF
-chown root:ammar /opt/cti-platform/clients/*.env
-chmod 0640 /opt/cti-platform/clients/*.env
-rm -f /opt/cti-platform/clients/alaa-publisher.env
+# Generate only the scoped Backend client fragment using an atomic replacement.
+"${vps_dir}/scripts/generate_backend_client_fragment.sh" "${secret_file}"
 
 gateway_ready=false
 for _attempt in $(seq 1 30); do

@@ -91,7 +91,13 @@ class DarkWebReadinessTests(unittest.TestCase):
         self.assertEqual(external["environment"]["EXTERNAL_DARK_WEB_ENABLED"], "${EXTERNAL_DARK_WEB_ENABLED:-false}")
         self.assertEqual(external["environment"]["EXTERNAL_DARK_WEB_CONFIG_PATH"], "/app/config/dark_web_sources.local.json")
         self.assertEqual(external["depends_on"]["tor"]["condition"], "service_healthy")
-        self.assertEqual(external["networks"], ["external_egress"])
+        self.assertEqual(
+            external["networks"],
+            {
+                "external_egress": {},
+                "cti_backend_external": {"aliases": ["cti-external-control"]},
+            },
+        )
         self.assertEqual(tor["networks"], ["external_egress"])
 
 

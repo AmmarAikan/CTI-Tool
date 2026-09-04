@@ -44,6 +44,9 @@ cat > /etc/docker/daemon.json <<'EOF'
 EOF
 systemctl enable --now docker
 
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+"${script_dir}/provision_backend_networks.sh"
+
 if ! swapon --show=NAME --noheadings | grep -q .; then
   if [[ ! -e /swapfile ]]; then
     fallocate -l 4G /swapfile
