@@ -187,6 +187,10 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
                 "http://cti-gateway:8080/api/v1/sensors/dionaea",
                 "DIONAEA_API_ALLOW_HTTP=true",
             ),
+            "INTERNAL_SENSOR": (
+                "http://cti-gateway:8080/api/v1/sensors/host-auth",
+                "INTERNAL_SENSOR_ALLOW_HTTP=true",
+            ),
         }
         for name, (url, flag) in expected.items():
             with self.subTest(integration=name):
@@ -195,6 +199,12 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertNotIn("EXTERNAL_CONTROL_API_URL=http://host.docker.internal", self.generator)
         self.assertNotIn("EXTERNAL_FEED_URL=http://host.docker.internal", self.generator)
         self.assertNotIn("DIONAEA_API_URL=http://host.docker.internal", self.generator)
+        self.assertIn(
+            "WEB_ACCESS_API_URL=http://cti-gateway:8080/api/v1/sensors/web-access",
+            self.generator,
+        )
+        self.assertNotIn("HOST_AUTH_API_URL=http://host.docker.internal", self.generator)
+        self.assertNotIn("WEB_ACCESS_API_URL=http://host.docker.internal", self.generator)
 
 if __name__ == "__main__":
     unittest.main()
