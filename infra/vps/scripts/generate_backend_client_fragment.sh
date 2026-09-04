@@ -35,6 +35,7 @@ source "${secret_file}"
 set +a
 
 cat >"${temporary}" <<EOF
+# Plain HTTP is approved only for the two isolated Docker aliases below.
 EXTERNAL_FEED_URL=http://cti-gateway:8080/api/v1/external-feed
 EXTERNAL_FEED_TOKEN=${FEED_READ_TOKEN}
 EXTERNAL_FEED_HMAC_SECRET=${FEED_RESPONSE_HMAC_SECRET}

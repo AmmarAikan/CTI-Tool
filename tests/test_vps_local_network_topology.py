@@ -173,5 +173,28 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertIn('generate_backend_client_fragment.sh" "${secret_file}"', self.deploy_stack)
 
 
+    def test_internal_http_is_allowed_only_for_approved_aliases(self) -> None:
+        expected = {
+            "EXTERNAL_CONTROL": (
+                "http://cti-external-control:8000/api/v1/external-sources",
+                "EXTERNAL_CONTROL_ALLOW_HTTP=true",
+            ),
+            "EXTERNAL_FEED": (
+                "http://cti-gateway:8080/api/v1/external-feed",
+                "EXTERNAL_FEED_ALLOW_HTTP=true",
+            ),
+            "DIONAEA": (
+                "http://cti-gateway:8080/api/v1/sensors/dionaea",
+                "DIONAEA_API_ALLOW_HTTP=true",
+            ),
+        }
+        for name, (url, flag) in expected.items():
+            with self.subTest(integration=name):
+                self.assertIn(url, self.generator)
+                self.assertEqual(self.generator.count(flag), 1)
+        self.assertNotIn("EXTERNAL_CONTROL_API_URL=http://host.docker.internal", self.generator)
+        self.assertNotIn("EXTERNAL_FEED_URL=http://host.docker.internal", self.generator)
+        self.assertNotIn("DIONAEA_API_URL=http://host.docker.internal", self.generator)
+
 if __name__ == "__main__":
     unittest.main()

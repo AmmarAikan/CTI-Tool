@@ -62,8 +62,14 @@ Modules must never join either network.
 The generated Backend client fragment uses the service aliases and container
 ports directly. Feed, Dionaea, host-auth, and web-access remain mediated by
 Gateway on port 8080; External control uses External Sources on port 8000.
-Tokens, HMAC verification, request bounds, timeouts, and explicit internal-HTTP
-allow settings are unchanged.
+Tokens, HMAC verification, request bounds, and timeouts are unchanged. Plain
+HTTP is explicitly allowed only for `EXTERNAL_CONTROL_API_URL` at
+`cti-external-control:8000` and for `EXTERNAL_FEED_URL` and `DIONAEA_API_URL` at
+`cti-gateway:8080`, because both hops are confined to the two internal pairwise
+Docker networks. The generated fragment sets exactly
+`EXTERNAL_CONTROL_ALLOW_HTTP=true`, `EXTERNAL_FEED_ALLOW_HTTP=true`, and
+`DIONAEA_API_ALLOW_HTTP=true` for those targets. Remote Tailscale clients retain
+HTTPS verification and `*_ALLOW_HTTP=false` as documented below.
 
 MISP is outside this migration. Its URL, certificate verification setting, and
 networks remain unchanged; if its existing route is unavailable, health must

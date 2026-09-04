@@ -49,6 +49,13 @@ remains owned by transfer path
 overrides must preserve those values and `/opt/cti-platform/current` is not its
 controller.
 
+For this VPS-local path only, Central Backend sets
+`EXTERNAL_CONTROL_ALLOW_HTTP=true`, `EXTERNAL_FEED_ALLOW_HTTP=true`, and
+`DIONAEA_API_ALLOW_HTTP=true`. Their URLs are fixed respectively to
+`cti-external-control:8000` and `cti-gateway:8080` on the isolated internal
+networks. Credentials, HMAC checks, timeouts, MISP, and Wazuh remain unchanged;
+the remote Tailscale profile continues to require HTTPS and disallow HTTP.
+
 ## Deployment procedure
 
 1. Transfer a versioned Git archive of the tracked project files; build large images directly on the VPS.
