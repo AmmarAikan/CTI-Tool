@@ -63,3 +63,28 @@ Last updated: 2026-09-06 (Asia/Riyadh)
 - The transferred PostgreSQL and uploads Volumes remain the persistence
   anchors; prior release and rollback images remain available.
 - Do not run a second External Feed pull while another pipeline run is active.
+
+## Continuation note (2026-09-06 01:40 Asia/Riyadh)
+
+The production cutover is complete. The only in-progress operation at this
+checkpoint is the normal server-side External Sources collection/publish job
+started automatically when its persistent systemd timer was re-enabled. This
+is not a Central Backend/BERT pull and does not make the deployment incomplete.
+Do not stop it, restart Docker, or start a duplicate collection.
+
+The next operator should only:
+
+1. Check `systemctl is-active cti-external-collection.service` until it reports
+   `inactive` or `failed`; do not poll the Central pull endpoint.
+2. If inactive, inspect the last sanitized journal lines and confirm the publish
+   completed, then verify `cti-external-collection.timer` is enabled/active and
+   has a future trigger in `systemctl list-timers`.
+3. If failed, diagnose the unit and External Sources logs without restarting
+   Backend, PostgreSQL, or deleting any Volume.
+
+Do not repeat the immediate External Feed verification: run
+`804ea504-a93e-4778-a936-a07b0fb87568` already proved
+`not_modified=true` with zero collected, processed, stored, and failed counts.
+Runtime code is commit `5d4991d`; documentation head is `05f10e6` on
+`codex/vps-production-integration`. The active release, rollback checkpoint,
+and previous release are recorded above and on the VPS.
