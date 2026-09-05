@@ -18,14 +18,17 @@ Last updated: 2026-09-05 (Asia/Riyadh)
 - Root-only integration fragments replace the former user-specific handoff.
 - Production Compose, pre-deployment database dump, image rollback, and
   Tailscale Serve scripts added.
+- Existing PostgreSQL/upload Volumes and database/egress networks are declared
+  as mandatory external resources so cutover cannot create an empty database.
 - Frontend container build requires TypeScript lint, Vitest, and production
   build to pass before an image is created.
 - VPS-only architecture and operations documentation synchronized.
 - Targeted Backend/topology/deployment tests pass.
+- VPS candidate tests pass by service boundary: Central Backend 93, External
+  Sources 191, and Frontend 13 plus TypeScript and production build.
 
 ## Pending before completion
 
-- Run full repository tests and Frontend test/build on the VPS candidate.
 - Push the integration branch and create an immutable VPS release.
 - Migrate the existing secret file to `/etc/cti-platform/central.env` without
   printing or changing secret values.

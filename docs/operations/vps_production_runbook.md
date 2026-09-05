@@ -21,10 +21,18 @@ CTI_BACKEND_PORT=18000
 CTI_FRONTEND_PORT=18080
 CTI_NER_MODEL_DIR=/opt/cti-backend-transfers/20260903-v1/cti-backend-20260903-v1/model
 CTI_NER_REPORT_DIR=/opt/cti-backend-transfers/20260903-v1/cti-backend-20260903-v1/reports
+CTI_POSTGRES_VOLUME=cti-backend-20260903-v1_database
+CTI_UPLOADS_VOLUME=cti-backend-20260903-v1_uploads
+CTI_DATABASE_NETWORK=cti-backend-20260903-v1_database
+CTI_EGRESS_NETWORK=cti-backend-20260903-v1_egress
 ```
 
 The same file must retain the existing `POSTGRES_*`, `JWT_SECRET`, and bootstrap
 values. Never replace them with example values.
+
+The four existing resource names are mandatory migration anchors. The deployment
+fails closed if any named Volume or network is missing; it must never create an
+empty replacement PostgreSQL Volume.
 
 `deploy_stack.sh` generates
 `/opt/cti-platform/clients/backend-integrations.env`. `deploy_misp.sh` generates

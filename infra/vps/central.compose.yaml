@@ -12,6 +12,10 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    networks: !override
+      - database
+    volumes: !override
+      - database:/var/lib/postgresql/data
 
   backend:
     image: cti-central-backend:current
@@ -34,9 +38,24 @@ services:
     ports: !override
       - "127.0.0.1:${CTI_BACKEND_PORT:-18000}:8000"
     volumes: !override
-      - cti_uploads:/app/data/uploads
+      - uploads:/app/data/uploads
       - ${CTI_NER_MODEL_DIR:?Set CTI_NER_MODEL_DIR}:/app/ml/models/dnrti_bert_ner:ro
       - ${CTI_NER_REPORT_DIR:?Set CTI_NER_REPORT_DIR}:/app/ml/reports:ro
+    networks: !override
+      database: {}
+      egress: {}
+      cti_backend_gateway:
+        aliases:
+          - cti-backend
+      cti_backend_external:
+        aliases:
+          - cti-backend
+      cti_backend_misp:
+        aliases:
+          - cti-backend
+      frontend_backend:
+        aliases:
+          - backend
     logging:
       driver: json-file
       options:
@@ -47,3 +66,23 @@ services:
     image: cti-central-frontend:current
     ports: !override
       - "127.0.0.1:${CTI_FRONTEND_PORT:-18080}:8080"
+
+  adminer:
+    networks: !override
+      - database
+
+networks:
+  database:
+    external: true
+    name: ${CTI_DATABASE_NETWORK:?Set CTI_DATABASE_NETWORK}
+  egress:
+    external: true
+    name: ${CTI_EGRESS_NETWORK:?Set CTI_EGRESS_NETWORK}
+
+volumes:
+  database:
+    external: true
+    name: ${CTI_POSTGRES_VOLUME:?Set CTI_POSTGRES_VOLUME}
+  uploads:
+    external: true
+    name: ${CTI_UPLOADS_VOLUME:?Set CTI_UPLOADS_VOLUME}

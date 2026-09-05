@@ -29,6 +29,10 @@ def render_production() -> dict:
             "CTI_COMPOSE_PROJECT_NAME": "cti-test",
             "CTI_NER_MODEL_DIR": str(ROOT / "ml" / "models" / "dnrti_bert_ner"),
             "CTI_NER_REPORT_DIR": str(ROOT / "ml" / "reports"),
+            "CTI_POSTGRES_VOLUME": "cti-test-database",
+            "CTI_UPLOADS_VOLUME": "cti-test-uploads",
+            "CTI_DATABASE_NETWORK": "cti-test-database",
+            "CTI_EGRESS_NETWORK": "cti-test-egress",
         }
     )
     completed = subprocess.run(
@@ -78,6 +82,19 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertEqual(backend["cap_drop"], ["ALL"])
         self.assertEqual(backend["environment"]["CTI_APP_ENV"], "production")
 
+    def test_existing_database_resources_are_external_and_preserved(self) -> None:
+        self.assertEqual(self.compose["volumes"]["database"]["name"], "cti-test-database")
+        self.assertTrue(self.compose["volumes"]["database"]["external"])
+        self.assertEqual(self.compose["volumes"]["uploads"]["name"], "cti-test-uploads")
+        self.assertTrue(self.compose["volumes"]["uploads"]["external"])
+        self.assertEqual(self.compose["networks"]["database"]["name"], "cti-test-database")
+        self.assertTrue(self.compose["networks"]["database"]["external"])
+        self.assertEqual(self.compose["networks"]["egress"]["name"], "cti-test-egress")
+        self.assertTrue(self.compose["networks"]["egress"]["external"])
+        backend_networks = self.compose["services"]["backend"]["networks"]
+        self.assertIn("database", backend_networks)
+        self.assertIn("egress", backend_networks)
+
     def test_deploy_backs_up_and_validates_database_before_runtime_cutover(self) -> None:
         backup = self.deploy.index("pg_dump -Fc")
         validate = self.deploy.index("pg_restore --list")
@@ -89,6 +106,8 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertNotIn(" down", self.deploy)
         self.assertNotIn("volume rm", self.deploy)
         self.assertNotIn("POSTGRES_PASSWORD", self.deploy)
+        self.assertIn('docker volume inspect "${volume_name}"', self.deploy)
+        self.assertIn('docker network inspect "${network_name}"', self.deploy)
 
     def test_rollback_never_restores_or_replaces_postgresql(self) -> None:
         self.assertIn("PostgreSQL was not replaced", self.rollback)

@@ -32,6 +32,10 @@ backend_port=$(read_env_value "${central_env}" CTI_BACKEND_PORT)
 frontend_port=$(read_env_value "${central_env}" CTI_FRONTEND_PORT)
 model_dir=$(read_env_value "${central_env}" CTI_NER_MODEL_DIR)
 report_dir=$(read_env_value "${central_env}" CTI_NER_REPORT_DIR)
+postgres_volume=$(read_env_value "${central_env}" CTI_POSTGRES_VOLUME)
+uploads_volume=$(read_env_value "${central_env}" CTI_UPLOADS_VOLUME)
+database_network=$(read_env_value "${central_env}" CTI_DATABASE_NETWORK)
+egress_network=$(read_env_value "${central_env}" CTI_EGRESS_NETWORK)
 project_name=${project_name:-cti-central}
 backend_port=${backend_port:-18000}
 frontend_port=${frontend_port:-18080}
@@ -48,6 +52,18 @@ if [[ ! -s "${model_dir}/model.safetensors" || ! -d "${report_dir}" ]]; then
   echo "The configured NER model or report directory is incomplete" >&2
   exit 1
 fi
+for volume_name in "${postgres_volume}" "${uploads_volume}"; do
+  if [[ -z "${volume_name}" ]] || ! docker volume inspect "${volume_name}" >/dev/null 2>&1; then
+    echo "Required existing Docker volume is unavailable" >&2
+    exit 1
+  fi
+done
+for network_name in "${database_network}" "${egress_network}"; do
+  if [[ -z "${network_name}" ]] || ! docker network inspect "${network_name}" >/dev/null 2>&1; then
+    echo "Required existing Central Backend network is unavailable" >&2
+    exit 1
+  fi
+done
 
 compose=(
   docker compose
