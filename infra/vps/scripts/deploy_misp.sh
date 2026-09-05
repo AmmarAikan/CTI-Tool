@@ -77,6 +77,28 @@ EOF
 fi
 chmod 0600 "${misp_env}"
 
+# The Central Backend reaches MISP over a dedicated same-host internal bridge.
+# Keep HTTPS for operator access, but do not redirect this allow-listed internal
+# HTTP hop to MISP's localhost-only self-signed certificate.
+temporary_env=$(mktemp /etc/cti-platform/.misp.env.XXXXXX)
+trap 'rm -f "${temporary_env}"' EXIT
+awk '
+  BEGIN { updated = 0 }
+  { sub(/\r$/, "") }
+  /^DISABLE_SSL_REDIRECT=/ {
+    if (!updated) {
+      print "DISABLE_SSL_REDIRECT=true"
+      updated = 1
+    }
+    next
+  }
+  { print }
+  END {
+    if (!updated) print "DISABLE_SSL_REDIRECT=true"
+  }
+' "${misp_env}" >"${temporary_env}"
+install -o root -g root -m 0600 "${temporary_env}" "${misp_env}"
+
 compose=(docker compose --env-file "${misp_env}" -f "${misp_root}/docker-compose.yml" -f "${override_file}")
 images_ready=false
 for _attempt in $(seq 1 3); do

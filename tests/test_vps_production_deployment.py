@@ -125,6 +125,7 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertIn("MISP_URL=http://cti-misp", self.deploy_misp)
         self.assertIn("MISP_ALLOW_HTTP=true", self.deploy_misp)
         self.assertIn("MISP_VERIFY_TLS=true", self.deploy_misp)
+        self.assertIn('print "DISABLE_SSL_REDIRECT=true"', self.deploy_misp)
         self.assertNotIn("MISP_VERIFY_TLS=false", self.deploy_misp)
 
     def test_frontend_image_runs_quality_gates_before_build(self) -> None:

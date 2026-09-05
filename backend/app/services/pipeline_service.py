@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import requests
 from sqlalchemy import select
@@ -48,6 +49,22 @@ class PipelineService:
     @staticmethod
     def integration_status() -> dict[str, Any]:
         settings = get_settings()
+        external_control_host = urlparse(
+            str(settings.external_control_api_url or "")
+        ).hostname
+        if external_control_host == "cti-external-control":
+            external_control_deployment = "vps_internal"
+            external_control_transport = "docker_internal_http"
+        elif external_control_host in {"localhost", "127.0.0.1", "::1"}:
+            external_control_deployment = "vps_loopback"
+            external_control_transport = (
+                "ssh_tunnel" if settings.external_control_allow_http else "https"
+            )
+        else:
+            external_control_deployment = "remote_private"
+            external_control_transport = (
+                "http" if settings.external_control_allow_http else "https"
+            )
         return {
             "external_feed": {
                 "configured": settings.external_feed_configured,
@@ -56,9 +73,9 @@ class PipelineService:
             },
             "external_control_api": {
                 "configured": settings.external_control_configured,
-                "deployment_status": "vps_loopback",
+                "deployment_status": external_control_deployment,
                 "tls_verification": settings.external_control_verify_tls,
-                "transport": "ssh_tunnel" if settings.external_control_allow_http else "https",
+                "transport": external_control_transport,
             },
             "wazuh_indexer": {
                 "configured": settings.wazuh_indexer_configured,
