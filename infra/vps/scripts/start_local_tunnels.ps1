@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KeyPath,
 
-    [string]$SshUser = "ammar",
+    [string]$SshUser = "root",
 
     [ValidateRange(1, 65535)]
     [int]$RemotePort = 22,

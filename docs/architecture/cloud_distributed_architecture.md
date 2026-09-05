@@ -1,115 +1,135 @@
-# Implemented Hybrid Cloud Backend Architecture
+# Implemented VPS-Only CTI Architecture
 
 ## Current decision
 
-The graduation project uses a two-node, cost-aware hybrid architecture. Heavy ML and the central database remain on Ammar's computer. Internet-facing External collection, internal sensors, the private Gateway, and CTI sharing run continuously on the VPS. No collaborator computer is an operational dependency.
+The graduation platform has one production runtime: the VPS. A personal or
+collaborator computer may be used for source review and emergency diagnostics,
+but it does not host FastAPI, PostgreSQL, DNRTI models, collectors, or the
+frontend.
+
+The design follows the processing lifecycle in *AI-Based Holistic Framework for
+Cyber Threat Intelligence Management*: gather internal and external evidence,
+apply privacy and relevance controls, extract IoCs/IoAs and entities, correlate,
+store centrally, and share selected intelligence through MISP. It also adopts
+the useful OpenCTI connector boundary: collectors produce a versioned handoff;
+only the central platform writes authoritative CTI state. OpenCTI itself,
+Elasticsearch, RabbitMQ, MinIO, TheHive, Cortex, and Wazuh are not deployed.
 
 ```mermaid
 flowchart LR
-    Internet["Untrusted internet"] --> External["VPS External Sources\ncollect + privacy + versioned export"]
-    External -->|"scheduled validated JSON publish"| Gateway["VPS CTI Gateway\nCumulative feed + sensor API"]
-    Internet --> Dionaea["VPS Dionaea\npublic honeypot ports"]
-    Dionaea -->|"rotated JSON"| Gateway
-    SSHLog["VPS SSH journal collector"] --> Gateway
-    WebLog["Gateway access telemetry"] --> Gateway
-    Gateway -->|"Tailscale HTTPS + bearer + HMAC"| API["Ammar PC FastAPI"]
-    API -->|"Tailscale HTTPS; source control and jobs"| External
-    API --> BERT["DNRTI BERT primary\nsklearn secondary fallback"]
-    API --> PG["Local PostgreSQL\nraw + processed + audit"]
-    API -->|"Tailscale HTTPS; unpublished first"| MISP["VPS MISP 2.5.44"]
-    API --> STIX["STIX 2.1 / Frontend API"]
+    Operator["Authorized tailnet user"] --> TS["Tailscale Serve HTTPS"]
+    TS --> Frontend["Static Frontend + same-origin proxy"]
+    Frontend -->|"/api/v1"| API["Central FastAPI"]
+
+    Internet["Untrusted internet"] --> External["External Sources"]
+    External --> Gateway["CTI Gateway"]
+    Internet --> Dionaea["Dionaea honeypot"]
+    Dionaea --> Gateway
+    SSHLog["SSH journal collector"] --> Gateway
+    Gateway --> API
+    External --> API
+
+    API --> BERT["DNRTI BERT + Regex"]
+    API --> PG["PostgreSQL source of truth"]
+    API --> MISP["MISP review/sharing copy"]
 ```
 
-## Component ownership
+## Service and trust boundaries
 
-| Component | Location | Role |
+| Component | Role | Network boundary |
 |---|---|---|
-| External collectors | VPS loopback service | Collect, preprocess, privacy-filter, deduplicate within External scope, export versioned JSON, accept bounded private control jobs |
-| CTI Gateway | VPS loopback | Merge run exports into a bounded stable-identity snapshot, serve authenticated/HMAC feed and sensor pages, log safe web metadata |
-| Dionaea | VPS public sensor network | Capture selected hostile service interactions into JSON; no backend/MISP secret |
-| SSH journal collector | VPS host | Convert accepted/failed SSH authentication metadata into bounded JSONL without passwords |
-| FastAPI backend | Ammar PC | Validate, normalize, sessionize, extract, score, correlate, audit, expose APIs |
-| PostgreSQL | Ammar PC private Compose network | Central source of truth for raw and processed project data |
-| DNRTI models | Ammar PC | `dnrti_bert_ner` primary; `dnrti_sklearn_ner` secondary fallback |
-| MISP | VPS loopback | Unpublished sharing/review copy; not the application database |
+| Frontend | Static analyst UI and `/api/v1` reverse proxy | Loopback host port plus `frontend_backend` with Backend only |
+| Central Backend | Authentication, orchestration, validation, analysis, correlation, risk, STIX, MISP delivery | Loopback diagnostics and explicit pairwise networks |
+| PostgreSQL | Authoritative raw and processed CTI state | Compose-private; no published port |
+| External Sources | Collection, privacy, relevance, External-only deduplication, versioned export | Egress plus `cti-backend-external` with Backend only |
+| CTI Gateway | Bounded cumulative feed and sensor delivery using tokens, HMAC, pagination, checkpoints, ETag and GZip | `cti-backend-gateway` with Backend only |
+| MISP Core | Unpublished review/sharing copy; never the central database | Loopback HTTPS plus `cti-backend-misp` with Backend only |
+| Dionaea | Public honeypot evidence | Isolated sensor network; no Backend, database, or MISP secret |
 
-## External flow
+All end-user traffic enters through the Frontend. The browser never receives a
+Gateway, External Control, sensor, MISP, or PostgreSQL credential.
+
+## External processing flow
 
 ```text
-VPS External collectors
--> versioned JSON
--> scheduled loopback publisher
+bounded collection
 -> privacy and structural validation
--> cumulative stable-identity snapshot
--> ETag/HMAC authenticated backend pull
--> raw_items
--> skip database-unchanged records
 -> relevance classification
--> BERT NER + Regex IoCs + prototype relationships
--> unified threat_events
--> correlations/risk/STIX/MISP/API
+-> versioned run export
+-> cumulative stable-identity Gateway snapshot
+-> authenticated HMAC pull
+-> database unchanged-record filter
+-> DNRTI BERT + Regex + relationship extraction
+-> correlation/risk/STIX
+-> PostgreSQL
+-> optional unpublished MISP delivery
 ```
 
-The Gateway removes metadata keys containing token, secret, password, authorization, cookie, or API-key semantics before storing the exchange artifact. It retains previous run records when new incremental exports arrive, updating matching stable identities atomically. A repeated unchanged pull is answered with HTTP 304 and produces a completed zero-record pipeline run; a changed snapshot sends only new or semantically changed records through BERT after PostgreSQL comparison.
+The Gateway is a delivery boundary, not a second CTI database. A repeated
+snapshot uses ETag/HTTP 304 and must create a completed zero-processing run.
+Changed snapshots send only new or semantically changed records to BERT.
 
-## Internal flow
+This is conceptually similar to OpenCTI's external-import connectors producing
+STIX bundles for platform workers, but the graduation project retains its own
+versioned JSON handoff and PostgreSQL schema. Introducing a broker is deferred
+until measured concurrency requires an asynchronous Analysis Worker.
+
+## Internal processing flow
 
 ```text
-Dionaea JSON / SSH auth JSON / Gateway web JSON
--> authenticated HMAC sensor endpoint
+Dionaea JSON / SSH authentication JSON / Gateway web JSON
+-> authenticated HMAC sensor pages
 -> raw_items
--> 30-minute sessions
--> numeric session features
--> Isolation Forest (or labelled small-batch fallback)
--> retain all sessions
--> promote outlier sessions only to threat_events
+-> sessions and numeric features
+-> outlier decision
+-> promote outliers only
+-> threat_events / indicators / entities / relationships
 ```
 
-The final acceptance database retained 169 sessions: 19 promoted outliers and 150 non-threat sessions. This proves the backend does not treat every log line as a threat.
+Wazuh is intentionally disabled. Its connector remains tested optional code and
+historical sample data must remain distinguishable from live VPS evidence.
 
 ## MISP flow
 
-The backend maps CTI indicators to MISP types, creates a deterministic event UUID, keeps `published=false`, adds each missing attribute, reads the event back, and fails the API call if any requested indicator is absent. Time bounds are normalized so `first_seen <= last_seen`. A repeated send finds the existing event and adds zero attributes.
+Backend and MISP Core share only the internal `cti-backend-misp` network.
+Backend calls `http://cti-misp` with `MISP_ALLOW_HTTP=true`; the client rejects
+all other non-loopback HTTP hosts. This avoids incorrectly trusting MISP's
+localhost-only origin certificate while keeping the hop inside one isolated
+same-host bridge. Tailnet operators still use Tailscale HTTPS.
 
-PostgreSQL remains authoritative. MISP contains a controlled sharing copy and future analyst-approved publications.
+MISP delivery uses deterministic event and attribute UUIDs, defaults to
+`published=false`, inserts only missing attributes, reads the event back, and
+fails if requested indicators are absent. PostgreSQL remains authoritative.
 
-## Trust and network boundaries
+## NER runtime decision
 
-### Ammar computer to VPS
+DNRTI BERT remains in the Central Backend for the current load. The model is a
+read-only external artifact mounted into the container and loaded once per
+process. It becomes a separate Analysis Worker only after measurements show API
+contention. That future boundary requires a durable job contract, idempotency,
+bounded retries, queue depth monitoring, and single-writer central persistence.
 
-- Tailscale/WireGuard is the primary private data path; the observed two-node route is direct UDP rather than a relay.
-- Tailscale Serve exposes valid HTTPS only inside the tailnet and Funnel remains disabled.
-- SSH key authentication only; password and keyboard-interactive login are disabled, and local forwarding remains a recovery fallback.
-- Gateway, External control, and MISP stay bound to VPS loopback behind the tailnet-only proxy.
-- Read, control, sensor, and MISP credentials remain independently scoped.
-- Client secret fragments are ignored by Git.
-- The External control API is bound to VPS `127.0.0.1:8090` and served to the tailnet on HTTPS `8444`; the recovery forward remains Ammar's local `127.0.0.1:18090`.
+## Private access and recovery
 
-### Honeypot boundary
+- Tailscale Serve HTTPS is the normal operator path; Funnel remains disabled.
+- Backend, Frontend, Gateway, External Control, MISP, and PostgreSQL have no
+  public application ports.
+- Selected Dionaea honeypot ports and SSH are the only intended public ingress.
+- SSH local forwarding remains diagnostic fallback and never hosts Backend or
+  PostgreSQL on an operator computer.
+- Runtime secrets are root-only under `/etc/cti-platform` and
+  `/opt/cti-platform/clients`; they are never committed.
 
-- Dionaea has no Docker socket, host filesystem, MISP key, PostgreSQL credential, or personal-LAN route.
-- Separate Docker networks use fixed subnets and inter-container communication is disabled.
-- `DOCKER-USER` permits established replies and drops new outbound connections from sensor/gateway subnets.
-- Public ports are selected honeypot ports only.
+## Acceptance boundary
 
-Containers still share the VPS kernel. This is acceptable for the cost-constrained graduation lab but is not equivalent to a separate physical honeypot host. A second disposable VPS remains recommended future work.
+A release is accepted only after verified PostgreSQL backup, healthy containers,
+authenticated login and `/auth/me`, dashboard/source rendering, all configured
+integration health checks, BERT inference, an unchanged External Feed pull with
+zero processing, MISP read health, reboot persistence, and a recorded
+application rollback checkpoint.
 
-## Wazuh decision
+## Primary references
 
-Wazuh Manager/Indexer/Dashboard are not deployed. On a 12 GB server, MISP plus the Gateway and public sensor provide more project value with lower operational risk. The existing Wazuh file/Indexer connector remains tested optional code and historical Wazuh sample rows remain clearly distinguishable from live VPS sources.
-
-## Validation boundary
-
-Live acceptance currently covers:
-
-- hardened SSH and host firewall;
-- healthy Gateway, Dionaea, MISP Core, MariaDB, Valkey/Redis, and MISP Modules;
-- healthy VPS External Sources control service and scheduled publish path;
-- live External publish/pull and HTTP 304 repeat;
-- live Dionaea, SSH-auth, and web sensor pulls;
-- PostgreSQL raw/processed separation and outlier-only promotion;
-- BERT runtime and saved held-out metrics;
-- correlation and STIX export;
-- unpublished, verified, idempotent MISP delivery.
-
-It does not claim high availability, production PKI/domain exposure, a separate honeypot kernel, off-host restore proof, Wazuh deployment, live Onion collection, or enterprise SOC scale.
+- A. Spyros et al., *AI-Based Holistic Framework for Cyber Threat Intelligence Management*, IEEE Access, DOI `10.1109/ACCESS.2025.3533084`.
+- OpenCTI platform: <https://github.com/OpenCTI-Platform/opencti>
+- OpenCTI connector architecture: <https://github.com/OpenCTI-Platform/opencti/blob/master/docs/docs/deployment/connectors.md>

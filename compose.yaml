@@ -30,6 +30,7 @@ services:
       MISP_URL: ${MISP_URL:-}
       MISP_API_KEY: ${MISP_API_KEY:-}
       MISP_VERIFY_TLS: ${MISP_VERIFY_TLS:-true}
+      MISP_ALLOW_HTTP: ${MISP_ALLOW_HTTP:-false}
       EXTERNAL_FEED_URL: ${EXTERNAL_FEED_URL:-}
       EXTERNAL_FEED_TOKEN: ${EXTERNAL_FEED_TOKEN:-}
       EXTERNAL_FEED_HMAC_SECRET: ${EXTERNAL_FEED_HMAC_SECRET:-}
@@ -101,6 +102,12 @@ services:
       cti_backend_external:
         aliases:
           - cti-backend
+      cti_backend_misp:
+        aliases:
+          - cti-backend
+      frontend_backend:
+        aliases:
+          - backend
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -108,6 +115,42 @@ services:
       - ./ml/models/dnrti_bert_ner:/app/ml/models/dnrti_bert_ner:ro
       - ./ml/reports:/app/ml/reports:ro
       - dionaea_data:/data/dionaea:ro
+
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+
+  frontend:
+    build:
+      context: ./frontend
+    image: cti-frontend:1.0.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.50
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - frontend_backend
+    ports:
+      - "127.0.0.1:18080:8080"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   adminer:
     profiles: ["database-ui"]
@@ -148,6 +191,11 @@ networks:
   cti_backend_external:
     external: true
     name: cti-backend-external
+  cti_backend_misp:
+    external: true
+    name: cti-backend-misp
+  frontend_backend:
+    internal: true
 
 volumes:
   cti_postgres_data:

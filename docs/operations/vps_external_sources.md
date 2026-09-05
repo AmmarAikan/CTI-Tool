@@ -4,7 +4,7 @@
 
 External Sources runs continuously on the VPS instead of depending on a collaborator computer. The canonical collectors, preprocessing, privacy checks, External-only deduplication, review records, and versioned export remain unchanged. The deployment changes only their runtime location and transport.
 
-The VPS service is bound to `127.0.0.1:8090`. It is never a public collector API. Ammar's authenticated FastAPI backend reaches it through tailnet-only Tailscale Serve HTTPS on port `8444`; SSH forwarding on local port `18090` remains a recovery fallback. The frontend uses only the central FastAPI routes.
+The VPS service is bound to `127.0.0.1:8090`. It is never a public collector API. Central Backend reaches it directly as `cti-external-control` through the pairwise internal `cti-backend-external` Docker network. Tailscale HTTPS on port `8444` and SSH forwarding on local port `18090` are diagnostic recovery paths only. The frontend uses only Central Backend routes.
 
 ## Data flow
 
@@ -13,8 +13,8 @@ VPS External Sources
 -> validated run-scoped JSON export
 -> scheduled host publisher
 -> VPS Gateway cumulative, deduplicated snapshot
--> Tailscale/WireGuard HTTPS + Bearer + HMAC
--> Ammar FastAPI
+-> pairwise internal Docker network + Bearer + HMAC
+-> VPS Central FastAPI
 -> BERT / Regex / PostgreSQL / correlation / STIX / MISP
 ```
 
@@ -85,7 +85,7 @@ Registered scheduled sources remain committed in `config/sources.json` so change
 
 ## Secrets
 
-`/etc/cti-platform/vps.env` contains the External control token and existing Gateway secrets with mode `0600`. Ammar receives a generated client fragment containing only the read/control values required by the local backend. The obsolete collaborator publisher fragment is removed.
+`/etc/cti-platform/vps.env` contains the External control token and Gateway secrets with mode `0600`. The deployment generates `/opt/cti-platform/clients/backend-integrations.env`, also root-only, containing only the read/control values required by the same-host Central Backend. No client fragment is transferred to a personal computer.
 
 Never commit `/etc/cti-platform/vps.env`, `.vps-client.env`, any future real Onion configuration, or provider credentials.
 

@@ -1,6 +1,6 @@
-# CTI Hybrid VPS Operations
+# CTI VPS-Only Production Operations
 
-This directory contains the project-owned deployment for the graduation lab. Large images and upstream MISP source are downloaded and built on the VPS; only these small configuration files and scripts are transferred from a developer computer.
+This directory contains the project-owned deployment for the graduation lab. Source, large images, MISP, Central Backend, PostgreSQL, DNRTI models, and the production frontend are built or operated on the VPS. A personal computer is not a runtime dependency.
 
 ## Deployed boundary
 
@@ -8,7 +8,7 @@ This directory contains the project-owned deployment for the graduation lab. Lar
 - Public sensor: Dionaea on selected honeypot ports.
 - Private services: CTI Gateway on `127.0.0.1:8088`; External Sources control on `127.0.0.1:8090`; MISP HTTP/HTTPS on `127.0.0.1:8080/8443`.
 - Lightweight internal telemetry: Dionaea JSON, SSH journal events, and gateway web-access JSON.
-- Local Ammar PC: FastAPI, PostgreSQL, DNRTI BERT primary model, sklearn fallback, correlation, risk, and final CTI API.
+- VPS Central Platform: FastAPI, PostgreSQL, DNRTI BERT primary model, sklearn fallback, correlation, risk, production frontend, and final CTI API.
 - VPS External Sources: canonical collectors, privacy/classification, versioned export, and a scheduled loopback publisher.
 - Wazuh is not deployed in the current 12 GB VPS design. Its connector remains optional code only.
 - Live Onion collection is not enabled: the current VPS has no Tor proxy or approved operational Onion list, so no placeholder dark-web configuration is mounted.
@@ -20,11 +20,15 @@ MISP, Gateway, and External control are never exposed publicly or bound to a pub
 - `compose.yaml`: Gateway, VPS External Sources, and Dionaea.
 - `gateway/`: authenticated feed/sensor API with HMAC, ETag, cursor, bounds, redaction, cumulative stable-identity feed merging, and structured web telemetry.
 - `collectors/`: lightweight SSH journal collector.
-- `misp/compose.override.yaml`: resource limits and loopback-only ports over the official MISP Compose project.
+- `central.compose.yaml`: hardened VPS production overrides for Backend, PostgreSQL, model mounts, and Frontend.
+- `misp/compose.override.yaml`: resource limits, loopback-only ports, and the pairwise Backend-to-MISP network over the official MISP Compose project.
 - `scripts/bootstrap_host.sh`: host hardening and Docker prerequisites.
 - `scripts/deploy_stack.sh`: builds and starts Gateway/External Sources/Dionaea and installs their timers on the VPS.
 - `scripts/deploy_misp.sh`: pins and starts MISP and creates a least-privilege backend client fragment.
-- `scripts/start_local_tunnels.ps1`: starts the three Windows SSH forwards for emergency fallback.
+- `scripts/deploy_central_stack.sh`: validates configuration, verifies a PostgreSQL dump, builds Backend/Frontend, and records a rollback checkpoint.
+- `scripts/rollback_central_stack.sh`: restores the previous application images without replacing PostgreSQL.
+- `scripts/configure_tailscale_serve.sh`: exposes the frontend and private diagnostic services to the tailnet; Funnel stays disabled.
+- `scripts/start_local_tunnels.ps1`: optional Windows SSH diagnostic forwards for emergency access.
 - `systemd/`, `logrotate/`, `sysctl/`: timers, firewall persistence, log rotation, and the documented IPv4-only registry workaround.
 
 ## First deployment
@@ -35,29 +39,33 @@ Use a versioned release directory such as `/opt/cti-platform/releases/<release-i
 /opt/cti-platform/current/infra/vps/scripts/bootstrap_host.sh
 /opt/cti-platform/current/infra/vps/scripts/deploy_stack.sh /opt/cti-platform/current
 /opt/cti-platform/current/infra/vps/scripts/deploy_misp.sh /opt/cti-platform/current
+/opt/cti-platform/current/infra/vps/scripts/deploy_central_stack.sh /opt/cti-platform/current
+/opt/cti-platform/current/infra/vps/scripts/configure_tailscale_serve.sh
 ```
 
-The scripts generate secrets under `/etc/cti-platform/` with root-only permissions. Never copy those files into Git. They create scoped client fragments under `/opt/cti-platform/clients/` for secure transfer to the intended machine.
+The scripts generate secrets under `/etc/cti-platform/` and scoped same-host integration fragments under `/opt/cti-platform/clients/`, all with root-only permissions. Never copy them into Git or transfer them to a personal computer.
 
 MISP is cloned directly on the VPS at pinned commit `223b675c4480730832f928e113b6f2e5260b450d` and uses `misp-core:v2.5.44-slim` and `misp-modules:v3.0.9-slim`. The images are pulled on the VPS, not uploaded from a personal computer.
 
 ## VPS-local Central Backend networks
 
-Gateway and External Sources use two independently provisioned internal bridge
-networks when Central Backend runs on the same VPS:
+Gateway, External Sources, and MISP use three independently provisioned internal
+bridge networks with Central Backend:
 
 - `cti-backend-gateway`: Central Backend (`cti-backend`) and Gateway
   (`cti-gateway`) only.
 - `cti-backend-external`: Central Backend (`cti-backend`) and External Sources
   (`cti-external-control`) only.
+- `cti-backend-misp`: Central Backend (`cti-backend`) and MISP Core
+  (`cti-misp`) only.
 
 Both Compose projects declare these networks as external. The dedicated
 `scripts/provision_backend_networks.sh` entry point creates them idempotently,
 rejects Docker inspection failures, refuses incompatible networks, and rejects
 unauthorized or duplicate attached service roles. `bootstrap_host.sh` calls this
 entry point for new hosts; existing hosts call it directly without rerunning host
-hardening. Database, Redis, Tor, Dionaea, MISP, and MISP
-Modules must never join either network.
+hardening. Database, Redis, Tor, Dionaea, and MISP Modules must never join these
+networks. MISP Core joins only `cti-backend-misp`.
 
 The generated Backend client fragment uses the service aliases and container
 ports directly. Feed, Dionaea, host-auth, and web-access remain mediated by
@@ -71,9 +79,9 @@ Docker networks. The generated fragment sets exactly
 `DIONAEA_API_ALLOW_HTTP=true` for those targets. Remote Tailscale clients retain
 HTTPS verification and `*_ALLOW_HTTP=false` as documented below.
 
-MISP is outside this migration. Its URL, certificate verification setting, and
-networks remain unchanged; if its existing route is unavailable, health must
-continue to report it as configured but disconnected. Wazuh remains
+MISP uses `http://cti-misp` only inside `cti-backend-misp`. The Backend requires
+`MISP_ALLOW_HTTP=true` and rejects any non-loopback/non-`cti-misp` HTTP host.
+Tailnet clients still receive HTTPS from Tailscale Serve. Wazuh remains
 unconfigured.
 
 The Tailscale and SSH sections below describe remote-client and recovery paths.
@@ -135,42 +143,26 @@ sudo docker compose -p cti-backend-20260903-v1 \
 The rendered model must retain `127.0.0.1:18000:8000` before the second command
 is authorized.
 
-## Primary Tailscale path and backend
+## Primary Tailscale frontend path
 
-Install Tailscale on the VPS and Ammar's Windows computer, join both to the same tailnet, and enable unattended mode on Windows. Keep Funnel disabled. On the VPS, expose only the existing loopback services to the tailnet:
+Join authorized operator devices and the VPS to the same tailnet. Keep Funnel disabled. The default HTTPS endpoint serves the production frontend; the remaining endpoints are private diagnostics:
 
 ```bash
-tailscale serve --bg --https=443 http://127.0.0.1:8088
+tailscale serve --bg --https=443 http://127.0.0.1:18080
 tailscale serve --bg --https=8444 http://127.0.0.1:8090
 tailscale serve --bg --https=8443 https+insecure://127.0.0.1:8443
+tailscale serve --bg --https=8445 http://127.0.0.1:8088
 tailscale serve status
 ```
 
-The `https+insecure` target is limited to the VPS loopback hop to MISP's private certificate. Clients still validate the Tailscale-issued HTTPS certificate. Use the VPS MagicDNS name in ignored client fragments:
-
-```text
-EXTERNAL_FEED_URL=https://<VPS_TAILNET_DNS>/api/v1/external-feed
-EXTERNAL_CONTROL_API_URL=https://<VPS_TAILNET_DNS>:8444/api/v1/external-sources
-DIONAEA_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/dionaea
-HOST_AUTH_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/host-auth
-WEB_ACCESS_API_URL=https://<VPS_TAILNET_DNS>/api/v1/sensors/web-access
-MISP_URL=https://<VPS_TAILNET_DNS>:8443
-```
-
-Keep every `*_VERIFY_TLS=true` and every `*_ALLOW_HTTP=false`. Then start the local backend:
-
-```powershell
-tailscale ping <VPS_TAILNET_DNS>
-docker compose --env-file .env --env-file .vps-client.env --env-file .misp-client.env up -d --build db backend
-```
+The `https+insecure` target is limited to the VPS loopback hop to MISP's private certificate. Tailnet clients still validate the Tailscale-issued certificate. Gateway, External Control, and MISP do not sit on the end-user request path; the frontend talks only to Central Backend through same-origin `/api/v1`.
 
 ## SSH recovery fallback
 
-From PowerShell:
+From an authorized operator computer, these forwards are diagnostics only and never host the Backend:
 
 ```powershell
 .\infra\vps\scripts\start_local_tunnels.ps1 -ServerHost <VPS_IP> -KeyPath <SSH_KEY_PATH>
-docker compose --env-file .env --env-file .vps-client.env --env-file .misp-client.env up -d --build db backend
 ```
 
 Forwarding is:
@@ -179,7 +171,7 @@ Forwarding is:
 - `127.0.0.1:18090` -> VPS `127.0.0.1:8090` for External source control/jobs.
 - `127.0.0.1:18443` -> VPS `127.0.0.1:8443` for MISP.
 
-Use these forwards only if Tailscale is unavailable. After Windows sleep, network changes, or a server restart, rerun the tunnel script. It refuses to replace an occupied port, waits up to 90 seconds for a slow SSH handshake, and enables SSH compression. `-RemotePort` exists for authorized recovery listeners; normal operation remains `ammar` on port `22`.
+Use these forwards only if Tailscale is unavailable. The script refuses to replace an occupied port, waits up to 90 seconds for a slow SSH handshake, and enables SSH compression. `-RemotePort` exists for authorized recovery listeners; the default operator is `root` on port `22`.
 
 ## Public and private ports
 
@@ -199,7 +191,7 @@ docker ps
 systemctl is-active cti-ssh-collector.timer cti-external-collection.timer cti-storage-maintenance.timer cti-docker-firewall.service
 ```
 
-On Ammar's PC, use the authenticated FastAPI endpoints:
+Through the private production frontend or a root-only VPS diagnostic session, use the authenticated FastAPI endpoints:
 
 ```text
 /api/v1/integrations/status

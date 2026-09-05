@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Any, ClassVar
+from urllib.parse import urlparse
 
 import requests
 
@@ -10,6 +11,9 @@ from backend.app.core.config import get_settings
 
 
 class MISPClient:
+    INTERNAL_HTTP_HOSTS: ClassVar[frozenset[str]] = frozenset(
+        {"cti-misp", "localhost", "127.0.0.1", "::1"}
+    )
     NAMESPACE: ClassVar[uuid.UUID] = uuid.UUID("ef1932f8-50d6-4d34-b4d7-d4e2965706ac")
     ATTRIBUTE_TYPES: ClassVar[dict[str, tuple[str, str, bool]]] = {
         # Extraction proves observation, not maliciousness. Analysts or an
@@ -32,6 +36,7 @@ class MISPClient:
         base_url: str | None = None,
         api_key: str | None = None,
         verify_tls: bool | None = None,
+        allow_http: bool | None = None,
         timeout: int | None = None,
         session: requests.Session | None = None,
     ) -> None:
@@ -39,8 +44,10 @@ class MISPClient:
         self.base_url = (base_url or settings.misp_url or "").rstrip("/")
         self.api_key = api_key or settings.misp_api_key
         self.verify_tls = settings.misp_verify_tls if verify_tls is None else verify_tls
+        self.allow_http = settings.misp_allow_http if allow_http is None else allow_http
         self.timeout = timeout or settings.misp_timeout_seconds
         self.session = session or requests.Session()
+        self._validate_url()
 
     @property
     def configured(self) -> bool:
@@ -208,6 +215,20 @@ class MISPClient:
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": str(self.api_key), "Accept": "application/json", "Content-Type": "application/json"}
+
+    def _validate_url(self) -> None:
+        if not self.base_url:
+            return
+        parsed = urlparse(self.base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("MISP_URL must be an absolute HTTP or HTTPS URL")
+        if parsed.username or parsed.password or parsed.query or parsed.fragment:
+            raise ValueError("MISP_URL must not contain credentials, a query, or a fragment")
+        if parsed.scheme == "http":
+            if not self.allow_http:
+                raise ValueError("MISP_URL must use HTTPS unless MISP_ALLOW_HTTP=true")
+            if parsed.hostname.lower() not in self.INTERNAL_HTTP_HOSTS:
+                raise ValueError("MISP HTTP is limited to the isolated cti-misp or loopback endpoint")
 
     def _find_event(self, event_uuid: str) -> dict[str, Any] | None:
         response = self.session.post(

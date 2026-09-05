@@ -1,0 +1,49 @@
+name: ${CTI_COMPOSE_PROJECT_NAME:-cti-central}
+
+services:
+  db:
+    restart: unless-stopped
+    mem_limit: 2g
+    cpus: 1.50
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: cti-central-backend:current
+    restart: unless-stopped
+    init: true
+    read_only: true
+    environment:
+      CTI_APP_ENV: production
+      HF_HOME: /tmp/huggingface
+      TRANSFORMERS_CACHE: /tmp/huggingface
+    tmpfs:
+      - /tmp:size=256m,noexec,nosuid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 512
+    mem_limit: 4g
+    cpus: 3.00
+    ports: !override
+      - "127.0.0.1:${CTI_BACKEND_PORT:-18000}:8000"
+    volumes: !override
+      - cti_uploads:/app/data/uploads
+      - ${CTI_NER_MODEL_DIR:?Set CTI_NER_MODEL_DIR}:/app/ml/models/dnrti_bert_ner:ro
+      - ${CTI_NER_REPORT_DIR:?Set CTI_NER_REPORT_DIR}:/app/ml/reports:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    image: cti-central-frontend:current
+    ports: !override
+      - "127.0.0.1:${CTI_FRONTEND_PORT:-18080}:8080"

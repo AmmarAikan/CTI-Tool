@@ -21,6 +21,8 @@ if [[ ! -f "${ipv4_sysctl_file}" ]]; then
   exit 1
 fi
 
+"${release_root}/infra/vps/scripts/provision_backend_networks.sh"
+
 # This VPS has reproducibly reset large GHCR downloads over IPv6.  Keep the
 # host on the tested IPv4 path; all public CTI services and SSH tunnels use IPv4.
 install -o root -g root -m 0644 "${ipv4_sysctl_file}" /etc/sysctl.d/99-cti-ipv4-only.conf
@@ -108,13 +110,14 @@ set -a
 # shellcheck disable=SC1090
 source "${misp_env}"
 set +a
-install -d -o root -g ammar -m 0750 /opt/cti-platform/clients
+install -d -o root -g root -m 0700 /opt/cti-platform/clients
 umask 027
 cat > /opt/cti-platform/clients/misp-client.env <<EOF
-MISP_URL=https://host.docker.internal:18443
+MISP_URL=http://cti-misp
 MISP_API_KEY=${ADMIN_KEY}
-MISP_VERIFY_TLS=false
+MISP_VERIFY_TLS=true
+MISP_ALLOW_HTTP=true
 EOF
-chown root:ammar /opt/cti-platform/clients/misp-client.env
-chmod 0640 /opt/cti-platform/clients/misp-client.env
+chown root:root /opt/cti-platform/clients/misp-client.env
+chmod 0600 /opt/cti-platform/clients/misp-client.env
 "${compose[@]}" ps

@@ -6,7 +6,7 @@ if [[ ${EUID} -ne 0 ]]; then
   exit 1
 fi
 
-readonly -a NETWORKS=(cti-backend-gateway cti-backend-external)
+readonly -a NETWORKS=(cti-backend-gateway cti-backend-external cti-backend-misp)
 
 die() {
   echo "$1" >&2
@@ -65,3 +65,4 @@ ensure_network() {
 
 ensure_network cti-backend-gateway backend gateway
 ensure_network cti-backend-external backend external-sources
+ensure_network cti-backend-misp backend misp-core

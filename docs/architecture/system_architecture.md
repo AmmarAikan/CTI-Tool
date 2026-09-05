@@ -96,7 +96,7 @@ backend/app/pipeline/common/cti_schema.py
 
 The central repository is implemented with SQLAlchemy and PostgreSQL. SQLite is supported for lightweight local tests. Exact indicator matching provides simple correlation, TF-IDF/cosine similarity provides prototype advanced textual correlation, NVD provides CVE enrichment, STIX 2.1 provides portable export, and MISP is an optional external sharing target. NVD and correlation changes re-run the same explainable risk formula with source-diversity and correlation evidence; repeated recalculation does not compound already-derived severity. TAXII and the frontend dashboard remain future work; dashboard data is already available through the API.
 
-The planned hybrid VPS layout and its trust boundaries are defined in `cloud_distributed_architecture.md`. MongoDB, background workers, TAXII, and other nonessential heavy extensions remain in `future_bound_work.md`.
+The implemented VPS-only layout and its trust boundaries are defined in `cloud_distributed_architecture.md`. MongoDB, background workers, TAXII, and other nonessential heavy extensions remain in `future_bound_work.md`.
 
 ## Backend API and security
 

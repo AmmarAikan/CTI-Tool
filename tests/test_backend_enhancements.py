@@ -685,6 +685,25 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual((persisted_first, persisted_last), (earlier, later))
         self.assertEqual((mapped_first, mapped_last), (earlier.isoformat(), later.isoformat()))
 
+    def test_misp_http_requires_explicit_internal_opt_in(self) -> None:
+        with self.assertRaisesRegex(ValueError, "MISP_ALLOW_HTTP"):
+            MISPClient(base_url="http://cti-misp", api_key="test-only")
+
+        client = MISPClient(
+            base_url="http://cti-misp",
+            api_key="test-only",
+            allow_http=True,
+        )
+        self.assertTrue(client.configured)
+
+    def test_misp_http_rejects_non_internal_hosts(self) -> None:
+        with self.assertRaisesRegex(ValueError, "limited to the isolated"):
+            MISPClient(
+                base_url="http://misp.example.test",
+                api_key="test-only",
+                allow_http=True,
+            )
+
     def test_misp_send_adds_and_verifies_indicators_separately(self) -> None:
         seen = datetime(2026, 8, 24, tzinfo=timezone.utc)
         event = SimpleNamespace(

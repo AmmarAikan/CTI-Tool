@@ -35,7 +35,7 @@ Authorization: Bearer <feed-publish-token>
 Content-Type: application/json
 ```
 
-The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a cumulative snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. This prevents the local backend from missing a collection window while it is offline. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic write. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports the published, inserted, updated, unchanged, and total snapshot counts plus the ETag.
+The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a cumulative snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. This prevents Central Backend from missing a collection window while it is unavailable. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic write. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports the published, inserted, updated, unchanged, and total snapshot counts plus the ETag.
 
 ## Response envelope
 

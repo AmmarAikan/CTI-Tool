@@ -40,6 +40,7 @@ class Settings:
     misp_url: str | None = os.getenv("MISP_URL")
     misp_api_key: str | None = os.getenv("MISP_API_KEY")
     misp_verify_tls: bool = _as_bool(os.getenv("MISP_VERIFY_TLS"), True)
+    misp_allow_http: bool = _as_bool(os.getenv("MISP_ALLOW_HTTP"), False)
     misp_timeout_seconds: int = int(os.getenv("MISP_TIMEOUT_SECONDS", "30"))
     external_feed_url: str | None = os.getenv("EXTERNAL_FEED_URL")
     external_feed_token: str | None = os.getenv("EXTERNAL_FEED_TOKEN")

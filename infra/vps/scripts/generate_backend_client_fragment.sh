@@ -8,7 +8,7 @@ fi
 
 readonly secret_file="${1:-/etc/cti-platform/vps.env}"
 readonly client_dir="${2:-/opt/cti-platform/clients}"
-readonly target="${client_dir}/ammar-backend.env"
+readonly target="${client_dir}/backend-integrations.env"
 temporary=""
 
 cleanup() {
@@ -25,9 +25,9 @@ if [[ ! -s "${secret_file}" ]]; then
   exit 1
 fi
 
-install -d -o root -g ammar -m 0750 "${client_dir}"
+install -d -o root -g root -m 0700 "${client_dir}"
 umask 077
-temporary=$(mktemp "${client_dir}/.ammar-backend.env.XXXXXX")
+temporary=$(mktemp "${client_dir}/.backend-integrations.env.XXXXXX")
 
 set -a
 # shellcheck disable=SC1090
@@ -58,7 +58,7 @@ EXTERNAL_CONTROL_VERIFY_TLS=false
 EXTERNAL_CONTROL_ALLOW_HTTP=true
 EOF
 
-chown root:ammar "${temporary}"
-chmod 0640 "${temporary}"
+  chown root:root "${temporary}"
+  chmod 0600 "${temporary}"
 mv -f -- "${temporary}" "${target}"
 temporary=""

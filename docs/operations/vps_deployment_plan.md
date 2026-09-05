@@ -2,7 +2,7 @@
 
 ## Recorded deployment
 
-The VPS deployment was completed on 2026-08-29 for the hybrid graduation lab. The server has 6 vCPU, 12 GB RAM, 200 GB SSD, Ubuntu 24.04, and an added 4 GB swap file. Large Docker images and the official MISP repository were downloaded directly on the VPS because its network is faster than uploading images from a personal computer.
+The original VPS deployment was completed on 2026-08-29 for the hybrid graduation lab. On 2026-09-05 the production decision changed to VPS-only: Central Backend, PostgreSQL, DNRTI models, and Frontend also run on the server. This document preserves the original capacity and bootstrap evidence; `vps_production_runbook.md` is authoritative for current cutover and rollback. The server has 6 vCPU, 12 GB RAM, 200 GB SSD, Ubuntu 24.04, and an added 4 GB swap file. Large images and upstream source are downloaded directly on the VPS.
 
 This document intentionally omits the public IP, credentials, tokens, hostile source addresses, and raw honeypot evidence.
 
@@ -64,7 +64,7 @@ the remote Tailscale profile continues to require HTTPS and disallow HTTP.
 4. Run `deploy_stack.sh` to build Gateway/Dionaea on the server and install systemd/firewall/logrotate policies.
 5. Run `deploy_misp.sh` to clone the pinned upstream repository, generate server-only secrets, pull slim images, start services, and wait for MISP heartbeat.
 6. Securely copy Ammar's least-privilege backend fragment; keep it ignored by Git.
-7. Join the VPS and Ammar's Windows computer to one tailnet, enable tailnet-only Tailscale Serve HTTPS for the loopback services, update the ignored client fragments, and launch the local backend. Keep the three SSH tunnels as a recovery fallback.
+7. Join authorized operator devices and the VPS to one tailnet, deploy the Central Backend and Frontend on the VPS, then expose the Frontend through tailnet-only Tailscale Serve HTTPS. Keep SSH tunnels as diagnostic recovery only.
 
 Exact commands and layouts are in `infra/vps/README.md`.
 
@@ -86,7 +86,7 @@ Docker-published ports require a `DOCKER-USER` policy in addition to UFW. New ou
 
 - `/etc/cti-platform/vps.env`: Gateway/sensor server secrets, root-only.
 - `/etc/cti-platform/misp.env`: MISP/MariaDB/Redis/application secrets, root-only.
-- Ammar backend fragment: feed/sensor read keys plus External control token only.
+- Root-only same-host Backend fragment: feed/sensor read keys plus External control token only.
 - External publishing uses the server-only publish token locally on the VPS; no second computer receives it.
 - MISP backend fragment: MISP URL/API key only.
 - `.vps-client.env` and `.misp-client.env` are ignored by Git. The obsolete `.vps-publisher.env` pattern remains ignored defensively but is no longer used.

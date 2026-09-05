@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CENTRAL_COMPOSE = ROOT / "compose.yaml"
 VPS_COMPOSE = ROOT / "infra" / "vps" / "compose.yaml"
+MISP_OVERRIDE = ROOT / "infra" / "vps" / "misp" / "compose.override.yaml"
 BOOTSTRAP = ROOT / "infra" / "vps" / "scripts" / "bootstrap_host.sh"
 PROVISIONER = ROOT / "infra" / "vps" / "scripts" / "provision_backend_networks.sh"
 GENERATOR = ROOT / "infra" / "vps" / "scripts" / "generate_backend_client_fragment.sh"
@@ -77,6 +78,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         cls.provisioner = PROVISIONER.read_text(encoding="utf-8")
         cls.generator = GENERATOR.read_text(encoding="utf-8")
         cls.deploy_stack = DEPLOY_STACK.read_text(encoding="utf-8")
+        cls.misp_override = MISP_OVERRIDE.read_text(encoding="utf-8")
 
     def test_pairwise_networks_render_as_stable_external_networks(self) -> None:
         for key, stable_name in NETWORKS.items():
@@ -133,6 +135,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertEqual(environment["MISP_URL"], "")
         self.assertEqual(environment["MISP_API_KEY"], "")
         self.assertEqual(environment["MISP_VERIFY_TLS"], "true")
+        self.assertEqual(environment["MISP_ALLOW_HTTP"], "false")
         self.assertEqual(environment["WAZUH_INDEXER_URL"], "")
         self.assertEqual(environment["WAZUH_INDEXER_USERNAME"], "")
         self.assertEqual(environment["WAZUH_INDEXER_PASSWORD"], "")
@@ -151,12 +154,12 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertIn('"${script_dir}/provision_backend_networks.sh"', self.bootstrap)
 
     def test_generator_is_atomic_exactly_scoped_and_uses_local_targets(self) -> None:
-        self.assertIn('mktemp "${client_dir}/.ammar-backend.env.XXXXXX"', self.generator)
+        self.assertIn('mktemp "${client_dir}/.backend-integrations.env.XXXXXX"', self.generator)
         self.assertIn("trap cleanup EXIT", self.generator)
         self.assertIn("trap 'exit 130' INT", self.generator)
         self.assertIn("trap 'exit 143' TERM", self.generator)
-        self.assertIn('chown root:ammar "${temporary}"', self.generator)
-        self.assertIn('chmod 0640 "${temporary}"', self.generator)
+        self.assertIn('chown root:root "${temporary}"', self.generator)
+        self.assertIn('chmod 0600 "${temporary}"', self.generator)
         self.assertIn('mv -f -- "${temporary}" "${target}"', self.generator)
         self.assertNotIn("*.env", self.generator)
         expected = {
@@ -171,6 +174,32 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertNotIn("host.docker.internal:18088", self.generator)
         self.assertNotIn("host.docker.internal:18090", self.generator)
         self.assertIn('generate_backend_client_fragment.sh" "${secret_file}"', self.deploy_stack)
+
+    def test_misp_uses_a_dedicated_pairwise_internal_network(self) -> None:
+        backend_network = self.central["networks"]["cti_backend_misp"]
+        self.assertIs(backend_network["external"], True)
+        self.assertEqual(backend_network["name"], "cti-backend-misp")
+        self.assertIn("cti_backend_misp", service_networks(self.central, "backend"))
+        self.assertIn("cti_backend_misp:", self.misp_override)
+        self.assertIn("name: cti-backend-misp", self.misp_override)
+        self.assertIn("- cti-misp", self.misp_override)
+        self.assertIn("ensure_network cti-backend-misp backend misp-core", self.provisioner)
+
+    def test_frontend_is_loopback_only_and_pairwise_with_backend(self) -> None:
+        self.assertEqual(
+            published_ports(self.central, "frontend"),
+            {("127.0.0.1", "18080", 8080, "tcp")},
+        )
+        self.assertIs(self.central["networks"]["frontend_backend"]["internal"], True)
+        members = {
+            service
+            for service in self.central["services"]
+            if "frontend_backend" in service_networks(self.central, service)
+        }
+        self.assertEqual(members, {"backend", "frontend"})
+        frontend = self.central["services"]["frontend"]
+        self.assertTrue(frontend["read_only"])
+        self.assertEqual(frontend["cap_drop"], ["ALL"])
 
 
     def test_internal_http_is_allowed_only_for_approved_aliases(self) -> None:
