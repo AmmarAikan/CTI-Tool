@@ -198,6 +198,13 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
             if "frontend_backend" in service_networks(self.central, service)
         }
         self.assertEqual(members, {"backend", "frontend"})
+        ingress_members = {
+            service
+            for service in self.central["services"]
+            if "frontend_ingress" in service_networks(self.central, service)
+        }
+        self.assertEqual(ingress_members, {"frontend"})
+        self.assertFalse(self.central["networks"]["frontend_ingress"].get("internal", False))
         frontend = self.central["services"]["frontend"]
         self.assertTrue(frontend["read_only"])
         self.assertEqual(frontend["cap_drop"], ["ALL"])

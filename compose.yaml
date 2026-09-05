@@ -144,6 +144,10 @@ services:
         condition: service_healthy
     networks:
       - frontend_backend
+      # Docker does not publish a host port for a container attached only to
+      # an internal network.  This single-member bridge provides the loopback
+      # ingress used by Tailscale Serve; backend traffic remains pairwise.
+      - frontend_ingress
     ports:
       - "127.0.0.1:18080:8080"
     logging:
@@ -196,6 +200,8 @@ networks:
     name: cti-backend-misp
   frontend_backend:
     internal: true
+  frontend_ingress:
+    internal: false
 
 volumes:
   cti_postgres_data:
