@@ -15,6 +15,7 @@ ROLLBACK = ROOT / "infra" / "vps" / "scripts" / "rollback_central_stack.sh"
 TAILSCALE = ROOT / "infra" / "vps" / "scripts" / "configure_tailscale_serve.sh"
 DEPLOY_MISP = ROOT / "infra" / "vps" / "scripts" / "deploy_misp.sh"
 FRONTEND_DOCKERFILE = ROOT / "frontend" / "Dockerfile"
+FRONTEND_NGINX = ROOT / "frontend" / "nginx.conf"
 
 
 def render_production() -> dict:
@@ -65,6 +66,7 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         cls.tailscale = TAILSCALE.read_text(encoding="utf-8")
         cls.deploy_misp = DEPLOY_MISP.read_text(encoding="utf-8")
         cls.frontend_dockerfile = FRONTEND_DOCKERFILE.read_text(encoding="utf-8")
+        cls.frontend_nginx = FRONTEND_NGINX.read_text(encoding="utf-8")
 
     def test_production_images_and_ports_are_stable_and_loopback_only(self) -> None:
         self.assertEqual(self.compose["name"], "cti-test")
@@ -134,6 +136,9 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         build = self.frontend_dockerfile.index("npm run build")
         self.assertLess(lint, tests)
         self.assertLess(tests, build)
+
+    def test_frontend_keeps_bounded_long_pipeline_requests_connected(self) -> None:
+        self.assertIn("proxy_read_timeout 7200s;", self.frontend_nginx)
 
 
 if __name__ == "__main__":
