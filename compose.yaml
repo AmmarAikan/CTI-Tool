@@ -93,8 +93,14 @@ services:
       db:
         condition: service_healthy
     networks:
-      - default
-      - honeypot_lab
+      default: {}
+      honeypot_lab: {}
+      cti_backend_gateway:
+        aliases:
+          - cti-backend
+      cti_backend_external:
+        aliases:
+          - cti-backend
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -136,6 +142,12 @@ networks:
   default:
   honeypot_lab:
     internal: true
+  cti_backend_gateway:
+    external: true
+    name: cti-backend-gateway
+  cti_backend_external:
+    external: true
+    name: cti-backend-external
 
 volumes:
   cti_postgres_data:
