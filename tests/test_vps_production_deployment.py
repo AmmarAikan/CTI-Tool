@@ -14,6 +14,7 @@ DEPLOY = ROOT / "infra" / "vps" / "scripts" / "deploy_central_stack.sh"
 ROLLBACK = ROOT / "infra" / "vps" / "scripts" / "rollback_central_stack.sh"
 TAILSCALE = ROOT / "infra" / "vps" / "scripts" / "configure_tailscale_serve.sh"
 DEPLOY_MISP = ROOT / "infra" / "vps" / "scripts" / "deploy_misp.sh"
+FRONTEND_DOCKERFILE = ROOT / "frontend" / "Dockerfile"
 
 
 def render_production() -> dict:
@@ -59,6 +60,7 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         cls.rollback = ROLLBACK.read_text(encoding="utf-8")
         cls.tailscale = TAILSCALE.read_text(encoding="utf-8")
         cls.deploy_misp = DEPLOY_MISP.read_text(encoding="utf-8")
+        cls.frontend_dockerfile = FRONTEND_DOCKERFILE.read_text(encoding="utf-8")
 
     def test_production_images_and_ports_are_stable_and_loopback_only(self) -> None:
         self.assertEqual(self.compose["name"], "cti-test")
@@ -105,6 +107,13 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertIn("MISP_ALLOW_HTTP=true", self.deploy_misp)
         self.assertIn("MISP_VERIFY_TLS=true", self.deploy_misp)
         self.assertNotIn("MISP_VERIFY_TLS=false", self.deploy_misp)
+
+    def test_frontend_image_runs_quality_gates_before_build(self) -> None:
+        lint = self.frontend_dockerfile.index("npm run lint")
+        tests = self.frontend_dockerfile.index("npm test")
+        build = self.frontend_dockerfile.index("npm run build")
+        self.assertLess(lint, tests)
+        self.assertLess(tests, build)
 
 
 if __name__ == "__main__":
