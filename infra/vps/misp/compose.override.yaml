@@ -23,6 +23,10 @@ services:
       - "127.0.0.1:8080:80"
       - "127.0.0.1:8443:443"
     networks:
+      # Keep the upstream MISP application network so the core can still
+      # resolve its db, redis, and misp-modules dependencies.  This second
+      # network is the only path exposed to the Central Backend.
+      default: {}
       cti_backend_misp:
         aliases:
           - cti-misp

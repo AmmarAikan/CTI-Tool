@@ -180,6 +180,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertIs(backend_network["external"], True)
         self.assertEqual(backend_network["name"], "cti-backend-misp")
         self.assertIn("cti_backend_misp", service_networks(self.central, "backend"))
+        self.assertIn("default: {}", self.misp_override)
         self.assertIn("cti_backend_misp:", self.misp_override)
         self.assertIn("name: cti-backend-misp", self.misp_override)
         self.assertIn("- cti-misp", self.misp_override)
