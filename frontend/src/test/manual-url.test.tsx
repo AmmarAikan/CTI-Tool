@@ -5,91 +5,57 @@ import { clearToken } from '../api/client';
 import { Manual } from '../pages/Manual';
 import { renderWithProviders } from './fixtures';
 
-const users = {
-  viewer: { id: 'u1', username: 'viewer', role: 'viewer', is_active: true },
-  analyst: { id: 'u2', username: 'analyst', role: 'analyst', is_active: true },
-  admin: { id: 'u3', username: 'admin', role: 'admin', is_active: true },
-} as const;
-const job = (state: string, result: Record<string, unknown> | null = null, error: Record<string, unknown> | null = null) => ({
-  schema_version: '1.0', job_id: 'job-manual-1234', command_id: 'cmd-manual-1234', state,
-  created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:01Z', progress: {}, result, error,
-});
+const users = { viewer: { id: 'u1', username: 'viewer', role: 'viewer', is_active: true }, analyst: { id: 'u2', username: 'analyst', role: 'analyst', is_active: true }, admin: { id: 'u3', username: 'admin', role: 'admin', is_active: true } } as const;
+const preview = { schema_version: '1.0', preview_id: 'prv-12345678901234567890', state: 'pending', created_at: '2026-09-06T00:00:00Z', expires_at: '2099-09-06T00:15:00Z', display_url: 'https://example.org/report', page_type: 'article', title: 'تقرير تهديد منقّى', excerpt: 'مقتطف قصير خالٍ من البيانات الحساسة.', disposition: 'accepted', classification_label: 'cti_related', classification_confidence: .91, privacy_status: 'reviewed', review_reasons: [], content_sha256: 'sha256:' + 'a'.repeat(64), counts: { items: 1, accepted: 1, review: 0, rejected: 0, skipped: 0, errors: 0 } };
+const job = (state: string) => ({ schema_version: '1.0', job_id: 'job-manual-1234', command_id: 'cmd-manual-1234', state, created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:01Z', progress: {}, result: state === 'completed' ? { accepted_records: 1 } : null, error: null });
 const response = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
-
 function mockRole(role: keyof typeof users, handler?: (path: string, init?: RequestInit) => Promise<Response>) {
   sessionStorage.setItem('cti_access_token', 'token');
-  return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
-    const path = String(input);
-    if (path.endsWith('/auth/me')) return response(users[role]);
-    return handler ? handler(path, init) : response(job('completed'));
-  });
+  return vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => String(input).endsWith('/auth/me') ? response(users[role]) : handler ? handler(String(input), init) : response(preview));
 }
+beforeEach(() => { sessionStorage.clear(); clearToken(); vi.restoreAllMocks(); vi.stubGlobal('crypto', { randomUUID: () => 'idem-1234567890' }); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
-beforeEach(() => { sessionStorage.clear(); clearToken(); vi.restoreAllMocks(); });
-afterEach(() => cleanup());
-
-describe('manual URL workflow', () => {
-  it('hides and blocks the operation for viewers, while analyst and admin can use it', async () => {
-    mockRole('viewer'); renderWithProviders(<Manual />, ['/manual']);
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'إدخال رابط يدوي' })).not.toBeInTheDocument());
-    cleanup();
-    mockRole('analyst'); renderWithProviders(<Manual />, ['/manual']);
-    expect(await screen.findByRole('button', { name: 'تسجيل الرابط وتشغيله' })).toBeInTheDocument();
-    cleanup();
-    mockRole('admin'); renderWithProviders(<Manual />, ['/manual']);
-    expect(await screen.findByRole('button', { name: 'تسجيل الرابط وتشغيله' })).toBeInTheDocument();
+describe('manual preview workflow', () => {
+  it('denies viewers and allows analyst/admin', async () => {
+    mockRole('viewer'); renderWithProviders(<Manual />, ['/manual']); await waitFor(() => expect(screen.queryByRole('heading', { name: 'معاينة رابط يدوي' })).not.toBeInTheDocument()); cleanup();
+    mockRole('analyst'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument(); cleanup();
+    mockRole('admin'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument();
   });
 
-  it('requires a valid HTTP(S) URL and explicit confirmation', async () => {
-    const fetchMock = mockRole('analyst');
-    renderWithProviders(<Manual />);
-    const actor = userEvent.setup();
-    const input = await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' });
-    await actor.type(input, 'ftp://example.org/report');
-    await actor.click(screen.getByRole('button', { name: 'تسجيل الرابط وتشغيله' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('HTTP أو HTTPS');
-    expect(fetchMock.mock.calls.some(([value]) => String(value).endsWith('/manual-sources'))).toBe(false);
-    await actor.clear(input); await actor.type(input, 'https://example.org/report');
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
-    await actor.click(screen.getByRole('button', { name: 'تسجيل الرابط وتشغيله' }));
-    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('ليست معاينة'));
-    expect(fetchMock.mock.calls.some(([value]) => String(value).endsWith('/manual-sources'))).toBe(false);
+  it('creates one preview, renders only sanitized fields, and prevents duplicates', async () => {
+    let resolve!: (value: Response) => void; const pending = new Promise<Response>((done) => { resolve = done; });
+    const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? pending : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox'), 'https://example.org/report?token=hidden');
+    const button = screen.getByRole('button', { name: 'معاينة الرابط' }); await actor.click(button); expect(button).toBeDisabled(); button.click();
+    const calls = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/previews')); expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ url: 'https://example.org/report?token=hidden' }) });
+    resolve(await response(preview)); expect(await screen.findByText(preview.title)).toBeInTheDocument();
+    expect(screen.getByText(preview.excerpt)).toBeInTheDocument(); expect(document.body).not.toHaveTextContent('token=hidden');
   });
 
-  it('posts the exact contract once, prevents duplicates, and follows the returned job', async () => {
-    let resolveStart!: (value: Response) => void;
-    const pending = new Promise<Response>((resolve) => { resolveStart = resolve; });
-    const fetchMock = mockRole('analyst', (path) => path.endsWith('/manual-sources') ? pending : response(job('completed', { accepted_records: 2, review_records: 1, rejected_records: 0, skipped_records: 3, error_count: 0 })));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    renderWithProviders(<Manual />);
-    const actor = userEvent.setup();
-    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report?token=hidden');
-    const button = screen.getByRole('button', { name: 'تسجيل الرابط وتشغيله' });
-    await actor.click(button); expect(button).toBeDisabled(); button.click();
-    const posts = fetchMock.mock.calls.filter(([value]) => String(value).endsWith('/manual-sources'));
-    expect(posts).toHaveLength(1);
-    expect(posts[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ url: 'https://example.org/report?token=hidden', force: false }) });
-    resolveStart(await response(job('queued')));
+  it('requires approval confirmation and follows the approval job', async () => {
+    const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : path.endsWith('/approve') ? response(job('queued')) : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    vi.spyOn(window, 'confirm').mockReturnValue(false); await actor.click(await screen.findByRole('button', { name: 'اعتماد وحفظ' })); expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/approve'))).toBe(false);
+    vi.mocked(window.confirm).mockReturnValue(true); await actor.click(screen.getByRole('button', { name: 'اعتماد وحفظ' }));
     expect(await screen.findByText(/مكتملة/)).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent('token=hidden');
+    const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approve')); expect(call?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) });
   });
 
-  it('shows safe submission failures and rejects malformed responses', async () => {
-    mockRole('analyst', (path) => path.endsWith('/manual-sources') ? response({ detail: 'private http://internal.local token=secret' }, 500) : response(job('failed')));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    renderWithProviders(<Manual />);
-    const actor = userEvent.setup();
-    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report');
-    await actor.click(screen.getByRole('button', { name: 'تسجيل الرابط وتشغيله' }));
-    expect(await screen.findByText('لم تقبل الخدمة طلب الإرسال.')).toBeInTheDocument();
-    expect(document.body).not.toHaveTextContent('internal.local');
-    cleanup();
-    mockRole('analyst', (path) => path.endsWith('/manual-sources') ? response({ job_id: 'short', state: 'unknown' }) : response(job('failed')));
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
-    renderWithProviders(<Manual />);
-    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report');
-    await actor.click(screen.getByRole('button', { name: 'تسجيل الرابط وتشغيله' }));
-    expect(await screen.findByText('لم تقبل الخدمة طلب الإرسال.')).toBeInTheDocument();
+  it('rejects with a controlled reason and removes preview content', async () => {
+    mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : response({ schema_version: '1.0', preview_id: preview.preview_id, state: 'rejected', decided_at: '2026-09-06T00:01:00Z' }));
+    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    await actor.selectOptions(await screen.findByRole('combobox'), 'duplicate'); await actor.click(screen.getByRole('button', { name: 'تجاهل' }));
+    expect(await screen.findByText(/تم تجاهل المعاينة/)).toBeInTheDocument(); expect(screen.queryByText(preview.title)).not.toBeInTheDocument(); expect(screen.queryByText(preview.excerpt)).not.toBeInTheDocument();
+  });
+
+  it('handles expiry, disconnected service, malformed responses, and 401 safely', async () => {
+    for (const [body, status, expected] of [[{ code: 'preview_expired', message: 'raw secret' }, 410, 'انتهت صلاحية'], [{}, 200, 'استجابة غير صالحة']] as const) {
+      mockRole('analyst', () => response(body, status)); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
+    }
+    mockRole('analyst', () => Promise.reject(new TypeError('offline'))); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(/غير متصلة/)).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
+    mockRole('analyst', () => response({ detail: 'expired' }, 401)); renderWithProviders(<Manual />); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); await waitFor(() => expect(sessionStorage.getItem('cti_access_token')).toBeNull());
   });
 });

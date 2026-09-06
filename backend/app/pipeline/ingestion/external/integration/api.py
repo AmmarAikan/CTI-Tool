@@ -23,6 +23,9 @@ from backend.app.pipeline.ingestion.external.application.job_service import JobS
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     ManualSourceService,
 )
+from backend.app.pipeline.ingestion.external.application.manual_preview_service import (
+    ManualPreviewService, PreviewConsumed, PreviewExpired, PreviewHashMismatch, PreviewNotFound,
+)
 from backend.app.pipeline.ingestion.external.application.review_service import (
     ReviewService,
 )
@@ -52,6 +55,11 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
     LatestExportResponse,
     LatestExportSummaryResponse,
     LatestReviewResponse,
+    ManualPreviewApproveBody,
+    ManualPreviewRejectBody,
+    ManualPreviewRejectedResponse,
+    ManualPreviewRequestBody,
+    ManualPreviewResponse,
     ManualURLRequestBody,
     SourceCollectionRequestBody,
     SourceResponse,
@@ -87,6 +95,7 @@ class AdapterServices:
     job_runner: JobRunner
     idempotency: IdempotencyStore
     review_service: ReviewService | None = None
+    manual_preview_service: ManualPreviewService | None = None
 
 
 def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> FastAPI:
@@ -175,6 +184,47 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     def recheck_manual(body: ManualURLRequestBody, current: Principal = Depends(permitted("manual:create")),
                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         return _manual_job(services, current, str(body.url), True, idempotency_key, scope="recheck_url")
+
+    @app.post(f"{API_PREFIX}/manual-sources/previews", response_model=ManualPreviewResponse, status_code=201)
+    def create_manual_preview(body: ManualPreviewRequestBody,
+                              current: Principal = Depends(permitted("manual:preview"))) -> ManualPreviewResponse:
+        preview = _previews(services)
+        try: value = preview.create(str(body.url), requested_by=current.subject)
+        except Exception: raise APIError(422, "preview_unavailable", "URL could not be previewed safely") from None
+        return ManualPreviewResponse.model_validate(value)
+
+    @app.post(f"{API_PREFIX}/manual-sources/previews/{{preview_id}}/approve",
+              response_model=JobStatusResponse, status_code=202)
+    def approve_manual_preview(preview_id: str, body: ManualPreviewApproveBody,
+                               current: Principal = Depends(permitted("manual:approve")),
+                               idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
+        cached = _cached(services, current, f"approve_preview:{preview_id}", idempotency_key)
+        if cached: return JobStatusResponse.model_validate(cached)
+        preview = _previews(services)
+        try: claimed = preview.claim_approval(preview_id, body.expected_content_sha256)
+        except Exception as exc: raise _preview_error(exc)
+        command_id = _id("cmd")
+        try:
+            job = services.job_runner.submit(command_id, lambda: preview.approve_claimed(claimed, requested_by=current.subject))
+        except Exception:
+            preview.release_approval(preview_id)
+            raise APIError(503, "preview_enqueue_failed", "manual preview approval could not be queued", retryable=True) from None
+        response = _queued(job.job_id, command_id)
+        _remember(services, current, f"approve_preview:{preview_id}", idempotency_key, response.model_dump())
+        return response
+
+    @app.post(f"{API_PREFIX}/manual-sources/previews/{{preview_id}}/reject",
+              response_model=ManualPreviewRejectedResponse)
+    def reject_manual_preview(preview_id: str, body: ManualPreviewRejectBody,
+                              current: Principal = Depends(permitted("manual:reject")),
+                              idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> ManualPreviewRejectedResponse:
+        cached = _cached(services, current, f"reject_preview:{preview_id}", idempotency_key)
+        if cached: return ManualPreviewRejectedResponse.model_validate(cached)
+        try: value = _previews(services).reject(preview_id, body.reason, requested_by=current.subject)
+        except Exception as exc: raise _preview_error(exc)
+        response = ManualPreviewRejectedResponse.model_validate(value)
+        _remember(services, current, f"reject_preview:{preview_id}", idempotency_key, response.model_dump())
+        return response
 
     @app.get(f"{API_PREFIX}/sources", response_model=list[SourceResponse])
     def list_sources(_current: Principal = Depends(permitted("sources:read"))) -> list[SourceResponse]:
@@ -282,6 +332,19 @@ def _manual_job(services: AdapterServices, principal: Principal, url: str, force
     response = _queued(job.job_id, command_id)
     _remember(services, principal, scope, key, response.model_dump())
     return response
+
+
+def _previews(services: AdapterServices) -> ManualPreviewService:
+    if services.manual_preview_service is None:
+        raise APIError(503, "preview_unavailable", "manual preview service is unavailable", retryable=True)
+    return services.manual_preview_service
+
+
+def _preview_error(exc: Exception) -> APIError:
+    if isinstance(exc, PreviewExpired): return APIError(410, exc.code, "manual preview has expired")
+    if isinstance(exc, PreviewNotFound): return APIError(404, exc.code, "manual preview was not found")
+    if isinstance(exc, (PreviewConsumed, PreviewHashMismatch)): return APIError(409, exc.code, "manual preview cannot be decided")
+    return APIError(503, "preview_unavailable", "manual preview operation failed safely", retryable=True)
 
 
 def _require_successful_business_result(result: Any) -> Any:

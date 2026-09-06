@@ -156,6 +156,26 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(summary["accepted_records"], 25)
         self.assertTrue(client.session.calls[0][1].endswith("/exports/latest/summary"))
 
+    def test_manual_preview_proxy_contract_and_decision_idempotency(self) -> None:
+        preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
+            "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z",
+            "display_url": "https://example.test/report", "page_type": "article", "title": "Safe",
+            "excerpt": "Safe excerpt", "disposition": "accepted", "classification_label": "cti_related",
+            "classification_confidence": 0.9, "privacy_status": "reviewed", "review_reasons": [],
+            "content_sha256": "sha256:" + "a" * 64,
+            "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0}}
+        queued = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "queued", "created_at": "2026-09-06T00:00:00Z", "updated_at": "2026-09-06T00:00:00Z",
+            "progress": {}, "result": None, "error": None}
+        rejected = {"schema_version": "1.0", "preview_id": preview["preview_id"], "state": "rejected",
+                    "decided_at": "2026-09-06T00:01:00Z"}
+        client = self.client([FakeResponse(preview), FakeResponse(queued), FakeResponse(rejected)])
+        self.assertEqual(client.create_manual_preview("https://example.test/report")["state"], "pending")
+        client.approve_manual_preview(preview["preview_id"], preview["content_sha256"], idempotency_key="approve-once")
+        client.reject_manual_preview(preview["preview_id"], "duplicate", idempotency_key="reject-once")
+        self.assertEqual(client.session.calls[1][2]["headers"]["Idempotency-Key"], "approve-once")
+        self.assertEqual(client.session.calls[2][2]["headers"]["Idempotency-Key"], "reject-once")
+
 
 if __name__ == "__main__":
     unittest.main()

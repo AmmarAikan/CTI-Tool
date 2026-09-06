@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import desc, func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -42,6 +43,11 @@ from backend.app.schemas.api import (
     CorrelationRequest,
     ExternalCollectionStartRequest,
     ExternalManualSourceRequest,
+    ExternalManualPreviewApproveRequest,
+    ExternalManualPreviewRejectRequest,
+    ExternalManualPreviewRequest,
+    ExternalManualPreviewResponse,
+    ExternalManualPreviewRejectedResponse,
     ExternalSourceRunRequest,
     LoginRequest,
     MISPSendRequest,
@@ -458,6 +464,42 @@ def external_control_manual_recheck(
     audit(db, user, "recheck_external_manual_source", "external_collection_job", result["job_id"])
     db.commit()
     return result
+
+
+@router.post("/integrations/external-control/manual-sources/previews", tags=["external-control"],
+             response_model=ExternalManualPreviewResponse, status_code=201)
+def external_control_manual_preview(payload: ExternalManualPreviewRequest, db: SessionDep,
+                                    user: Annotated[User, Depends(require_roles("admin", "analyst"))]):
+    result = external_control_call(lambda client: client.create_manual_preview(str(payload.url)))
+    audit(db, user, "preview_external_manual_source", "external_manual_preview", result["preview_id"],
+          content_sha256=result["content_sha256"], counts=result["counts"])
+    db.commit(); return result
+
+
+@router.post("/integrations/external-control/manual-sources/previews/{preview_id}/approve",
+             tags=["external-control"], status_code=202)
+def external_control_manual_preview_approve(preview_id: str, payload: ExternalManualPreviewApproveRequest,
+                                            db: SessionDep,
+                                            user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+                                            idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+    key = idempotency_key or str(uuid.uuid4())
+    result = external_control_call(lambda client: client.approve_manual_preview(
+        preview_id, payload.expected_content_sha256, idempotency_key=key))
+    audit(db, user, "approve_external_manual_preview", "external_manual_preview", preview_id,
+          content_sha256=payload.expected_content_sha256)
+    db.commit(); return result
+
+
+@router.post("/integrations/external-control/manual-sources/previews/{preview_id}/reject",
+             tags=["external-control"], response_model=ExternalManualPreviewRejectedResponse)
+def external_control_manual_preview_reject(preview_id: str, payload: ExternalManualPreviewRejectRequest,
+                                           db: SessionDep,
+                                           user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+                                           idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None):
+    key = idempotency_key or str(uuid.uuid4())
+    result = external_control_call(lambda client: client.reject_manual_preview(preview_id, payload.reason, idempotency_key=key))
+    audit(db, user, "reject_external_manual_preview", "external_manual_preview", preview_id, decision="rejected", reason=payload.reason)
+    db.commit(); return result
 
 
 @router.get("/integrations/external-control/exports/latest", tags=["external-control"])

@@ -19,6 +19,7 @@ from backend.app.pipeline.ingestion.external.application.job_service import JobS
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     ManualSourceService,
 )
+from backend.app.pipeline.ingestion.external.application.manual_preview_service import ManualPreviewService, PreviewConsumed
 from backend.app.pipeline.ingestion.external.application.source_management_service import (
     SourceView,
 )
@@ -90,7 +91,16 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         self.manual = Mock(spec=ManualSourceService); self.sources = FakeSources(); self.job_service = Mock(spec=JobService); self.runner = FakeRunner()
         self.manual.validate_url.side_effect = lambda value: value
         self.job_service.get_job_status.return_value = None
-        self.services = AdapterServices(TokenAuth(), RoleAuthorizer(), self.collection, self.manual, self.sources, self.job_service, self.runner, InMemoryIdempotencyStore(), FakeReviews())
+        self.previews = Mock(spec=ManualPreviewService)
+        self.previews.create.return_value = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
+            "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z", "display_url": "https://example.test/report",
+            "page_type": "article", "title": "Safe title", "excerpt": "Safe excerpt", "disposition": "accepted",
+            "classification_label": "cti_related", "classification_confidence": 0.9, "privacy_status": "reviewed",
+            "review_reasons": [], "content_sha256": "sha256:" + "a" * 64,
+            "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0}}
+        self.previews.reject.return_value = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890",
+            "state": "rejected", "decided_at": "2026-09-06T00:01:00Z"}
+        self.services = AdapterServices(TokenAuth(), RoleAuthorizer(), self.collection, self.manual, self.sources, self.job_service, self.runner, InMemoryIdempotencyStore(), FakeReviews(), self.previews)
         self.client = TestClient(create_app(self.services))
 
     @staticmethod
@@ -154,6 +164,37 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         accepted = self.client.post(f"{API_PREFIX}/manual-sources", json={"url": "https://example.test/report"}, headers=self.auth())
         self.assertEqual((accepted.status_code, accepted.json()["state"]), (202, "queued")); self.assertEqual(len(self.runner.submissions), 1)
         self.manual.validate_url.assert_called_once_with("https://example.test/report")
+
+    def test_manual_preview_permissions_contract_and_decisions(self):
+        path = f"{API_PREFIX}/manual-sources/previews"
+        self.assertEqual(self.client.post(path, json={"url": "https://example.test/report"}, headers=self.auth("viewer-token")).status_code, 403)
+        created = self.client.post(path, json={"url": "https://example.test/report"}, headers=self.auth())
+        self.assertEqual((created.status_code, created.json()["state"]), (201, "pending"))
+        preview_id = created.json()["preview_id"]
+        claimed = Mock(); claimed.preview_id = preview_id
+        self.previews.claim_approval.return_value = claimed
+        approved = self.client.post(f"{path}/{preview_id}/approve", json={"expected_content_sha256": "sha256:" + "a" * 64},
+                                    headers={**self.auth(), "Idempotency-Key": "approve-once"})
+        self.assertEqual((approved.status_code, approved.json()["state"]), (202, "queued"))
+        rejected = self.client.post(f"{path}/{preview_id}/reject", json={"reason": "duplicate"},
+                                    headers={**self.auth(), "Idempotency-Key": "reject-once"})
+        self.assertEqual(rejected.json()["state"], "rejected")
+        self.assertNotIn("url", str(created.json()).lower().replace("display_url", "display"))
+
+    def test_manual_preview_enqueue_failure_releases_claim_with_safe_error(self):
+        preview_id = self.previews.create.return_value["preview_id"]
+        claimed = Mock(); claimed.preview_id = preview_id
+        self.previews.claim_approval.return_value = claimed
+        self.runner.submit = Mock(side_effect=RuntimeError("token=private internal failure"))
+        response = self.client.post(
+            f"{API_PREFIX}/manual-sources/previews/{preview_id}/approve",
+            json={"expected_content_sha256": "sha256:" + "a" * 64},
+            headers={**self.auth(), "Idempotency-Key": "recoverable-approval"},
+        )
+        self.assertEqual((response.status_code, response.json()["code"]), (503, "preview_enqueue_failed"))
+        self.previews.release_approval.assert_called_once_with(preview_id)
+        self.assertNotIn("private", response.text.lower())
+        self.assertNotIn("token", response.text.lower())
 
     def test_application_url_policy_rejection_happens_before_job_acceptance(self):
         self.manual.validate_url.side_effect = ValueError("sensitive internal detail")

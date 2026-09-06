@@ -55,6 +55,22 @@ class ManualTrackedRoot:
         return {"root_id": self.root_id, "active": self.active, "origin": self.origin}
 
 
+@dataclass(frozen=True, slots=True)
+class ManualPreviewBundle:
+    canonical_url: str = field(repr=False)
+    page_type: str
+    items: tuple[tuple[ExternalCTIItem, str], ...]
+    state: dict[str, Any] = field(repr=False)
+    result: ManualSourceResult
+
+
+class MemoryStateManager:
+    def __init__(self) -> None:
+        self.value: dict[str, Any] = {"schema_version": "1.0", "sources": {}, "urls": {}, "items": {}, "runs": {}}
+    def load(self) -> dict[str, Any]: return deepcopy(self.value)
+    def save(self, state: dict[str, Any]) -> None: self.value = deepcopy(state)
+
+
 class ManualSourceService(ABC):
     @abstractmethod
     def validate_url(self, url: str) -> str:
@@ -126,6 +142,50 @@ class CanonicalManualSourceService(ManualSourceService):
         if route.kind != "generic_web":
             return self._run_adapter(route, canonical, state)
         return self._run_web(canonical, state, force=False)
+
+    def preview_url(self, url: str, *, requested_by: str) -> ManualPreviewBundle:
+        del requested_by
+        validated = self.policy.validate(url)
+        captured: list[tuple[ExternalCTIItem, str]] = []
+        memory = MemoryStateManager()
+        isolated = CanonicalManualSourceService(
+            policy=self.policy, crawler=self.crawler, state_manager=memory,
+            adapters=self.adapters, router=self.router, content_processor=self.content_processor,
+            classification_service=self.classification_service,
+            record_sink=lambda item, disposition: captured.append((item, disposition)),
+            max_listing_links=self.max_listing_links, clock=self.clock,
+        )
+        result = isolated.add_manual_source(validated.canonical_url, requested_by="preview")
+        if result.status == "error":
+            raise URLPolicyError("URL preview failed safely")
+        route = self.router.route(validated.canonical_url)
+        state = memory.load()
+        page_type = route.kind if route.kind != "generic_web" else (
+            "listing" if state.get("urls", {}).get(validated.canonical_url, {}).get("known_sub_links") is not None else "article"
+        )
+        return ManualPreviewBundle(validated.canonical_url, page_type, tuple(captured), state, result)
+
+    def commit_preview(self, bundle: ManualPreviewBundle, *, requested_by: str) -> ManualSourceResult:
+        del requested_by
+        state = deepcopy(self.state_manager.load())
+        state.setdefault("urls", {}); state.setdefault("items", {}); state.setdefault("sources", {})
+        self._migrate_tracked_roots(state)
+        self._register_tracked_root(state, bundle.canonical_url)
+        for key in ("urls", "items", "sources"):
+            incoming = bundle.state.get(key, {})
+            if isinstance(incoming, dict): state[key].update(deepcopy(incoming))
+        for item, disposition in bundle.items:
+            self.record_sink(item, disposition)
+        self.state_manager.save(state)
+        accepted = sum(disposition == "accepted" for _, disposition in bundle.items)
+        review = sum(disposition == "review" for _, disposition in bundle.items)
+        rejected = sum(disposition == "rejected" for _, disposition in bundle.items)
+        return ManualSourceResult(
+            "stored" if accepted else ("review_required" if review else "ignored"),
+            "frozen manual preview committed", records_created=len(bundle.items),
+            canonical_url=bundle.canonical_url, accepted_records=accepted,
+            review_records=review, rejected_records=rejected,
+        )
 
     def list_tracked_roots(self) -> tuple[ManualTrackedRoot, ...]:
         state = deepcopy(self.state_manager.load())

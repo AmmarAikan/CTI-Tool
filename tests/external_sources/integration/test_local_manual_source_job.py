@@ -137,6 +137,25 @@ class LocalManualSourceJobTests(unittest.TestCase):
             self.assertEqual(record["classification"]["status"], "accepted")
             self._close(app, root)
 
+    def test_preview_is_non_persistent_until_frozen_approval_exports_it(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE)]), AcceptClassification())
+            client = TestClient(app); headers = {"Authorization": "Bearer manual-test-token"}
+            preview = client.post(f"{API_PREFIX}/manual-sources/previews", json={"url": URL}, headers=headers)
+            self.assertEqual((preview.status_code, preview.json()["state"]), (201, "pending"))
+            self.assertFalse((root / "state" / "manual_sources.json").exists())
+            self.assertFalse(list((root / "exports").glob("final_dataset_*.json")))
+            approved = client.post(
+                f"{API_PREFIX}/manual-sources/previews/{preview.json()['preview_id']}/approve",
+                json={"expected_content_sha256": preview.json()["content_sha256"]},
+                headers={**headers, "Idempotency-Key": "approve-preview-once"},
+            )
+            terminal = self._wait(client, approved.json()["job_id"], headers)
+            self.assertEqual((approved.status_code, terminal["state"]), (202, "completed"))
+            self.assertEqual(terminal["result"]["accepted_records"], 1)
+            self.assertEqual(client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()["accepted_records"], 1)
+            self._close(app, root)
+
     def test_unchanged_manual_url_completes_as_unchanged(self):
         values = [successful_crawl(CONTENT_ONE), CrawlResult(URL, URL, "unchanged")]
         with tempfile.TemporaryDirectory() as folder:

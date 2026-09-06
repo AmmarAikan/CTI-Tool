@@ -15,6 +15,7 @@ from backend.app.pipeline.ingestion.external.application.job_service import JobS
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     CanonicalManualSourceService, ManualAdapter, ManualSourceResult, ManualSourceService,
 )
+from backend.app.pipeline.ingestion.external.application.manual_preview_service import ManualPreviewService, SQLiteManualPreviewStore
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem
@@ -474,6 +475,8 @@ class ExportingManualSourceService(ManualSourceService):
         return self._run(lambda: self.delegate.add_manual_source(url, requested_by=requested_by))
     def recheck_url(self, url: str, *, requested_by: str, force: bool = False) -> ManualSourceResult:
         return self._run(lambda: self.delegate.recheck_url(url, requested_by=requested_by, force=force))
+    def commit_preview(self, bundle, *, requested_by: str) -> ManualSourceResult:
+        return self._run(lambda: self.delegate.commit_preview(bundle, requested_by=requested_by))
 
     def _run(self, operation: Callable[[], ManualSourceResult]) -> ManualSourceResult:
         self.sink.begin()
@@ -554,9 +557,17 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
                                             record_sink=manual_sink)
     collection = CanonicalCollectionService(runner, registry, executor, exporter, manual_service=manual_delegate)
     manual = ExportingManualSourceService(manual_delegate, manual_sink, canonical_exporter, export_reader)
+    preview_store = SQLiteManualPreviewStore(
+        state_directory / "manual_previews.sqlite3",
+        ttl_seconds=int(os.environ.get("EXTERNAL_PREVIEW_TTL_SECONDS", "900")),
+    )
+    previews = ManualPreviewService(
+        manual_delegate, preview_store,
+        lambda bundle, actor: manual.commit_preview(bundle, requested_by=actor),
+    )
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
         manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner,
-        InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader)),
+        InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader), previews),
         docs_enabled=docs_enabled)
 
 

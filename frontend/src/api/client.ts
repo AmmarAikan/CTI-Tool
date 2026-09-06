@@ -50,6 +50,25 @@ export interface ExternalJob {
   error?: string;
 }
 
+export interface ManualPreview {
+  preview_id: string;
+  state: 'pending';
+  created_at: string;
+  expires_at: string;
+  display_url: string;
+  page_type: string;
+  title: string;
+  excerpt: string;
+  disposition: 'accepted' | 'review' | 'rejected';
+  classification_label?: string;
+  classification_confidence?: number;
+  privacy_status: 'reviewed' | 'review_required';
+  review_reasons: Array<'privacy_review' | 'classification_review' | 'relevance_rejected'>;
+  content_sha256: string;
+  counts: Record<'items' | 'accepted' | 'review' | 'rejected' | 'skipped' | 'errors', number>;
+}
+export interface ManualPreviewRejection { preview_id: string; state: 'rejected'; decided_at: string; }
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);
@@ -166,6 +185,38 @@ function parseExternalJob(value: unknown): ExternalJob {
   return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at, updated_at: body.updated_at, counts, error: message };
 }
 
+function parseManualPreview(value: unknown): ManualPreview {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
+  const required = ['schema_version', 'preview_id', 'state', 'created_at', 'expires_at', 'display_url', 'page_type', 'title', 'excerpt',
+    'disposition', 'classification_label', 'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256', 'counts'];
+  if (Object.keys(value).some((key) => !required.includes(key)) || required.some((key) => !(key in value))
+    || value.schema_version !== '1.0' || typeof value.preview_id !== 'string' || value.preview_id.length < 20 || value.state !== 'pending'
+    || typeof value.created_at !== 'string' || !value.created_at.endsWith('Z') || typeof value.expires_at !== 'string' || !value.expires_at.endsWith('Z')
+    || typeof value.display_url !== 'string' || value.display_url.length > 400 || typeof value.page_type !== 'string' || value.page_type.length > 80
+    || typeof value.title !== 'string' || value.title.length > 300 || typeof value.excerpt !== 'string' || value.excerpt.length > 500
+    || !['accepted', 'review', 'rejected'].includes(String(value.disposition))
+    || (value.classification_label !== null && typeof value.classification_label !== 'string')
+    || (value.classification_confidence !== null && (typeof value.classification_confidence !== 'number' || value.classification_confidence < 0 || value.classification_confidence > 1))
+    || !['reviewed', 'review_required'].includes(String(value.privacy_status)) || !Array.isArray(value.review_reasons)
+    || value.review_reasons.some((reason) => !['privacy_review', 'classification_review', 'relevance_rejected'].includes(String(reason)))
+    || typeof value.content_sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.content_sha256) || !isPlainObject(value.counts)) {
+    throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
+  }
+  const countKeys = ['items', 'accepted', 'review', 'rejected', 'skipped', 'errors'];
+  const counts = value.counts as Record<string, unknown>;
+  if (Object.keys(counts).length !== countKeys.length || countKeys.some((key) => !Number.isSafeInteger(counts[key]) || (counts[key] as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
+  return value as unknown as ManualPreview;
+}
+
+function parseManualPreviewRejection(value: unknown): ManualPreviewRejection {
+  if (!isPlainObject(value) || Object.keys(value).length !== 4 || value.schema_version !== '1.0'
+    || typeof value.preview_id !== 'string' || value.preview_id.length < 20 || value.state !== 'rejected'
+    || typeof value.decided_at !== 'string' || !value.decided_at.endsWith('Z')) {
+    throw new ApiError(502, 'invalid_response', 'Invalid manual preview decision response');
+  }
+  return { preview_id: value.preview_id, state: 'rejected', decided_at: value.decided_at };
+}
+
 function isRole(value: unknown): value is Role { return value === 'viewer' || value === 'analyst' || value === 'admin'; }
 
 function safeText(value: unknown): string | undefined { return typeof value === 'string' ? value.slice(0, 200) : undefined; }
@@ -196,5 +247,8 @@ export const api = {
   dashboardSummary: async () => parseDashboardSummary(await request<unknown>('/dashboard/summary')),
   startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
   startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
+  createManualPreview: async (url: string) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }) })),
+  approveManualPreview: async (preview: ManualPreview) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) })),
+  rejectManualPreview: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled') => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })),
   externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),
 };

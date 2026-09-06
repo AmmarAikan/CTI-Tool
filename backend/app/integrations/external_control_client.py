@@ -137,6 +137,24 @@ class ExternalControlClient:
             )
         )
 
+    def create_manual_preview(self, url: str) -> dict[str, Any]:
+        self._validate_manual_url(url)
+        return self._preview_response(self._request("POST", "/manual-sources/previews", payload={"url": url}))
+
+    def approve_manual_preview(self, preview_id: str, content_sha256: str, *, idempotency_key: str) -> dict[str, Any]:
+        self._validate_preview_id(preview_id); self._validate_sha256(content_sha256)
+        return self._job_response(self._request("POST", f"/manual-sources/previews/{quote(preview_id, safe='')}/approve",
+            payload={"expected_content_sha256": content_sha256}, idempotency_key=idempotency_key))
+
+    def reject_manual_preview(self, preview_id: str, reason: str, *, idempotency_key: str) -> dict[str, Any]:
+        self._validate_preview_id(preview_id)
+        if reason not in {"not_relevant", "duplicate", "user_cancelled"}: raise ValueError("Invalid preview rejection reason")
+        value = self._request("POST", f"/manual-sources/previews/{quote(preview_id, safe='')}/reject",
+                              payload={"reason": reason}, idempotency_key=idempotency_key)
+        if not isinstance(value, dict) or value.get("schema_version") != "1.0" or value.get("state") != "rejected":
+            raise ExternalControlTransportError("External preview decision contract is invalid")
+        return {key: value[key] for key in ("schema_version", "preview_id", "state", "decided_at")}
+
     def get_job(self, job_id: str) -> dict[str, Any]:
         self._validate_job_id(job_id)
         return self._job_response(self._request("GET", f"/jobs/{quote(job_id, safe='')}"))
@@ -224,6 +242,17 @@ class ExternalControlClient:
             raise ExternalControlTransportError("External job identity or state is invalid")
         return payload
 
+    @staticmethod
+    def _preview_response(payload: Any) -> dict[str, Any]:
+        required = {"schema_version", "preview_id", "state", "created_at", "expires_at", "display_url", "page_type",
+                    "title", "excerpt", "disposition", "classification_label", "classification_confidence",
+                    "privacy_status", "review_reasons", "content_sha256", "counts"}
+        if not isinstance(payload, dict) or set(payload) != required or payload.get("schema_version") != "1.0" or payload.get("state") != "pending":
+            raise ExternalControlTransportError("External preview contract is invalid")
+        if not isinstance(payload.get("preview_id"), str) or not isinstance(payload.get("counts"), dict):
+            raise ExternalControlTransportError("External preview contract is invalid")
+        return {key: payload[key] for key in required}
+
     @classmethod
     def _validate_source_id(cls, source_id: str) -> None:
         if not cls.SOURCE_ID.fullmatch(source_id):
@@ -233,6 +262,14 @@ class ExternalControlClient:
     def _validate_job_id(cls, job_id: str) -> None:
         if len(job_id) < 10 or not cls.SOURCE_ID.fullmatch(job_id):
             raise ValueError("External job id is invalid")
+
+    @classmethod
+    def _validate_preview_id(cls, preview_id: str) -> None:
+        if len(preview_id) < 20 or not cls.SOURCE_ID.fullmatch(preview_id): raise ValueError("External preview id is invalid")
+
+    @staticmethod
+    def _validate_sha256(value: str) -> None:
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", value): raise ValueError("External preview hash is invalid")
 
     @staticmethod
     def _validate_manual_url(url: str) -> None:
