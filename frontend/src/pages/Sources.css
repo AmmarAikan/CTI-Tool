@@ -1,0 +1,9 @@
+.button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
+.job-panel { margin: 0 0 20px; padding: 18px 20px; background: white; border: 1px solid var(--line); display: grid; gap: 12px; }
+.job-panel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.job-counts { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; }
+.job-counts div { min-width: 90px; padding: 10px; background: #f8fafb; }
+.job-counts dt { color: var(--muted); font-size: 12px; }
+.job-counts dd { margin: 4px 0 0; font-weight: 700; }
+.job-error { color: var(--red); font-size: 13px; }
+@media (max-width: 800px) { .job-panel > div:first-child { align-items: flex-start; flex-direction: column; } }

@@ -39,6 +39,17 @@ export interface DashboardSummary {
   by_pipeline: Record<string, number>;
 }
 
+export type JobState = 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'cancellation_requested' | 'cancelled';
+export interface ExternalJob {
+  job_id: string;
+  command_id: string;
+  state: JobState;
+  created_at: string;
+  updated_at: string;
+  counts: Partial<Record<'accepted_records' | 'review_records' | 'rejected_records' | 'skipped_records' | 'error_count', number>>;
+  error?: string;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);
@@ -134,12 +145,33 @@ function parseDashboardSummary(value: unknown): DashboardSummary {
   };
 }
 
+const JOB_STATES: JobState[] = ['queued', 'running', 'completed', 'partial', 'failed', 'cancellation_requested', 'cancelled'];
+const JOB_COUNT_KEYS = ['accepted_records', 'review_records', 'rejected_records', 'skipped_records', 'error_count'] as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value); }
+
+function parseExternalJob(value: unknown): ExternalJob {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+  const body = value;
+  if (body.schema_version !== '1.0' || typeof body.job_id !== 'string' || body.job_id.length < 10 || typeof body.command_id !== 'string' || body.command_id.length < 10 || typeof body.state !== 'string' || !JOB_STATES.includes(body.state as JobState) || typeof body.created_at !== 'string' || !body.created_at.endsWith('Z') || typeof body.updated_at !== 'string' || !body.updated_at.endsWith('Z') || !isPlainObject(body.progress) || (body.result !== null && !isPlainObject(body.result)) || (body.error !== null && !isPlainObject(body.error))) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+  const counts: ExternalJob['counts'] = {};
+  if (body.result) for (const key of JOB_COUNT_KEYS) {
+    const amount = body.result[key];
+    if (amount !== undefined) {
+      if (!Number.isSafeInteger(amount) || (amount as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+      counts[key] = amount as number;
+    }
+  }
+  const message = body.error && typeof body.error.message === 'string' ? sanitizeError(body.error.message) : undefined;
+  return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at, updated_at: body.updated_at, counts, error: message };
+}
+
 function isRole(value: unknown): value is Role { return value === 'viewer' || value === 'analyst' || value === 'admin'; }
 
 function safeText(value: unknown): string | undefined { return typeof value === 'string' ? value.slice(0, 200) : undefined; }
 
 function sanitizeError(value: string): string {
-  return value.replace(ONION_VALUE, '[redacted]').replace(/(token|password|secret|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[redacted]').slice(0, 300);
+  return value.replace(ONION_VALUE, '[redacted]').replace(/https?:\/\/[^\s"']+/gi, '[redacted]').replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[redacted]').replace(/(token|password|secret|authorization)\s*[=:]\s*[^\s,;]+/gi, '$1=[redacted]').slice(0, 300);
 }
 
 function redactSensitive(value: unknown): unknown {
@@ -162,4 +194,6 @@ export const api = {
   externalHealth: async () => parseHealth(await request<unknown>('/integrations/external-control/health')),
   externalSources: async () => parseSources(await request<unknown>('/integrations/external-control/sources')),
   dashboardSummary: async () => parseDashboardSummary(await request<unknown>('/dashboard/summary')),
+  startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
+  externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),
 };
