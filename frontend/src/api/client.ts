@@ -28,6 +28,17 @@ export interface Source {
   metadata: Record<string, unknown>;
 }
 
+export interface DashboardSummary {
+  events: number;
+  indicators: number;
+  observables: number;
+  correlations: number;
+  sessions: number;
+  outliers: number;
+  by_severity: Record<string, number>;
+  by_pipeline: Record<string, number>;
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message);
@@ -101,6 +112,28 @@ function parseSources(value: unknown): Source[] {
   });
 }
 
+function parseDashboardSummary(value: unknown): DashboardSummary {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError(502, 'invalid_response', 'Invalid dashboard summary response');
+  const body = value as Record<string, unknown>;
+  const count = (key: string) => {
+    const item = body[key];
+    if (!Number.isSafeInteger(item) || (item as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid dashboard summary response');
+    return item as number;
+  };
+  const countMap = (key: string) => {
+    const item = body[key];
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new ApiError(502, 'invalid_response', 'Invalid dashboard summary response');
+    const entries = Object.entries(item);
+    if (entries.some(([name, amount]) => !name || !Number.isSafeInteger(amount) || (amount as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid dashboard summary response');
+    return Object.fromEntries(entries) as Record<string, number>;
+  };
+  return {
+    events: count('events'), indicators: count('indicators'), observables: count('observables'),
+    correlations: count('correlations'), sessions: count('sessions'), outliers: count('outliers'),
+    by_severity: countMap('by_severity'), by_pipeline: countMap('by_pipeline'),
+  };
+}
+
 function isRole(value: unknown): value is Role { return value === 'viewer' || value === 'analyst' || value === 'admin'; }
 
 function safeText(value: unknown): string | undefined { return typeof value === 'string' ? value.slice(0, 200) : undefined; }
@@ -128,4 +161,5 @@ export const api = {
   me: async () => parseUser(await request<unknown>('/auth/me')),
   externalHealth: async () => parseHealth(await request<unknown>('/integrations/external-control/health')),
   externalSources: async () => parseSources(await request<unknown>('/integrations/external-control/sources')),
+  dashboardSummary: async () => parseDashboardSummary(await request<unknown>('/dashboard/summary')),
 };
