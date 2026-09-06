@@ -185,7 +185,8 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         return _manual_job(services, current, str(body.url), True, idempotency_key, scope="recheck_url")
 
-    @app.post(f"{API_PREFIX}/manual-sources/previews", response_model=ManualPreviewResponse, status_code=201)
+    @app.post(f"{API_PREFIX}/manual-sources/previews", response_model=ManualPreviewResponse,
+              response_model_exclude_none=True, status_code=201)
     def create_manual_preview(body: ManualPreviewRequestBody,
                               current: Principal = Depends(permitted("manual:preview"))) -> ManualPreviewResponse:
         preview = _previews(services)

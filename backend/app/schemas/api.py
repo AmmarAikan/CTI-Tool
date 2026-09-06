@@ -67,6 +67,21 @@ class ExternalManualPreviewRejectRequest(BaseModel):
     reason: Literal["not_relevant", "duplicate", "user_cancelled"]
 
 
+class ExternalManualPreviewItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    item_index: int = Field(ge=1)
+    title: str = Field(max_length=200)
+    excerpt: str = Field(max_length=300)
+    page_type: Literal["article"]
+    disposition: Literal["accepted", "review", "rejected"]
+    classification_label: str | None = Field(default=None, max_length=80)
+    classification_confidence: float | None = Field(default=None, ge=0, le=1)
+    privacy_status: Literal["reviewed", "review_required"]
+    review_reasons: list[Literal["privacy_review", "classification_review", "relevance_rejected"]] = Field(max_length=3)
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    published: str | None = Field(default=None, max_length=40)
+
+
 class ExternalManualPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal["1.0"]
@@ -84,6 +99,9 @@ class ExternalManualPreviewResponse(BaseModel):
     privacy_status: Literal["reviewed", "review_required"]
     review_reasons: list[Literal["privacy_review", "classification_review", "relevance_rejected"]]
     content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    items_preview: list[ExternalManualPreviewItemResponse] = Field(max_length=20)
+    items_preview_total: int = Field(ge=0)
+    items_preview_truncated: bool
     counts: dict[str, int]
 
 

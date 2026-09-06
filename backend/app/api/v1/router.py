@@ -467,7 +467,7 @@ def external_control_manual_recheck(
 
 
 @router.post("/integrations/external-control/manual-sources/previews", tags=["external-control"],
-             response_model=ExternalManualPreviewResponse, status_code=201)
+             response_model=ExternalManualPreviewResponse, response_model_exclude_none=True, status_code=201)
 def external_control_manual_preview(payload: ExternalManualPreviewRequest, db: SessionDep,
                                     user: Annotated[User, Depends(require_roles("admin", "analyst"))]):
     result = external_control_call(lambda client: client.create_manual_preview(str(payload.url)))

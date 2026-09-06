@@ -246,11 +246,42 @@ class ExternalControlClient:
     def _preview_response(payload: Any) -> dict[str, Any]:
         required = {"schema_version", "preview_id", "state", "created_at", "expires_at", "display_url", "page_type",
                     "title", "excerpt", "disposition", "classification_label", "classification_confidence",
-                    "privacy_status", "review_reasons", "content_sha256", "counts"}
+                    "privacy_status", "review_reasons", "content_sha256", "counts", "items_preview",
+                    "items_preview_total", "items_preview_truncated"}
         if not isinstance(payload, dict) or set(payload) != required or payload.get("schema_version") != "1.0" or payload.get("state") != "pending":
             raise ExternalControlTransportError("External preview contract is invalid")
         if not isinstance(payload.get("preview_id"), str) or not isinstance(payload.get("counts"), dict):
             raise ExternalControlTransportError("External preview contract is invalid")
+        items = payload.get("items_preview")
+        item_keys = {"item_index", "title", "excerpt", "page_type", "disposition", "classification_label",
+                     "classification_confidence", "privacy_status", "review_reasons", "content_sha256"}
+        if (not isinstance(items, list) or len(items) > 20 or type(payload.get("items_preview_total")) is not int
+                or payload["items_preview_total"] < len(items) or not isinstance(payload.get("items_preview_truncated"), bool)
+                or payload["items_preview_truncated"] != (payload["items_preview_total"] > len(items))):
+            raise ExternalControlTransportError("External preview contract is invalid")
+        for index, item in enumerate(items, start=1):
+            if not isinstance(item, dict) or set(item) not in (item_keys, item_keys | {"published"}):
+                raise ExternalControlTransportError("External preview item contract is invalid")
+            confidence = item.get("classification_confidence")
+            label = item.get("classification_label")
+            reasons = item.get("review_reasons")
+            published = item.get("published")
+            if (type(item.get("item_index")) is not int or item["item_index"] != index
+                    or not isinstance(item.get("title"), str) or len(item["title"]) > 200
+                    or not isinstance(item.get("excerpt"), str) or len(item["excerpt"]) > 300
+                    or item.get("page_type") != "article"
+                    or item.get("disposition") not in {"accepted", "review", "rejected"}
+                    or item.get("privacy_status") not in {"reviewed", "review_required"}
+                    or (label is not None and (not isinstance(label, str) or len(label) > 80))
+                    or (confidence is not None and (not isinstance(confidence, (int, float)) or isinstance(confidence, bool)
+                                                    or confidence < 0 or confidence > 1))
+                    or not isinstance(reasons, list) or len(reasons) > 3
+                    or any(reason not in {"privacy_review", "classification_review", "relevance_rejected"} for reason in reasons)
+                    or not isinstance(item.get("content_sha256"), str)
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", item["content_sha256"])
+                    or (published is not None and (not isinstance(published, str) or len(published) > 40 or not published.endswith("Z")))
+                    or ((item["privacy_status"] == "review_required" or item["disposition"] == "rejected") and item["excerpt"])):
+                raise ExternalControlTransportError("External preview item contract is invalid")
         return {key: payload[key] for key in required}
 
     @classmethod
