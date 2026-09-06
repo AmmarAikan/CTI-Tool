@@ -19,15 +19,15 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 describe('manual preview workflow', () => {
   it('denies viewers and allows analyst/admin', async () => {
     mockRole('viewer'); renderWithProviders(<Manual />, ['/manual']); await waitFor(() => expect(screen.queryByRole('heading', { name: 'معاينة رابط يدوي' })).not.toBeInTheDocument()); cleanup();
-    mockRole('analyst'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument(); cleanup();
-    mockRole('admin'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument();
+    mockRole('analyst'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'إعادة الفحص' })).toBeInTheDocument(); cleanup();
+    mockRole('admin'); renderWithProviders(<Manual />); expect(await screen.findByRole('button', { name: 'معاينة الرابط' })).toBeInTheDocument(); expect(screen.getByRole('button', { name: 'إعادة الفحص' })).toBeInTheDocument();
   });
 
   it('creates one preview, renders only sanitized fields, and prevents duplicates', async () => {
     let resolve!: (value: Response) => void; const pending = new Promise<Response>((done) => { resolve = done; });
     const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? pending : response(job('completed')));
     renderWithProviders(<Manual />); const actor = userEvent.setup();
-    await actor.type(await screen.findByRole('textbox'), 'https://example.org/report?token=hidden');
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report?token=hidden');
     const button = screen.getByRole('button', { name: 'معاينة الرابط' }); await actor.click(button); expect(button).toBeDisabled(); button.click();
     const calls = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/previews')); expect(calls).toHaveLength(1);
     expect(calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ url: 'https://example.org/report?token=hidden' }) });
@@ -37,7 +37,7 @@ describe('manual preview workflow', () => {
 
   it('requires approval confirmation and follows the approval job', async () => {
     const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : path.endsWith('/approve') ? response(job('queued')) : response(job('completed')));
-    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     vi.spyOn(window, 'confirm').mockReturnValue(false); await actor.click(await screen.findByRole('button', { name: 'اعتماد وحفظ' })); expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/approve'))).toBe(false);
     vi.mocked(window.confirm).mockReturnValue(true); await actor.click(screen.getByRole('button', { name: 'اعتماد وحفظ' }));
     expect(await screen.findByText(/مكتملة/)).toBeInTheDocument();
@@ -54,7 +54,7 @@ describe('manual preview workflow', () => {
     const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? response(listing)
       : path.endsWith('/approve') ? response(job('queued')) : response(job('completed')));
     renderWithProviders(<Manual />); const actor = userEvent.setup();
-    await actor.type(await screen.findByRole('textbox'), 'https://example.org/listing');
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/listing');
     await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     expect(await screen.findAllByRole('listitem')).toHaveLength(20);
     expect(screen.getByText('عرض 20 من 24')).toBeInTheDocument();
@@ -67,16 +67,62 @@ describe('manual preview workflow', () => {
 
   it('rejects with a controlled reason and removes preview content', async () => {
     mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : response({ schema_version: '1.0', preview_id: preview.preview_id, state: 'rejected', decided_at: '2026-09-06T00:01:00Z' }));
-    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     await actor.selectOptions(await screen.findByRole('combobox'), 'duplicate'); await actor.click(screen.getByRole('button', { name: 'تجاهل' }));
     expect(await screen.findByText(/تم تجاهل المعاينة/)).toBeInTheDocument(); expect(screen.queryByText(preview.title)).not.toBeInTheDocument(); expect(screen.queryByText(preview.excerpt)).not.toBeInTheDocument();
   });
 
   it('handles expiry, disconnected service, malformed responses, and 401 safely', async () => {
     for (const [body, status, expected] of [[{ code: 'preview_expired', message: 'raw secret' }, 410, 'انتهت صلاحية'], [{}, 200, 'استجابة غير صالحة']] as const) {
-      mockRole('analyst', () => response(body, status)); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
+      mockRole('analyst', () => response(body, status)); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(new RegExp(expected))).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
     }
-    mockRole('analyst', () => Promise.reject(new TypeError('offline'))); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(/غير متصلة/)).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
-    mockRole('analyst', () => response({ detail: 'expired' }, 401)); renderWithProviders(<Manual />); await actor.type(await screen.findByRole('textbox'), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); await waitFor(() => expect(sessionStorage.getItem('cti_access_token')).toBeNull());
+    mockRole('analyst', () => Promise.reject(new TypeError('offline'))); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(/غير متصلة/)).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
+    mockRole('analyst', () => response({ detail: 'expired' }, 401)); renderWithProviders(<Manual />); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); await waitFor(() => expect(sessionStorage.getItem('cti_access_token')).toBeNull());
+  });
+
+  it('requires recheck confirmation, sends the exact body, prevents duplicates, and polls to terminal', async () => {
+    let resolve!: (value: Response) => void;
+    const pending = new Promise<Response>((done) => { resolve = done; });
+    const fetchMock = mockRole('analyst', (path) => path.endsWith('/manual-sources/recheck') ? pending : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    const input = await screen.findByRole('textbox', { name: 'رابط المصدر لإعادة الفحص' });
+    await actor.type(input, 'https://example.org/existing');
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    await actor.click(screen.getByRole('button', { name: 'إعادة الفحص' }));
+    expect(fetchMock.mock.calls.some(([value]) => String(value).endsWith('/manual-sources/recheck'))).toBe(false);
+    vi.mocked(window.confirm).mockReturnValue(true);
+    const button = screen.getByRole('button', { name: 'إعادة الفحص' });
+    await actor.click(button); expect(button).toBeDisabled(); button.click();
+    const calls = fetchMock.mock.calls.filter(([value]) => String(value).endsWith('/manual-sources/recheck'));
+    expect(calls).toHaveLength(1);
+    expect(calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ url: 'https://example.org/existing', force: true }) });
+    resolve(await response(job('queued')));
+    expect(await screen.findByText(/مكتملة/)).toBeInTheDocument();
+  });
+
+  it('expires the session and never displays unsafe recheck errors', async () => {
+    mockRole('admin', (path) => path.endsWith('/manual-sources/recheck')
+      ? response({ code: 'denied', message: 'https://hidden.onion/?token=secret 10.0.0.1' }, 401) : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط المصدر لإعادة الفحص' }), 'https://example.org/existing');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await actor.click(screen.getByRole('button', { name: 'إعادة الفحص' }));
+    await waitFor(() => expect(sessionStorage.getItem('cti_access_token')).toBeNull());
+    expect(document.body).not.toHaveTextContent('hidden.onion');
+    expect(document.body).not.toHaveTextContent('10.0.0.1');
+    expect(document.body).not.toHaveTextContent('token=secret');
+  });
+
+  it('shows only a generic sanitized recheck failure', async () => {
+    mockRole('analyst', (path) => path.endsWith('/manual-sources/recheck')
+      ? response({ code: 'upstream_failed', message: 'https://hidden.onion/?token=secret 10.0.0.1' }, 503) : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط المصدر لإعادة الفحص' }), 'https://example.org/existing');
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await actor.click(screen.getByRole('button', { name: 'إعادة الفحص' }));
+    expect(await screen.findByText('تعذر تنفيذ العملية بأمان.')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('hidden.onion');
+    expect(document.body).not.toHaveTextContent('10.0.0.1');
+    expect(document.body).not.toHaveTextContent('token=secret');
   });
 });

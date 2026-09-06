@@ -37,10 +37,14 @@ export function Manual() {
   const [reason, setReason] = useState<keyof typeof REASONS>('not_relevant');
   const [message, setMessage] = useState('');
   const [validationError, setValidationError] = useState('');
+  const [recheckUrl, setRecheckUrl] = useState('');
+  const [recheckValidationError, setRecheckValidationError] = useState('');
+  const [recheckJob, setRecheckJob] = useState<ExternalJob>();
   const create = useMutation({ mutationFn: api.createManualPreview, onSuccess: (value) => { setPreview(value); setUrl(''); setMessage(''); } });
   const clearConsumed = (error: unknown) => { if (error instanceof ApiError && [401, 409, 410].includes(error.status)) setPreview(undefined); };
   const approve = useMutation({ mutationFn: api.approveManualPreview, onSuccess: (value) => { setJob(value); setPreview(undefined); setMessage('تم قبول طلب الاعتماد، وجار متابعة الحفظ والتصدير.'); }, onError: clearConsumed });
   const reject = useMutation({ mutationFn: () => preview ? api.rejectManualPreview(preview.preview_id, reason) : Promise.reject(new Error('missing preview')), onSuccess: () => { setPreview(undefined); setMessage('تم تجاهل المعاينة دون تسجيل الرابط أو حفظ محتواه.'); window.setTimeout(() => inputRef.current?.focus(), 0); }, onError: clearConsumed });
+  const recheck = useMutation({ mutationFn: api.recheckManualSource, onSuccess: (value) => { setRecheckJob(value); setRecheckUrl(''); } });
   useEffect(() => {
     if (!preview) return;
     const remaining = new Date(preview.expires_at).getTime() - Date.now();
@@ -55,7 +59,9 @@ export function Manual() {
   if (loading) return <LoadingState label="جار التحقق من الصلاحيات..." />;
   if (!can('analyst')) return <Navigate to="/" replace />;
   const activeJob = Boolean(job && !TERMINAL_STATES.includes(job.state));
+  const activeRecheck = Boolean(recheckJob && !TERMINAL_STATES.includes(recheckJob.state));
   const busy = create.isPending || approve.isPending || reject.isPending || activeJob;
+  const recheckBusy = recheck.isPending || activeRecheck;
   function submit(event: FormEvent) {
     event.preventDefault(); if (busy) return;
     const value = url.trim();
@@ -65,10 +71,18 @@ export function Manual() {
   function approvePreview() {
     if (preview && !busy && window.confirm('سيُحفظ ويُعالج ويُصدّر المحتوى المجمد الذي راجعته، دون إعادة جلب الرابط. هل تريد الاعتماد؟')) approve.mutate(preview);
   }
+  function submitRecheck(event: FormEvent) {
+    event.preventDefault(); if (recheckBusy) return;
+    const value = recheckUrl.trim();
+    if (!validUrl(value)) { setRecheckValidationError('أدخل رابط HTTP أو HTTPS صالحًا دون بيانات اعتماد.'); return; }
+    if (!window.confirm('إعادة الفحص تفرض معالجة المصدر الحالي وقد تحدّث النتائج والتصدير. هل تريد المتابعة؟')) return;
+    setRecheckValidationError(''); setRecheckJob(undefined); recheck.reset(); recheck.mutate(value);
+  }
 
   const error = create.error || approve.error || reject.error;
   return <section className="page-section manual-page"><div className="section-heading"><div><span className="eyebrow">المصادر / 03</span><h2>معاينة رابط يدوي</h2><p>راجع نسخة مؤقتة ومنقّاة قبل الحفظ أو التصدير.</p></div></div>
     <form className="manual-form" onSubmit={submit} noValidate><label htmlFor="manual-url">رابط HTTP أو HTTPS</label><input ref={inputRef} id="manual-url" type="url" inputMode="url" dir="ltr" placeholder="https://example.org/report" value={url} disabled={busy} aria-invalid={Boolean(validationError)} aria-describedby="manual-url-help manual-url-error" onChange={(event) => { setUrl(event.target.value); setValidationError(''); }} /><span id="manual-url-help" className="muted-text">لن يُسجّل الرابط أو يُصدّر شيء قبل اعتماد المعاينة صراحة.</span>{validationError && <span id="manual-url-error" className="field-error" role="alert">{validationError}</span>}<button className="button" type="submit" disabled={busy || !url.trim()}>{create.isPending ? 'جار إنشاء المعاينة...' : 'معاينة الرابط'}</button></form>
+    <section className="recheck-section" aria-labelledby="recheck-title"><h3 id="recheck-title">إعادة فحص مصدر يدوي</h3><p>أعد معالجة رابط مصدر يدوي مسجل مسبقًا. لا يعرض هذا الإجراء معاينة جديدة.</p><form className="manual-form" onSubmit={submitRecheck} noValidate><label htmlFor="manual-recheck-url">رابط المصدر لإعادة الفحص</label><input id="manual-recheck-url" type="url" inputMode="url" dir="ltr" placeholder="https://example.org/report" value={recheckUrl} disabled={recheckBusy} aria-invalid={Boolean(recheckValidationError)} aria-describedby="manual-recheck-help manual-recheck-error" onChange={(event) => { setRecheckUrl(event.target.value); setRecheckValidationError(''); }} /><span id="manual-recheck-help" className="muted-text">يتطلب تأكيدًا صريحًا لأن إعادة الفحص تفرض المعالجة.</span>{recheckValidationError && <span id="manual-recheck-error" className="field-error" role="alert">{recheckValidationError}</span>}<button className="button" type="submit" disabled={recheckBusy || !recheckUrl.trim()}>{recheck.isPending ? 'جار إرسال إعادة الفحص...' : 'إعادة الفحص'}</button></form>{Boolean(recheck.error) && <div className="job-panel error-panel" role="alert"><strong>تعذر بدء إعادة الفحص</strong><span>{safeError(recheck.error)}</span></div>}{recheckJob && <JobMonitor sourceId="manual-recheck" job={recheckJob} onUpdate={(_key, value) => setRecheckJob(value)} />}</section>
     {Boolean(error) && <div className="job-panel error-panel" role="alert"><strong>تعذر إكمال العملية</strong><span>{safeError(error)}</span></div>}
     {message && <div className="job-panel" role="status">{message}</div>}
     {preview && <article className="preview-card" aria-labelledby="preview-title"><div className="preview-header"><div><span className="eyebrow">معاينة مؤقتة</span><h3 id="preview-title">{preview.title || 'دون عنوان'}</h3></div><strong>{LABELS[preview.disposition]}</strong></div><code dir="ltr">{preview.display_url}</code><dl className="preview-details"><div><dt>نوع الصفحة</dt><dd>{preview.page_type}</dd></div><div><dt>تنتهي</dt><dd>{new Date(preview.expires_at).toLocaleString('ar')}</dd></div></dl><dl className="job-counts">{Object.entries(preview.counts).map(([key, value]) => <div key={key}><dt>{COUNT_LABELS[key as keyof typeof COUNT_LABELS]}</dt><dd>{value}</dd></div>)}</dl>

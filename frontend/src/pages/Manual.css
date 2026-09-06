@@ -20,4 +20,7 @@
 .preview-item { padding: 16px; border: 1px solid var(--line); background: #f8fafb; display: grid; gap: 10px; }
 .preview-item h5 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
 .preview-card .manual-warning { margin: 0; }
+.recheck-section { max-width: 680px; margin-bottom: 22px; padding-top: 8px; border-top: 1px solid var(--line); }
+.recheck-section h3 { margin-bottom: 6px; }
+.recheck-section > p { color: var(--muted); line-height: 1.7; }
 @media (max-width: 600px) { .manual-form { padding: 16px; } .manual-form .button { width: 100%; } }
