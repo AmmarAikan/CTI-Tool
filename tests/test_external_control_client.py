@@ -163,6 +163,10 @@ class ExternalControlClientTests(unittest.TestCase):
             "excerpt": "Safe excerpt", "disposition": "accepted", "classification_label": "cti_related",
             "classification_confidence": 0.9, "privacy_status": "reviewed", "review_reasons": [],
             "content_sha256": "sha256:" + "a" * 64,
+            "items_preview": [{"item_index": 1, "title": "Safe", "excerpt": "Safe excerpt", "page_type": "article",
+                "disposition": "accepted", "classification_label": "cti_related", "classification_confidence": 0.9,
+                "privacy_status": "reviewed", "review_reasons": [], "content_sha256": "sha256:" + "b" * 64}],
+            "items_preview_total": 1, "items_preview_truncated": False,
             "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0}}
         queued = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
             "state": "queued", "created_at": "2026-09-06T00:00:00Z", "updated_at": "2026-09-06T00:00:00Z",
@@ -175,6 +179,26 @@ class ExternalControlClientTests(unittest.TestCase):
         client.reject_manual_preview(preview["preview_id"], "duplicate", idempotency_key="reject-once")
         self.assertEqual(client.session.calls[1][2]["headers"]["Idempotency-Key"], "approve-once")
         self.assertEqual(client.session.calls[2][2]["headers"]["Idempotency-Key"], "reject-once")
+
+    def test_manual_preview_proxy_rejects_malformed_or_leaking_item_contract(self) -> None:
+        base = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
+            "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z",
+            "display_url": "https://example.test/report", "page_type": "article", "title": "Safe", "excerpt": "",
+            "disposition": "accepted", "classification_label": None, "classification_confidence": None,
+            "privacy_status": "reviewed", "review_reasons": [], "content_sha256": "sha256:" + "a" * 64,
+            "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0},
+            "items_preview_total": 1, "items_preview_truncated": False}
+        item = {"item_index": 1, "title": "Safe", "excerpt": "", "page_type": "article", "disposition": "accepted",
+            "classification_label": None, "classification_confidence": None, "privacy_status": "reviewed",
+            "review_reasons": [], "content_sha256": "sha256:" + "b" * 64}
+        from backend.app.integrations.external_control_client import ExternalControlTransportError
+        for changed in ({**item, "url": "https://private.example/?token=x"},
+                        {**item, "title": "x" * 201},
+                        {**item, "privacy_status": "review_required", "excerpt": "private"}):
+            with self.subTest(changed=changed):
+                client = self.client([FakeResponse({**base, "items_preview": [changed]})])
+                with self.assertRaises(ExternalControlTransportError):
+                    client.create_manual_preview("https://example.test/report")
 
 
 if __name__ == "__main__":

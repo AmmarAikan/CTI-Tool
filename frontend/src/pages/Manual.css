@@ -14,4 +14,10 @@
 .preview-details dt { color: var(--muted); font-size: 12px; }
 .preview-details dd { margin: 4px 0 0; font-weight: 700; overflow-wrap: anywhere; }
 .preview-actions label { display: flex; align-items: center; gap: 8px; }
+.preview-list-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.preview-list-heading h4 { margin: 0; }
+.preview-items { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; }
+.preview-item { padding: 16px; border: 1px solid var(--line); background: #f8fafb; display: grid; gap: 10px; }
+.preview-item h5 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.preview-card .manual-warning { margin: 0; }
 @media (max-width: 600px) { .manual-form { padding: 16px; } .manual-form .button { width: 100%; } }

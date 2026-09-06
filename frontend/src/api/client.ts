@@ -65,7 +65,23 @@ export interface ManualPreview {
   privacy_status: 'reviewed' | 'review_required';
   review_reasons: Array<'privacy_review' | 'classification_review' | 'relevance_rejected'>;
   content_sha256: string;
+  items_preview: ManualPreviewItem[];
+  items_preview_total: number;
+  items_preview_truncated: boolean;
   counts: Record<'items' | 'accepted' | 'review' | 'rejected' | 'skipped' | 'errors', number>;
+}
+export interface ManualPreviewItem {
+  item_index: number;
+  title: string;
+  excerpt: string;
+  page_type: 'article';
+  disposition: 'accepted' | 'review' | 'rejected';
+  classification_label?: string;
+  classification_confidence?: number;
+  privacy_status: 'reviewed' | 'review_required';
+  review_reasons: Array<'privacy_review' | 'classification_review' | 'relevance_rejected'>;
+  content_sha256: string;
+  published?: string;
 }
 export interface ManualPreviewRejection { preview_id: string; state: 'rejected'; decided_at: string; }
 
@@ -188,7 +204,8 @@ function parseExternalJob(value: unknown): ExternalJob {
 function parseManualPreview(value: unknown): ManualPreview {
   if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
   const required = ['schema_version', 'preview_id', 'state', 'created_at', 'expires_at', 'display_url', 'page_type', 'title', 'excerpt',
-    'disposition', 'classification_label', 'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256', 'counts'];
+    'disposition', 'classification_label', 'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256', 'counts',
+    'items_preview', 'items_preview_total', 'items_preview_truncated'];
   if (Object.keys(value).some((key) => !required.includes(key)) || required.some((key) => !(key in value))
     || value.schema_version !== '1.0' || typeof value.preview_id !== 'string' || value.preview_id.length < 20 || value.state !== 'pending'
     || typeof value.created_at !== 'string' || !value.created_at.endsWith('Z') || typeof value.expires_at !== 'string' || !value.expires_at.endsWith('Z')
@@ -199,13 +216,36 @@ function parseManualPreview(value: unknown): ManualPreview {
     || (value.classification_confidence !== null && (typeof value.classification_confidence !== 'number' || value.classification_confidence < 0 || value.classification_confidence > 1))
     || !['reviewed', 'review_required'].includes(String(value.privacy_status)) || !Array.isArray(value.review_reasons)
     || value.review_reasons.some((reason) => !['privacy_review', 'classification_review', 'relevance_rejected'].includes(String(reason)))
-    || typeof value.content_sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.content_sha256) || !isPlainObject(value.counts)) {
+    || typeof value.content_sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.content_sha256) || !isPlainObject(value.counts)
+    || !Array.isArray(value.items_preview) || value.items_preview.length > 20
+    || !Number.isSafeInteger(value.items_preview_total) || (value.items_preview_total as number) < value.items_preview.length
+    || typeof value.items_preview_truncated !== 'boolean'
+    || value.items_preview_truncated !== ((value.items_preview_total as number) > value.items_preview.length)
+    || value.items_preview.some((item, index) => !validManualPreviewItem(item, index + 1))) {
     throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
   }
   const countKeys = ['items', 'accepted', 'review', 'rejected', 'skipped', 'errors'];
   const counts = value.counts as Record<string, unknown>;
   if (Object.keys(counts).length !== countKeys.length || countKeys.some((key) => !Number.isSafeInteger(counts[key]) || (counts[key] as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
   return value as unknown as ManualPreview;
+}
+
+function validManualPreviewItem(value: unknown, index: number): boolean {
+  if (!isPlainObject(value)) return false;
+  const required = ['item_index', 'title', 'excerpt', 'page_type', 'disposition', 'classification_label',
+    'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256'];
+  const allowed = [...required, 'published'];
+  return !Object.keys(value).some((key) => !allowed.includes(key)) && required.every((key) => key in value)
+    && value.item_index === index && typeof value.title === 'string' && value.title.length <= 200
+    && typeof value.excerpt === 'string' && value.excerpt.length <= 300 && value.page_type === 'article'
+    && ['accepted', 'review', 'rejected'].includes(String(value.disposition))
+    && (value.classification_label === null || (typeof value.classification_label === 'string' && value.classification_label.length <= 80))
+    && (value.classification_confidence === null || (typeof value.classification_confidence === 'number' && value.classification_confidence >= 0 && value.classification_confidence <= 1))
+    && ['reviewed', 'review_required'].includes(String(value.privacy_status)) && Array.isArray(value.review_reasons)
+    && value.review_reasons.length <= 3
+    && value.review_reasons.every((reason) => ['privacy_review', 'classification_review', 'relevance_rejected'].includes(String(reason)))
+    && typeof value.content_sha256 === 'string' && /^sha256:[0-9a-f]{64}$/.test(value.content_sha256)
+    && (!('published' in value) || (typeof value.published === 'string' && value.published.length <= 40 && value.published.endsWith('Z')));
 }
 
 function parseManualPreviewRejection(value: unknown): ManualPreviewRejection {

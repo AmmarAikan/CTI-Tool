@@ -6,7 +6,7 @@ import { Manual } from '../pages/Manual';
 import { renderWithProviders } from './fixtures';
 
 const users = { viewer: { id: 'u1', username: 'viewer', role: 'viewer', is_active: true }, analyst: { id: 'u2', username: 'analyst', role: 'analyst', is_active: true }, admin: { id: 'u3', username: 'admin', role: 'admin', is_active: true } } as const;
-const preview = { schema_version: '1.0', preview_id: 'prv-12345678901234567890', state: 'pending', created_at: '2026-09-06T00:00:00Z', expires_at: '2099-09-06T00:15:00Z', display_url: 'https://example.org/report', page_type: 'article', title: 'تقرير تهديد منقّى', excerpt: 'مقتطف قصير خالٍ من البيانات الحساسة.', disposition: 'accepted', classification_label: 'cti_related', classification_confidence: .91, privacy_status: 'reviewed', review_reasons: [], content_sha256: 'sha256:' + 'a'.repeat(64), counts: { items: 1, accepted: 1, review: 0, rejected: 0, skipped: 0, errors: 0 } };
+const preview = { schema_version: '1.0', preview_id: 'prv-12345678901234567890', state: 'pending', created_at: '2026-09-06T00:00:00Z', expires_at: '2099-09-06T00:15:00Z', display_url: 'https://example.org/report', page_type: 'article', title: 'تقرير تهديد منقّى', excerpt: 'مقتطف قصير خالٍ من البيانات الحساسة.', disposition: 'accepted', classification_label: 'cti_related', classification_confidence: .91, privacy_status: 'reviewed', review_reasons: [], content_sha256: 'sha256:' + 'a'.repeat(64), items_preview: [{ item_index: 1, title: 'المقال الأول', excerpt: 'ملخص آمن', page_type: 'article', disposition: 'accepted', classification_label: 'cti_related', classification_confidence: .91, privacy_status: 'reviewed', review_reasons: [], content_sha256: 'sha256:' + 'b'.repeat(64) }], items_preview_total: 1, items_preview_truncated: false, counts: { items: 1, accepted: 1, review: 0, rejected: 0, skipped: 0, errors: 0 } };
 const job = (state: string) => ({ schema_version: '1.0', job_id: 'job-manual-1234', command_id: 'cmd-manual-1234', state, created_at: '2026-09-06T00:00:00Z', updated_at: '2026-09-06T00:00:01Z', progress: {}, result: state === 'completed' ? { accepted_records: 1 } : null, error: null });
 const response = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
 function mockRole(role: keyof typeof users, handler?: (path: string, init?: RequestInit) => Promise<Response>) {
@@ -32,7 +32,7 @@ describe('manual preview workflow', () => {
     const calls = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/previews')); expect(calls).toHaveLength(1);
     expect(calls[0][1]).toMatchObject({ method: 'POST', body: JSON.stringify({ url: 'https://example.org/report?token=hidden' }) });
     resolve(await response(preview)); expect(await screen.findByText(preview.title)).toBeInTheDocument();
-    expect(screen.getByText(preview.excerpt)).toBeInTheDocument(); expect(document.body).not.toHaveTextContent('token=hidden');
+    expect(screen.getByText(preview.items_preview[0].excerpt)).toBeInTheDocument(); expect(document.body).not.toHaveTextContent('token=hidden');
   });
 
   it('requires approval confirmation and follows the approval job', async () => {
@@ -42,6 +42,27 @@ describe('manual preview workflow', () => {
     vi.mocked(window.confirm).mockReturnValue(true); await actor.click(screen.getByRole('button', { name: 'اعتماد وحفظ' }));
     expect(await screen.findByText(/مكتملة/)).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approve')); expect(call?.[1]).toMatchObject({ method: 'POST', body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) });
+  });
+
+  it('renders twenty listing items, reports truncation, and approves the complete preview hash', async () => {
+    const items = Array.from({ length: 20 }, (_, index) => ({
+      ...preview.items_preview[0], item_index: index + 1, title: `مقال آمن ${index + 1}`,
+      content_sha256: 'sha256:' + (index % 10).toString().repeat(64),
+    }));
+    const listing = { ...preview, page_type: 'listing', items_preview: items, items_preview_total: 24,
+      items_preview_truncated: true, counts: { ...preview.counts, items: 24, accepted: 24 } };
+    const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? response(listing)
+      : path.endsWith('/approve') ? response(job('queued')) : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox'), 'https://example.org/listing');
+    await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    expect(await screen.findAllByRole('listitem')).toHaveLength(20);
+    expect(screen.getByText('عرض 20 من 24')).toBeInTheDocument();
+    expect(screen.getByText(/كامل المعاينة المجمدة/)).toBeInTheDocument();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    await actor.click(screen.getByRole('button', { name: 'اعتماد وحفظ' }));
+    const call = fetchMock.mock.calls.find(([input]) => String(input).endsWith('/approve'));
+    expect(call?.[1]).toMatchObject({ body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) });
   });
 
   it('rejects with a controlled reason and removes preview content', async () => {

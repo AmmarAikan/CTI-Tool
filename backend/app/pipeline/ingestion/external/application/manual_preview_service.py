@@ -21,6 +21,7 @@ from backend.app.pipeline.ingestion.external.common.models import ExternalCTIIte
 
 MAX_PREVIEW_BYTES = 1024 * 1024
 MAX_CLEANUP_ROWS = 50
+MAX_ITEMS_PREVIEW = 20
 SAFE_REASONS = frozenset({"not_relevant", "duplicate", "user_cancelled"})
 
 
@@ -203,6 +204,8 @@ def _safe_preview(record: PreviewRecord, bundle: ManualPreviewBundle) -> dict[st
     title = _clean(item.title if item else "")
     excerpt = _clean(item.summary if item and privacy.get("status") != "review_required" else "")
     result = bundle.result
+    items_preview = [_safe_item_preview(index, value, item_disposition)
+                     for index, (value, item_disposition) in enumerate(bundle.items[:MAX_ITEMS_PREVIEW], start=1)]
     return {"schema_version": "1.0", "preview_id": record.preview_id, "state": record.state,
             "created_at": record.created_at, "expires_at": record.expires_at, "display_url": display,
             "page_type": bundle.page_type, "title": title[:300], "excerpt": excerpt[:500],
@@ -210,8 +213,41 @@ def _safe_preview(record: PreviewRecord, bundle: ManualPreviewBundle) -> dict[st
             "classification_confidence": round(classification.score, 4) if classification.score is not None else None,
             "privacy_status": str(privacy.get("status") or "reviewed"), "review_reasons": sorted(set(reasons)),
             "content_sha256": record.content_sha256,
+            "items_preview": items_preview, "items_preview_total": len(bundle.items),
+            "items_preview_truncated": len(bundle.items) > MAX_ITEMS_PREVIEW,
             "counts": {"items": len(bundle.items), "accepted": result.accepted_records, "review": result.review_records,
                        "rejected": result.rejected_records, "skipped": result.skipped_records, "errors": result.error_count}}
+
+
+def _safe_item_preview(index: int, item: ExternalCTIItem, disposition: str) -> dict[str, Any]:
+    privacy = item.metadata.get("privacy", {})
+    privacy_status = str(privacy.get("status") or "reviewed")
+    reasons = []
+    if privacy_status == "review_required": reasons.append("privacy_review")
+    if disposition == "review": reasons.append("classification_review")
+    if disposition == "rejected": reasons.append("relevance_rejected")
+    published = _safe_published(item.published)
+    result = {
+        "item_index": index, "title": _clean(item.title)[:200],
+        "excerpt": _clean(item.summary)[:300] if privacy_status == "reviewed" and disposition != "rejected" else "",
+        "page_type": "article", "disposition": disposition,
+        "classification_label": _clean(item.classification.label or "")[:80] or None,
+        "classification_confidence": round(item.classification.score, 4) if item.classification.score is not None else None,
+        "privacy_status": privacy_status, "review_reasons": sorted(set(reasons))[:3],
+        "content_sha256": item.content_hash,
+    }
+    if published is not None: result["published"] = published
+    return result
+
+
+def _safe_published(value: str | None) -> str | None:
+    if not value or len(value) > 40: return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None: return None
+        return _time(parsed)
+    except ValueError:
+        return None
 
 
 def _clean(value: str) -> str:

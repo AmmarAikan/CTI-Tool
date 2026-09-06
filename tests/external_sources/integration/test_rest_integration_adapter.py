@@ -97,6 +97,10 @@ class RestIntegrationAdapterTests(unittest.TestCase):
             "page_type": "article", "title": "Safe title", "excerpt": "Safe excerpt", "disposition": "accepted",
             "classification_label": "cti_related", "classification_confidence": 0.9, "privacy_status": "reviewed",
             "review_reasons": [], "content_sha256": "sha256:" + "a" * 64,
+            "items_preview": [{"item_index": 1, "title": "Safe title", "excerpt": "Safe excerpt", "page_type": "article",
+                "disposition": "accepted", "classification_label": "cti_related", "classification_confidence": 0.9,
+                "privacy_status": "reviewed", "review_reasons": [], "content_sha256": "sha256:" + "b" * 64}],
+            "items_preview_total": 1, "items_preview_truncated": False,
             "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0}}
         self.previews.reject.return_value = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890",
             "state": "rejected", "decided_at": "2026-09-06T00:01:00Z"}
