@@ -1,0 +1,8 @@
+.manual-page { max-width: 920px; }
+.manual-form { max-width: 680px; margin-bottom: 22px; padding: 22px; border: 1px solid var(--line); background: white; display: grid; gap: 12px; }
+.manual-form label { font-weight: 700; }
+.manual-form .button { justify-self: start; }
+.manual-warning { max-width: 680px; margin-bottom: 16px; padding: 16px 18px; border: 1px solid var(--line); border-inline-start: 4px solid currentColor; background: #fff9ec; display: grid; gap: 6px; }
+.manual-warning span { color: var(--muted); line-height: 1.7; }
+.field-error { color: var(--red); font-size: 13px; }
+@media (max-width: 600px) { .manual-form { padding: 16px; } .manual-form .button { width: 100%; } }

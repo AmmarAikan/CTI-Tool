@@ -195,5 +195,6 @@ export const api = {
   externalSources: async () => parseSources(await request<unknown>('/integrations/external-control/sources')),
   dashboardSummary: async () => parseDashboardSummary(await request<unknown>('/dashboard/summary')),
   startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
+  startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
   externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),
 };

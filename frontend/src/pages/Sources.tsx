@@ -8,7 +8,7 @@ import './Sources.css';
 
 export const JOB_POLL_INTERVAL_MS = 2_000;
 export const JOB_POLL_MAX_MS = 120_000;
-const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
+export const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
 const STATE_LABELS: Record<JobState, string> = { queued: 'في الانتظار', running: 'قيد التشغيل', completed: 'مكتملة', partial: 'مكتملة جزئيًا', failed: 'فشلت', cancellation_requested: 'جار الإلغاء', cancelled: 'ملغاة' };
 const COUNT_LABELS = { accepted_records: 'مقبولة', review_records: 'للمراجعة', rejected_records: 'مرفوضة', skipped_records: 'متخطاة', error_count: 'أخطاء' } as const;
 
@@ -24,7 +24,7 @@ function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onR
   return <button className="button button-secondary" disabled={disabled} aria-label={`تشغيل ${source.name}`} title={source.status !== 'enabled' ? 'المصدر غير مفعّل' : undefined} onClick={() => onRun(source)}>{busy ? 'جار الإرسال...' : 'تشغيل'}</button>;
 }
 
-function JobMonitor({ sourceId, job, onUpdate }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
+export function JobMonitor({ sourceId, job, onUpdate }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
   const [timedOut, setTimedOut] = useState(false);
   const terminal = TERMINAL_STATES.includes(job.state);
   const query = useQuery({ queryKey: ['external-job', job.job_id], queryFn: () => api.externalJob(job.job_id), enabled: !terminal && !timedOut, retry: false, refetchInterval: JOB_POLL_INTERVAL_MS });
