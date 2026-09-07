@@ -156,6 +156,39 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(summary["accepted_records"], 25)
         self.assertTrue(client.session.calls[0][1].endswith("/exports/latest/summary"))
 
+    def test_reviews_history_and_cancellation_use_bounded_contracts(self) -> None:
+        review = {"run_id": "ext-run-1234567890", "records": [{
+            "record_id": "rec-123", "canonical_url": "https://private.test/report", "title": "Safe",
+            "source_type": "rss", "review_reason": "privacy_review", "review_reasons": ["privacy_review"],
+            "stage_status": {"privacy": "review"}, "classification_label": "related",
+            "privacy_status": "review_required", "collected_at": "2026-09-07T00:00:00Z", "published": None,
+        }]}
+        history = {"schema_version": "1.0", "persistence": "process_memory", "jobs": [{
+            "schema_version": "1.0", "job_id": "job-1234567890", "source_id": "cisa-kev",
+            "state": "running", "created_at": "2026-09-07T00:00:00Z", "updated_at": "2026-09-07T00:00:01Z",
+            "counts": {}, "error_code": None, "error_message": None,
+        }]}
+        queued = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "cancellation_requested", "created_at": "2026-09-07T00:00:00Z",
+            "updated_at": "2026-09-07T00:00:01Z", "progress": {}, "result": None, "error": None}
+        client = self.client([FakeResponse(review), FakeResponse(history), FakeResponse(queued)])
+        projected = client.latest_reviews()
+        self.assertNotIn("canonical_url", projected["records"][0])
+        self.assertNotIn("stage_status", projected["records"][0])
+        self.assertEqual(client.list_jobs(limit=50)["persistence"], "process_memory")
+        self.assertEqual(client.cancel_job("job-1234567890")["state"], "cancellation_requested")
+        self.assertTrue(client.session.calls[1][1].endswith("/jobs?limit=50"))
+        self.assertEqual(client.session.calls[2][0], "POST")
+
+    def test_history_rejects_extra_sensitive_fields(self) -> None:
+        payload = {"schema_version": "1.0", "persistence": "process_memory", "jobs": [{
+            "schema_version": "1.0", "job_id": "job-1234567890", "source_id": None, "state": "failed",
+            "created_at": "2026-09-07T00:00:00Z", "updated_at": "2026-09-07T00:00:01Z",
+            "counts": {}, "error_code": "job_failed", "error_message": "safe", "submitted_url": "https://private.test",
+        }]}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(payload)]).list_jobs()
+
     def test_manual_preview_proxy_contract_and_decision_idempotency(self) -> None:
         preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
             "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z",

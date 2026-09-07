@@ -50,6 +50,12 @@ export interface ExternalJob {
   error?: string;
 }
 
+export interface ExportSummary { run_id: string; status: string; dataset_sha256?: string; accepted_records: number; review_records: number; completed_at?: string; }
+export interface ReviewRecord { record_id: string; title?: string; source_type?: string; review_reason: string; review_reasons: string[]; classification_label?: string; privacy_status?: string; collected_at?: string; published?: string; }
+export interface LatestReviews { run_id: string; records: ReviewRecord[]; }
+export interface JobSummary { job_id: string; source_id?: string; state: JobState; created_at: string; updated_at: string; counts: ExternalJob['counts']; error_code?: string; error_message?: string; }
+export interface JobHistory { persistence: 'process_memory'; jobs: JobSummary[]; }
+
 export interface ManualPreview {
   preview_id: string;
   state: 'pending';
@@ -201,6 +207,50 @@ function parseExternalJob(value: unknown): ExternalJob {
   return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at, updated_at: body.updated_at, counts, error: message };
 }
 
+function validTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && value.endsWith('Z') && !Number.isNaN(Date.parse(value)); }
+function optionalText(value: unknown, max = 200): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length > max) throw new ApiError(502, 'invalid_response', 'Invalid external response');
+  return sanitizeError(value);
+}
+
+function parseExportSummary(value: unknown): ExportSummary {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['run_id', 'status', 'dataset_sha256', 'accepted_records', 'review_records', 'completed_at'].includes(key))
+    || typeof value.run_id !== 'string' || value.run_id.length > 200 || typeof value.status !== 'string' || value.status.length > 40
+    || (value.dataset_sha256 !== null && value.dataset_sha256 !== undefined && (typeof value.dataset_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.dataset_sha256)))
+    || !Number.isSafeInteger(value.accepted_records) || (value.accepted_records as number) < 0 || !Number.isSafeInteger(value.review_records) || (value.review_records as number) < 0
+    || (value.completed_at !== null && value.completed_at !== undefined && !validTimestamp(value.completed_at))) throw new ApiError(502, 'invalid_response', 'Invalid export summary response');
+  return { run_id: value.run_id, status: value.status, dataset_sha256: value.dataset_sha256 as string | undefined, accepted_records: value.accepted_records as number, review_records: value.review_records as number, completed_at: value.completed_at as string | undefined };
+}
+
+function parseReviews(value: unknown): LatestReviews {
+  if (!isPlainObject(value) || Object.keys(value).length !== 2 || typeof value.run_id !== 'string' || value.run_id.length > 200 || !Array.isArray(value.records) || value.records.length > 500) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+  const allowed = ['record_id', 'title', 'source_type', 'review_reason', 'review_reasons', 'classification_label', 'privacy_status', 'collected_at', 'published'];
+  const records = value.records.map((item): ReviewRecord => {
+    if (!isPlainObject(item) || Object.keys(item).some((key) => !allowed.includes(key)) || typeof item.record_id !== 'string' || !item.record_id || item.record_id.length > 200
+      || typeof item.review_reason !== 'string' || item.review_reason.length > 200 || !Array.isArray(item.review_reasons) || item.review_reasons.length > 20
+      || item.review_reasons.some((reason) => typeof reason !== 'string' || reason.length > 200)
+      || (item.collected_at !== null && item.collected_at !== undefined && !validTimestamp(item.collected_at)) || (item.published !== null && item.published !== undefined && !validTimestamp(item.published))) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+    return { record_id: item.record_id, title: optionalText(item.title, 300), source_type: optionalText(item.source_type, 100), review_reason: sanitizeError(item.review_reason), review_reasons: item.review_reasons.map((reason) => sanitizeError(reason as string)), classification_label: optionalText(item.classification_label, 100), privacy_status: optionalText(item.privacy_status, 100), collected_at: item.collected_at as string | undefined, published: item.published as string | undefined };
+  });
+  return { run_id: value.run_id, records };
+}
+
+function parseJobHistory(value: unknown): JobHistory {
+  if (!isPlainObject(value) || Object.keys(value).length !== 3 || value.schema_version !== '1.0' || value.persistence !== 'process_memory' || !Array.isArray(value.jobs) || value.jobs.length > 100) throw new ApiError(502, 'invalid_response', 'Invalid job history response');
+  const allowed = ['schema_version', 'job_id', 'source_id', 'state', 'created_at', 'updated_at', 'counts', 'error_code', 'error_message'];
+  const jobs = value.jobs.map((item): JobSummary => {
+    if (!isPlainObject(item) || Object.keys(item).some((key) => !allowed.includes(key)) || item.schema_version !== '1.0' || typeof item.job_id !== 'string' || item.job_id.length < 10
+      || typeof item.state !== 'string' || !JOB_STATES.includes(item.state as JobState) || !validTimestamp(item.created_at) || !validTimestamp(item.updated_at) || !isPlainObject(item.counts)
+      || (item.source_id !== null && item.source_id !== undefined && (typeof item.source_id !== 'string' || item.source_id.length > 200))) throw new ApiError(502, 'invalid_response', 'Invalid job history response');
+    const counts: ExternalJob['counts'] = {};
+    if (Object.keys(item.counts).some((key) => !JOB_COUNT_KEYS.includes(key as typeof JOB_COUNT_KEYS[number]))) throw new ApiError(502, 'invalid_response', 'Invalid job history response');
+    for (const key of JOB_COUNT_KEYS) if (item.counts[key] !== undefined) { if (!Number.isSafeInteger(item.counts[key]) || (item.counts[key] as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid job history response'); counts[key] = item.counts[key] as number; }
+    return { job_id: item.job_id, source_id: item.source_id as string | undefined, state: item.state as JobState, created_at: item.created_at, updated_at: item.updated_at, counts, error_code: optionalText(item.error_code, 100), error_message: optionalText(item.error_message, 300) };
+  });
+  return { persistence: 'process_memory', jobs };
+}
+
 function parseManualPreview(value: unknown): ManualPreview {
   if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
   const required = ['schema_version', 'preview_id', 'state', 'created_at', 'expires_at', 'display_url', 'page_type', 'title', 'excerpt',
@@ -292,4 +342,8 @@ export const api = {
   approveManualPreview: async (preview: ManualPreview) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) })),
   rejectManualPreview: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled') => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })),
   externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),
+  latestExternalExport: async () => parseExportSummary(await request<unknown>('/integrations/external-control/exports/latest')),
+  latestExternalReviews: async () => parseReviews(await request<unknown>('/integrations/external-control/reviews/latest')),
+  externalJobs: async () => parseJobHistory(await request<unknown>('/integrations/external-control/jobs?limit=50')),
+  cancelExternalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })),
 };

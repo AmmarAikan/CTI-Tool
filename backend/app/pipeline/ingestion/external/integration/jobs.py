@@ -28,9 +28,10 @@ class IntegrationJob:
     result: dict[str, Any] | None = None
     error: dict[str, Any] | None = None
     cancellation_requested: bool = False
+    source_id: str | None = None
 
     def safe_dict(self) -> dict[str, Any]:
-        return {key: value for key, value in asdict(self).items() if key != "cancellation_requested"}
+        return {key: value for key, value in asdict(self).items() if key not in {"cancellation_requested", "source_id"}}
 
 
 class JobRunner(Protocol):
@@ -39,6 +40,7 @@ class JobRunner(Protocol):
                on_queued_cancel: Callable[[], None] | None = None) -> IntegrationJob: ...
     def get(self, job_id: str) -> IntegrationJob | None: ...
     def cancel(self, job_id: str) -> IntegrationJob | None: ...
+    def list(self, *, limit: int) -> tuple[IntegrationJob, ...]: ...
 
 
 class InProcessJobRunner:
@@ -54,13 +56,19 @@ class InProcessJobRunner:
     def submit(self, command_id: str, operation: Callable[[], Any], *, safe_context: dict[str, str] | None = None,
                cancellation_event: threading.Event | None = None,
                on_queued_cancel: Callable[[], None] | None = None) -> IntegrationJob:
-        job = IntegrationJob(f"job-{secrets.token_hex(12)}", command_id)
+        source_id = (safe_context or {}).get("source_id")
+        job = IntegrationJob(f"job-{secrets.token_hex(12)}", command_id, source_id=source_id)
         with self._lock:
             self._jobs[job.job_id] = job
             if cancellation_event is not None: self._cancellation_events[job.job_id] = cancellation_event
             if on_queued_cancel is not None: self._queued_cancel_callbacks[job.job_id] = on_queued_cancel
         self._executor.submit(self._run, job.job_id, operation, dict(safe_context or {}))
         return job
+
+    def list(self, *, limit: int) -> tuple[IntegrationJob, ...]:
+        bounded = min(max(limit, 1), 100)
+        with self._lock:
+            return tuple(sorted(self._jobs.values(), key=lambda job: (job.created_at, job.job_id), reverse=True)[:bounded])
 
     def get(self, job_id: str) -> IntegrationJob | None:
         with self._lock: return self._jobs.get(job_id)

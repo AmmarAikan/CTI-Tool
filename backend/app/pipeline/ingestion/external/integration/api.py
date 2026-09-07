@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, Header, Request, status
+from fastapi import Body, Depends, FastAPI, Header, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -51,6 +51,8 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
     CollectionRequestBody,
     HealthResponse,
     IntegrationErrorResponse,
+    JobListResponse,
+    JobSummaryResponse,
     JobStatusResponse,
     LatestExportResponse,
     LatestExportSummaryResponse,
@@ -261,6 +263,24 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         legacy = services.job_service.get_job_status(job_id)
         if legacy is None: raise APIError(404, "job_not_found", "job was not found")
         return _legacy_job(legacy)
+
+    @app.get(f"{API_PREFIX}/jobs", response_model=JobListResponse)
+    def list_jobs(limit: int = Query(default=50, ge=1, le=100),
+                  _current: Principal = Depends(permitted("jobs:read"))) -> JobListResponse:
+        count_keys = {"accepted_records", "review_records", "rejected_records", "skipped_records", "error_count"}
+        summaries = []
+        for job in services.job_runner.list(limit=limit):
+            result = job.result if isinstance(job.result, dict) else {}
+            counts = {key: value for key, value in result.items()
+                      if key in count_keys and type(value) is int and value >= 0}
+            error = job.error if isinstance(job.error, dict) else {}
+            summaries.append(JobSummaryResponse(
+                job_id=job.job_id, source_id=job.source_id, state=job.state,
+                created_at=job.created_at, updated_at=job.updated_at, counts=counts,
+                error_code=str(error.get("code"))[:100] if error.get("code") else None,
+                error_message=str(error.get("message"))[:300] if error.get("message") else None,
+            ))
+        return JobListResponse(jobs=summaries)
 
     @app.post(f"{API_PREFIX}/jobs/{{job_id}}/cancel", response_model=JobStatusResponse)
     def cancel_job(job_id: str, current: Principal = Depends(permitted("jobs:cancel"))) -> JobStatusResponse:

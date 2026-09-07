@@ -159,6 +159,38 @@ class ExternalControlClient:
         self._validate_job_id(job_id)
         return self._job_response(self._request("GET", f"/jobs/{quote(job_id, safe='')}"))
 
+    def list_jobs(self, *, limit: int = 50) -> dict[str, Any]:
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("External job history limit is invalid")
+        payload = self._request("GET", f"/jobs?limit={limit}")
+        if not isinstance(payload, dict) or set(payload) != {"schema_version", "persistence", "jobs"} \
+                or payload.get("schema_version") != "1.0" or payload.get("persistence") != "process_memory" \
+                or not isinstance(payload.get("jobs"), list) or len(payload["jobs"]) > limit:
+            raise ExternalControlTransportError("External job history contract is invalid")
+        allowed = {"schema_version", "job_id", "source_id", "state", "created_at", "updated_at", "counts", "error_code", "error_message"}
+        for item in payload["jobs"]:
+            if not isinstance(item, dict) or set(item) != allowed or item.get("schema_version") != "1.0" \
+                    or not isinstance(item.get("job_id"), str) or item.get("state") not in {"queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"} \
+                    or not isinstance(item.get("counts"), dict):
+                raise ExternalControlTransportError("External job history contract is invalid")
+        return payload
+
+    def cancel_job(self, job_id: str) -> dict[str, Any]:
+        self._validate_job_id(job_id)
+        return self._job_response(self._request("POST", f"/jobs/{quote(job_id, safe='')}/cancel"))
+
+    def latest_reviews(self) -> dict[str, Any]:
+        payload = self._request("GET", "/reviews/latest")
+        if not isinstance(payload, dict) or set(payload) != {"run_id", "records"} or not isinstance(payload.get("run_id"), str) or not isinstance(payload.get("records"), list):
+            raise ExternalControlTransportError("External review contract is invalid")
+        allowed = {"record_id", "canonical_url", "title", "source_type", "review_reason", "review_reasons", "stage_status", "classification_label", "privacy_status", "collected_at", "published"}
+        safe_records = []
+        for item in payload["records"]:
+            if not isinstance(item, dict) or set(item) != allowed or not isinstance(item.get("record_id"), str) or not isinstance(item.get("review_reasons"), list):
+                raise ExternalControlTransportError("External review contract is invalid")
+            safe_records.append({key: item.get(key) for key in allowed if key != "canonical_url" and key != "stage_status"})
+        return {"run_id": payload["run_id"], "records": safe_records}
+
     def latest_export_summary(self) -> dict[str, Any]:
         payload = self._request("GET", "/exports/latest/summary")
         if not isinstance(payload, dict):

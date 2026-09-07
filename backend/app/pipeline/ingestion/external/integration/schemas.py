@@ -101,6 +101,24 @@ class JobStatusResponse(StrictModel):
     error: dict[str, Any] | None = None
 
 
+class JobSummaryResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    job_id: str = Field(min_length=10)
+    source_id: str | None = None
+    state: Literal["queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"]
+    created_at: str
+    updated_at: str
+    counts: dict[Literal["accepted_records", "review_records", "rejected_records", "skipped_records", "error_count"], int] = Field(default_factory=dict)
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+class JobListResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    persistence: Literal["process_memory"] = "process_memory"
+    jobs: list[JobSummaryResponse] = Field(default_factory=list)
+
+
 class SourceResponse(StrictModel):
     source_id: str
     name: str

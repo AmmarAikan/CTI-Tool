@@ -431,6 +431,20 @@ def external_control_job(job_id: str, _: CurrentUser) -> dict[str, Any]:
     return external_control_call(lambda client: client.get_job(job_id))
 
 
+@router.get("/integrations/external-control/jobs", tags=["external-control"])
+def external_control_jobs(_: CurrentUser, limit: int = Query(default=50, ge=1, le=100)) -> dict[str, Any]:
+    return external_control_call(lambda client: client.list_jobs(limit=limit))
+
+
+@router.post("/integrations/external-control/jobs/{job_id}/cancel", tags=["external-control"])
+def external_control_cancel_job(job_id: str, db: SessionDep,
+                                user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.cancel_job(job_id))
+    audit(db, user, "cancel_external_job", "external_collection_job", job_id)
+    db.commit()
+    return result
+
+
 @router.post(
     "/integrations/external-control/manual-sources",
     tags=["external-control"],
@@ -505,6 +519,11 @@ def external_control_manual_preview_reject(preview_id: str, payload: ExternalMan
 @router.get("/integrations/external-control/exports/latest", tags=["external-control"])
 def external_control_latest_export(_: CurrentUser) -> dict[str, Any]:
     return external_control_call(lambda client: client.latest_export_summary())
+
+
+@router.get("/integrations/external-control/reviews/latest", tags=["external-control"])
+def external_control_latest_reviews(_: CurrentUser) -> dict[str, Any]:
+    return external_control_call(lambda client: client.latest_reviews())
 
 
 @router.post("/integrations/external-feed/pull", tags=["integrations"])
