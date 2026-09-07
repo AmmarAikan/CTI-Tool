@@ -44,3 +44,23 @@
 .bar-fill { display: block; height: 100%; background: var(--teal); min-width: 2px; }
 @media (max-width: 1080px) { .integration-grid, .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 800px) { .sidebar { width: 100%; } .sidebar nav { align-items: stretch; } .nav-group { display: flex; flex: 0 0 auto; border-right: 0; border-bottom: 2px solid #36566f; padding: 0 0 5px; } .nav-group h2 { writing-mode: vertical-rl; } .integration-grid, .health-grid, .distribution-grid { grid-template-columns: 1fr; } .integration-card-head { grid-template-columns: auto 1fr; } .integration-card-head .status-badge { grid-column: 2; } .refresh-block { align-items: flex-start; } .records-heading { align-items: flex-start; flex-direction: column; gap: 12px; } }
+
+/* Phase 2 threat intelligence, analysis, and sharing surfaces. */
+.nav-analysis { border-right-color: #e79a3b; }
+.intelligence-module .eyebrow { color: #a85d08; }
+.analysis-module .eyebrow { color: #3d67b1; }
+.misp-module .eyebrow { color: #8b4b9f; }
+.metric-card.intel-accent, .health-card.misp-accent { border-top: 4px solid #e79a3b; }
+.metric-card.analysis-accent { border-top: 4px solid #4f78bf; }
+.intel-fill { background: #d17a16; }
+.detail-panel, .detail-list { background: white; border: 1px solid var(--line); padding: 24px; margin: 18px 0; }
+.detail-panel p, .detail-list p { color: var(--muted); line-height: 1.7; }
+.detail-list ul, .detail-panel ul { margin: 14px 0 0; padding-right: 22px; display: grid; gap: 9px; overflow-wrap: anywhere; }
+.detail-list h3, .detail-panel h3, .subheading { margin: 0 0 14px; }
+.copy-feedback { color: var(--teal); margin-inline-start: 12px; }
+.select-block { display: grid; gap: 8px; max-width: 620px; margin: 22px 0; font-weight: 600; }
+.select-block select { padding: 12px; border: 1px solid #bcccdc; background: white; color: var(--ink); }
+.intelligence-module td small { display: block; color: var(--muted); margin-top: 5px; max-width: 520px; }
+.intelligence-module td a { color: var(--ink); text-decoration-color: #d17a16; }
+.analysis-module tbody tr { cursor: pointer; }
+.misp-module .detail-panel li { overflow-wrap: anywhere; }

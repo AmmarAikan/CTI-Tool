@@ -166,6 +166,109 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(forbidden.status_code, 403)
         pull.assert_not_called()
 
+    def test_intelligence_facades_are_bounded_typed_and_sanitized(self) -> None:
+        events = self.client.get(
+            "/api/v1/intelligence/events?source_pipeline=internal&limit=1&offset=0",
+            headers=self.headers,
+        )
+        self.assertEqual(events.status_code, 200, events.text)
+        page = events.json()
+        self.assertEqual(page["limit"], 1)
+        self.assertNotIn("raw_reference", page["items"][0])
+        self.assertNotIn("normalized_text", page["items"][0])
+
+        event_id = page["items"][0]["id"]
+        detail = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}", headers=self.headers
+        )
+        self.assertEqual(detail.status_code, 200, detail.text)
+        self.assertFalse(any(item["type"] == "source_ip" for item in detail.json()["entities"]))
+        self.assertEqual(detail.json()["relationships"], [])
+
+        for path in ("indicators", "correlations", "outliers", "runs"):
+            response = self.client.get(
+                f"/api/v1/intelligence/{path}?limit=101", headers=self.headers
+            )
+            self.assertEqual(response.status_code, 422, path)
+        runs = self.client.get("/api/v1/intelligence/runs?limit=1", headers=self.headers)
+        self.assertNotIn("details", runs.json()["items"][0])
+        self.assertNotIn("error_message", runs.json()["items"][0])
+
+        ml = self.client.get("/api/v1/intelligence/ml/status", headers=self.headers)
+        self.assertEqual(ml.json()["execution_model"], "central_backend")
+        self.assertNotIn("load_error", ml.json())
+        health = self.client.get("/api/v1/intelligence/misp/health", headers=self.headers)
+        self.assertEqual(set(health.json()), {"configured", "reachable"})
+
+    def test_misp_preview_is_read_only_and_send_remains_admin_only(self) -> None:
+        events = self.client.get("/api/v1/intelligence/events?limit=1", headers=self.headers).json()
+        event_id = events["items"][0]["id"]
+        preview = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}/misp-preview", headers=self.headers
+        )
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertFalse(preview.json()["published"])
+        self.assertEqual(preview.json()["distribution"], 0)
+        self.assertNotIn("uuid", preview.json())
+
+        viewer_created = self.client.post(
+            "/api/v1/users", headers=self.headers,
+            json={"username": "phase1viewer", "password": "StrongViewerPassword123!", "role": "viewer"},
+        )
+        self.assertIn(viewer_created.status_code, {201, 409})
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "phase1viewer", "password": "StrongViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        with patch("backend.app.api.v1.router.MISPClient.send_event") as send:
+            forbidden = self.client.post(
+                f"/api/v1/intelligence/events/{event_id}/misp", headers=viewer_headers
+            )
+        self.assertEqual(forbidden.status_code, 403)
+        send.assert_not_called()
+
+        analyst_created = self.client.post(
+            "/api/v1/users", headers=self.headers,
+            json={"username": "phase2analyst", "password": "StrongAnalystPassword123!", "role": "analyst"},
+        )
+        self.assertIn(analyst_created.status_code, {201, 409})
+        analyst_login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "phase2analyst", "password": "StrongAnalystPassword123!"},
+        )
+        analyst_headers = {"Authorization": f"Bearer {analyst_login.json()['access_token']}"}
+        analyst_preview = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}/misp-preview", headers=analyst_headers
+        )
+        analyst_send = self.client.post(
+            f"/api/v1/intelligence/events/{event_id}/misp", headers=analyst_headers
+        )
+        self.assertEqual(analyst_preview.status_code, 200)
+        self.assertEqual(analyst_send.status_code, 403)
+
+        delivery = {"cti_delivery": {"created": True, "attributes_requested": 2, "attributes_added": 2, "attributes_verified": 2, "published": False}}
+        with patch("backend.app.api.v1.router.MISPClient.send_event", return_value=delivery):
+            sent = self.client.post(
+                f"/api/v1/intelligence/events/{event_id}/misp", headers=self.headers
+            )
+        self.assertEqual(sent.status_code, 200, sent.text)
+        self.assertEqual(sent.json()["attributes_verified"], 2)
+        self.assertNotIn("Event", sent.json())
+
+        with patch(
+            "backend.app.api.v1.router.MISPClient.send_event",
+            side_effect=RuntimeError("token=top-secret http://10.0.0.4/internal"),
+        ):
+            failed = self.client.post(
+                f"/api/v1/events/{event_id}/misp",
+                headers=self.headers,
+                json={"dry_run": False},
+            )
+        self.assertEqual(failed.status_code, 502)
+        self.assertNotIn("top-secret", failed.text)
+        self.assertNotIn("10.0.0.4", failed.text)
+
     def test_wazuh_upload_dashboard_stix_and_misp_dry_run(self) -> None:
         with SAMPLE_PATH.open("rb") as handle:
             response = self.client.post(

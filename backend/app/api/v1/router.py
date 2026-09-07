@@ -49,6 +49,17 @@ from backend.app.schemas.api import (
     ExternalManualPreviewResponse,
     ExternalManualPreviewRejectedResponse,
     ExternalSourceRunRequest,
+    IntelligenceCorrelationPageResponse,
+    IntelligenceEventDetailResponse,
+    IntelligenceEventPageResponse,
+    IntelligenceIndicatorPageResponse,
+    IntelligenceMISPDeliveryResponse,
+    IntelligenceMISPHealthResponse,
+    IntelligenceMISPPreviewResponse,
+    IntelligenceMLStatusResponse,
+    IntelligenceOutlierPageResponse,
+    IntelligenceRunPageResponse,
+    IntelligenceRunResponse,
     InternalEventPageResponse,
     LoginRequest,
     MISPSendRequest,
@@ -712,6 +723,196 @@ def list_internal_source_events(
     }
 
 
+def _safe_event_title(event: ThreatEvent) -> str:
+    if event.source_pipeline == "internal":
+        return f"Internal {event.source_type.replace('_', ' ')} event"
+    return event.title[:500]
+
+
+def _safe_event_summary(event: ThreatEvent) -> str:
+    if event.source_pipeline == "internal":
+        return "Internal telemetry event processed by the Central Backend."
+    return event.description[:500]
+
+
+def _indicator_dict(item: IndicatorRecord, event: ThreatEvent) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "event_id": item.event_id,
+        "type": item.indicator_type,
+        "value": item.value,
+        "confidence": item.confidence,
+        "source_pipeline": event.source_pipeline,
+        "severity": event.severity,
+        "first_seen": iso(item.first_seen),
+        "last_seen": iso(item.last_seen),
+    }
+
+
+def _intelligence_event_dict(event: ThreatEvent) -> dict[str, Any]:
+    return {
+        "id": event.id,
+        "title": _safe_event_title(event),
+        "summary": _safe_event_summary(event),
+        "source_type": event.source_type,
+        "source_pipeline": event.source_pipeline,
+        "category": event.classification_label,
+        "severity": event.severity,
+        "risk_score": event.risk_score,
+        "confidence": event.confidence,
+        "processing_status": event.processing_status,
+        "first_seen": iso(event.first_seen),
+        "last_seen": iso(event.last_seen),
+        "created_at": iso(event.created_at),
+        "indicator_count": len(event.indicators),
+        "entity_count": sum(item.entity_type != "source_ip" for item in event.entities),
+    }
+
+
+@router.get("/intelligence/events", tags=["intelligence"], response_model=IntelligenceEventPageResponse)
+def intelligence_events(
+    db: SessionDep,
+    _: CurrentUser,
+    source_pipeline: str | None = Query(default=None, pattern="^(external|internal)$"),
+    severity: str | None = Query(default=None, max_length=30),
+    processing_status: str | None = Query(default=None, max_length=30),
+    search: str | None = Query(default=None, min_length=2, max_length=100),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = []
+    if source_pipeline:
+        filters.append(ThreatEvent.source_pipeline == source_pipeline)
+    if severity:
+        filters.append(ThreatEvent.severity == severity)
+    if processing_status:
+        filters.append(ThreatEvent.processing_status == processing_status)
+    if search:
+        filters.append(ThreatEvent.title.ilike(f"%{search}%"))
+    total = db.scalar(select(func.count()).select_from(ThreatEvent).where(*filters)) or 0
+    records = db.scalars(
+        event_query().where(*filters).order_by(desc(ThreatEvent.created_at), desc(ThreatEvent.id)).limit(limit).offset(offset)
+    ).unique().all()
+    return {"items": [_intelligence_event_dict(item) for item in records], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/intelligence/events/{event_id}", tags=["intelligence"], response_model=IntelligenceEventDetailResponse)
+def intelligence_event_detail(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    return {
+        **_intelligence_event_dict(event),
+        "indicators": [_indicator_dict(item, event) for item in event.indicators],
+        "entities": [
+            {"type": item.entity_type, "value": item.value, "confidence": item.confidence}
+            for item in event.entities if item.entity_type != "source_ip"
+        ],
+        "relationships": [] if event.source_pipeline == "internal" else [
+            {"subject": item.subject, "relation": item.relation, "object": item.object_value, "confidence": item.confidence}
+            for item in event.relationships
+        ],
+    }
+
+
+@router.get("/intelligence/indicators", tags=["intelligence"], response_model=IntelligenceIndicatorPageResponse)
+def intelligence_indicators(
+    db: SessionDep, _: CurrentUser,
+    indicator_type: str | None = Query(default=None, max_length=50),
+    search: str | None = Query(default=None, min_length=2, max_length=100),
+    limit: int = Query(default=25, ge=1, le=100), offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = []
+    if indicator_type:
+        filters.append(IndicatorRecord.indicator_type == indicator_type)
+    if search:
+        filters.append(IndicatorRecord.value.ilike(f"%{search}%"))
+    joined = select(IndicatorRecord, ThreatEvent).join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id).where(*filters)
+    total = db.scalar(select(func.count()).select_from(IndicatorRecord).where(*filters)) or 0
+    rows = db.execute(joined.order_by(desc(ThreatEvent.created_at), IndicatorRecord.id).limit(limit).offset(offset)).all()
+    return {"items": [_indicator_dict(item, event) for item, event in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/intelligence/correlations", tags=["intelligence"], response_model=IntelligenceCorrelationPageResponse)
+def intelligence_correlations(db: SessionDep, _: CurrentUser, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
+    total = db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0
+    rows = db.scalars(select(CorrelationRecord).order_by(desc(CorrelationRecord.score), CorrelationRecord.id).limit(limit).offset(offset)).all()
+    return {"items": [{"id": item.id, "source_event_id": item.event_a_id, "target_event_id": item.event_b_id, "type": item.correlation_type, "score": item.score, "reason": item.reason} for item in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/intelligence/outliers", tags=["intelligence"], response_model=IntelligenceOutlierPageResponse)
+def intelligence_outliers(db: SessionDep, _: CurrentUser, only_outliers: bool = False, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
+    filters = [OutlierSessionRecord.is_outlier.is_(True)] if only_outliers else []
+    total = db.scalar(select(func.count()).select_from(OutlierSessionRecord).where(*filters)) or 0
+    rows = db.scalars(select(OutlierSessionRecord).where(*filters).order_by(desc(OutlierSessionRecord.started_at), OutlierSessionRecord.id).limit(limit).offset(offset)).all()
+    return {"items": [{"id": item.id, "event_id": item.event_id, "started_at": iso(item.started_at), "ended_at": iso(item.ended_at), "alert_count": item.alert_count, "is_outlier": item.is_outlier, "anomaly_score": item.anomaly_score, "detector": item.detector_backend} for item in rows], "total": total, "limit": limit, "offset": offset}
+
+
+def _intelligence_run_dict(item: PipelineRun) -> dict[str, Any]:
+    duration = (item.completed_at - item.started_at).total_seconds() if item.completed_at else None
+    return {"id": item.id, "pipeline": item.pipeline, "status": item.status, "collected": item.collected_count, "processed": item.processed_count, "stored": item.stored_count, "failed": item.failed_count, "error_category": "pipeline_error" if item.error_message else None, "started_at": iso(item.started_at), "completed_at": iso(item.completed_at), "duration_seconds": duration}
+
+
+@router.get("/intelligence/runs", tags=["intelligence"], response_model=IntelligenceRunPageResponse)
+def intelligence_runs(db: SessionDep, _: CurrentUser, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
+    total = db.scalar(select(func.count()).select_from(PipelineRun)) or 0
+    rows = db.scalars(select(PipelineRun).order_by(desc(PipelineRun.started_at), PipelineRun.id).limit(limit).offset(offset)).all()
+    return {"items": [_intelligence_run_dict(item) for item in rows], "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/intelligence/runs/{run_id}", tags=["intelligence"], response_model=IntelligenceRunResponse)
+def intelligence_run_detail(run_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    item = db.get(PipelineRun, run_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    return _intelligence_run_dict(item)
+
+
+@router.get("/intelligence/ml/status", tags=["intelligence"], response_model=IntelligenceMLStatusResponse)
+def intelligence_ml_status(_: CurrentUser) -> dict[str, Any]:
+    status_payload = ModelEvidenceService.status()
+    runtime = status_payload.get("runtime", {})
+    models = status_payload.get("model_priority", {})
+    bert = status_payload.get("held_out_test", {}).get("bert", {})
+    return {"execution_model": "central_backend", "backend": str(runtime.get("backend") or "unavailable"), "primary_model": str(models.get("primary") or "dnrti_bert_ner"), "secondary_model": str(models.get("secondary_fallback") or "dnrti_sklearn_ner"), "primary_loaded": runtime.get("primary_model_loaded") is True, "secondary_loaded": runtime.get("secondary_fallback_loaded") is True, "quality_gates_passed": status_payload.get("all_quality_gates_passed") is True, "held_out_f1": bert.get("f1")}
+
+
+@router.get("/intelligence/misp/health", tags=["intelligence"], response_model=IntelligenceMISPHealthResponse, response_model_exclude_none=True)
+def intelligence_misp_health(_: CurrentUser) -> dict[str, Any]:
+    try:
+        result = MISPClient().healthcheck()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        return {"configured": True, "reachable": False, "failure_category": type(exc).__name__}
+    return {"configured": result.get("configured") is True, "reachable": result.get("reachable") is True, "failure_category": result.get("error_type")}
+
+
+@router.get("/intelligence/events/{event_id}/misp-preview", tags=["intelligence"], response_model=IntelligenceMISPPreviewResponse)
+def intelligence_misp_preview(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    try:
+        client = MISPClient()
+        mapped = client.event_payload(event)["Event"]
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(status_code=503, detail=f"MISP preview unavailable: {type(exc).__name__}") from exc
+    return {"event_id": event.id, "title": str(mapped["info"]), "configured": client.configured, "published": False, "distribution": 0, "attributes": [{"type": item["type"], "category": item["category"], "value": item["value"], "to_ids": item["to_ids"]} for item in mapped.get("Attribute", [])]}
+
+
+@router.post("/intelligence/events/{event_id}/misp", tags=["intelligence"], response_model=IntelligenceMISPDeliveryResponse)
+def intelligence_misp_send(event_id: str, db: SessionDep, user: Annotated[User, Depends(require_roles("admin"))]) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    try:
+        result = MISPClient().send_event(event, dry_run=False)["cti_delivery"]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"MISP delivery failed: {type(exc).__name__}") from exc
+    audit(db, user, "misp_send", "threat_event", event_id)
+    db.commit()
+    return {"event_id": event_id, "created": result["created"], "attributes_requested": result["attributes_requested"], "attributes_added": result["attributes_added"], "attributes_verified": result["attributes_verified"], "published": result["published"]}
+
+
 @router.get("/events", tags=["cti"])
 def list_events(
     db: SessionDep,
@@ -899,7 +1100,7 @@ def send_misp(
     try:
         result = MISPClient().send_event(event, dry_run=payload.dry_run)
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MISP request failed: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"MISP request failed: {type(exc).__name__}") from exc
     audit(db, user, "misp_dry_run" if payload.dry_run else "misp_send", "threat_event", event_id)
     db.commit()
     return result
