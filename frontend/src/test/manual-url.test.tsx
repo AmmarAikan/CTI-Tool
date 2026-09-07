@@ -35,6 +35,20 @@ describe('manual preview workflow', () => {
     expect(screen.getByText(preview.items_preview[0].excerpt)).toBeInTheDocument(); expect(document.body).not.toHaveTextContent('token=hidden');
   });
 
+  it('accepts the deployed 201 shape with omitted nullable classification fields', async () => {
+    const deployed = { ...preview, items_preview: [{ ...preview.items_preview[0] }] } as Record<string, unknown>;
+    delete deployed.classification_label; delete deployed.classification_confidence;
+    const items = deployed.items_preview as Array<Record<string, unknown>>;
+    delete items[0].classification_label; delete items[0].classification_confidence;
+    mockRole('analyst', (path) => path.endsWith('/previews') ? response(deployed, 201) : response(job('completed')));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report');
+    await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    expect(await screen.findByText(preview.title)).toBeInTheDocument();
+    expect(screen.getByText('غير محدد')).toBeInTheDocument();
+    expect(screen.queryByText(/استجابة غير صالحة/)).not.toBeInTheDocument();
+  });
+
   it('requires approval confirmation and follows the approval job', async () => {
     const fetchMock = mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : path.endsWith('/approve') ? response(job('queued')) : response(job('completed')));
     renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));

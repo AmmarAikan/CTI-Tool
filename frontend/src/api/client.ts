@@ -253,17 +253,18 @@ function parseJobHistory(value: unknown): JobHistory {
 
 function parseManualPreview(value: unknown): ManualPreview {
   if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid manual preview response');
+  const nullable = ['classification_label', 'classification_confidence'];
   const required = ['schema_version', 'preview_id', 'state', 'created_at', 'expires_at', 'display_url', 'page_type', 'title', 'excerpt',
-    'disposition', 'classification_label', 'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256', 'counts',
+    'disposition', 'privacy_status', 'review_reasons', 'content_sha256', 'counts',
     'items_preview', 'items_preview_total', 'items_preview_truncated'];
-  if (Object.keys(value).some((key) => !required.includes(key)) || required.some((key) => !(key in value))
+  if (Object.keys(value).some((key) => !required.includes(key) && !nullable.includes(key)) || required.some((key) => !(key in value))
     || value.schema_version !== '1.0' || typeof value.preview_id !== 'string' || value.preview_id.length < 20 || value.state !== 'pending'
     || typeof value.created_at !== 'string' || !value.created_at.endsWith('Z') || typeof value.expires_at !== 'string' || !value.expires_at.endsWith('Z')
     || typeof value.display_url !== 'string' || value.display_url.length > 400 || typeof value.page_type !== 'string' || value.page_type.length > 80
     || typeof value.title !== 'string' || value.title.length > 300 || typeof value.excerpt !== 'string' || value.excerpt.length > 500
     || !['accepted', 'review', 'rejected'].includes(String(value.disposition))
-    || (value.classification_label !== null && typeof value.classification_label !== 'string')
-    || (value.classification_confidence !== null && (typeof value.classification_confidence !== 'number' || value.classification_confidence < 0 || value.classification_confidence > 1))
+    || (value.classification_label !== null && value.classification_label !== undefined && typeof value.classification_label !== 'string')
+    || (value.classification_confidence !== null && value.classification_confidence !== undefined && (typeof value.classification_confidence !== 'number' || value.classification_confidence < 0 || value.classification_confidence > 1))
     || !['reviewed', 'review_required'].includes(String(value.privacy_status)) || !Array.isArray(value.review_reasons)
     || value.review_reasons.some((reason) => !['privacy_review', 'classification_review', 'relevance_rejected'].includes(String(reason)))
     || typeof value.content_sha256 !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value.content_sha256) || !isPlainObject(value.counts)
@@ -282,15 +283,14 @@ function parseManualPreview(value: unknown): ManualPreview {
 
 function validManualPreviewItem(value: unknown, index: number): boolean {
   if (!isPlainObject(value)) return false;
-  const required = ['item_index', 'title', 'excerpt', 'page_type', 'disposition', 'classification_label',
-    'classification_confidence', 'privacy_status', 'review_reasons', 'content_sha256'];
-  const allowed = [...required, 'published'];
+  const required = ['item_index', 'title', 'excerpt', 'page_type', 'disposition', 'privacy_status', 'review_reasons', 'content_sha256'];
+  const allowed = [...required, 'classification_label', 'classification_confidence', 'published'];
   return !Object.keys(value).some((key) => !allowed.includes(key)) && required.every((key) => key in value)
     && value.item_index === index && typeof value.title === 'string' && value.title.length <= 200
     && typeof value.excerpt === 'string' && value.excerpt.length <= 300 && value.page_type === 'article'
     && ['accepted', 'review', 'rejected'].includes(String(value.disposition))
-    && (value.classification_label === null || (typeof value.classification_label === 'string' && value.classification_label.length <= 80))
-    && (value.classification_confidence === null || (typeof value.classification_confidence === 'number' && value.classification_confidence >= 0 && value.classification_confidence <= 1))
+    && (value.classification_label === null || value.classification_label === undefined || (typeof value.classification_label === 'string' && value.classification_label.length <= 80))
+    && (value.classification_confidence === null || value.classification_confidence === undefined || (typeof value.classification_confidence === 'number' && value.classification_confidence >= 0 && value.classification_confidence <= 1))
     && ['reviewed', 'review_required'].includes(String(value.privacy_status)) && Array.isArray(value.review_reasons)
     && value.review_reasons.length <= 3
     && value.review_reasons.every((reason) => ['privacy_review', 'classification_review', 'relevance_rejected'].includes(String(reason)))
