@@ -6,7 +6,7 @@ const groups = [
   { label: 'المصادر الخارجية', accent: 'external', links: [['/external-sources', 'المصادر'], ['/manual', 'رابط يدوي'], ['/jobs', 'الوظائف'], ['/reviews', 'المراجعات'], ['/exports', 'التصديرات']] },
   { label: 'المصادر الداخلية', accent: 'internal', links: [['/internal-sources', 'نظرة عامة'], ['/internal-sources/dionaea', 'Dionaea'], ['/internal-sources/host-auth', 'سجلات الدخول'], ['/internal-sources/web-access', 'الوصول إلى الويب']] },
   { label: 'الاستخبارات والتحليل', accent: 'analysis', links: [['/intelligence', 'نظرة عامة'], ['/intelligence/events', 'الأحداث'], ['/intelligence/indicators', 'المؤشرات'], ['/intelligence/correlations', 'الارتباطات'], ['/intelligence/outliers', 'القيم الشاذة'], ['/analysis', 'عمليات التحليل'], ['/misp', 'MISP']] },
-  { label: 'الإدارة', accent: 'admin', adminOnly: true, links: [['/admin', 'قريبًا']] },
+  { label: 'الإدارة', accent: 'admin', adminOnly: true, links: [['/admin', 'المستخدمون والتدقيق']] },
 ];
 
 export function Layout() {

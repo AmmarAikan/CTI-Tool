@@ -16,6 +16,7 @@ export function backendProxyTarget(value?: string): string {
 export function createViteConfig(proxyTarget?: string): UserConfig {
   return {
     plugins: [react()],
+    build: { sourcemap: false },
     server: {
       proxy: {
         [API_PROXY_PATH]: {

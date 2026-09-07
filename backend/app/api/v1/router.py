@@ -39,6 +39,13 @@ from backend.app.integrations.misp_client import MISPClient
 from backend.app.integrations.stix_exporter import STIXExporter
 from backend.app.repositories.cti_repository import CTIRepository
 from backend.app.schemas.api import (
+    AdminAuditPageResponse,
+    AdminPasswordResetRequest,
+    AdminUserActiveRequest,
+    AdminUserCreateRequest,
+    AdminUserPageResponse,
+    AdminUserResponse,
+    AdminUserRoleRequest,
     BootstrapRequest,
     CorrelationRequest,
     ExternalCollectionStartRequest,
@@ -282,6 +289,151 @@ def create_user(
     audit(db, admin, "create_user", "user", user.id, role=user.role)
     db.commit()
     return {"id": user.id, "username": user.username, "role": user.role}
+
+
+def _admin_user_dict(user: User) -> dict[str, Any]:
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": user.role,
+        "is_active": user.is_active,
+        "created_at": iso(user.created_at),
+    }
+
+
+def _protect_last_active_admin(db: Session, user: User) -> None:
+    if user.role != "admin" or not user.is_active:
+        return
+    active_admins = db.scalar(
+        select(func.count()).select_from(User).where(
+            User.role == "admin", User.is_active.is_(True)
+        )
+    ) or 0
+    if active_admins <= 1:
+        raise HTTPException(
+            status_code=409,
+            detail="The last active administrator cannot be demoted or deactivated",
+        )
+
+
+@router.get("/admin/users", tags=["administration"], response_model=AdminUserPageResponse)
+def admin_users(
+    db: SessionDep,
+    _: Annotated[User, Depends(require_roles("admin"))],
+    search: str | None = Query(default=None, min_length=2, max_length=100),
+    role: str | None = Query(default=None, pattern="^(viewer|analyst|admin)$"),
+    is_active: bool | None = None,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = []
+    if search:
+        filters.append(User.username.ilike(f"%{search}%"))
+    if role:
+        filters.append(User.role == role)
+    if is_active is not None:
+        filters.append(User.is_active.is_(is_active))
+    total = db.scalar(select(func.count()).select_from(User).where(*filters)) or 0
+    users = db.scalars(
+        select(User).where(*filters).order_by(User.username, User.id).limit(limit).offset(offset)
+    ).all()
+    return {"items": [_admin_user_dict(item) for item in users], "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/admin/users", tags=["administration"], response_model=AdminUserResponse, status_code=201)
+def admin_create_user(
+    payload: AdminUserCreateRequest,
+    db: SessionDep,
+    admin: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    if db.scalar(select(User).where(User.username == payload.username)):
+        raise HTTPException(status_code=409, detail="Username already exists")
+    user = User(username=payload.username, password_hash=hash_password(payload.password), role=payload.role)
+    db.add(user)
+    db.flush()
+    audit(db, admin, "admin_create_user", "user", user.id, role=user.role)
+    db.commit()
+    return _admin_user_dict(user)
+
+
+@router.patch("/admin/users/{user_id}/role", tags=["administration"], response_model=AdminUserResponse)
+def admin_update_role(
+    user_id: str,
+    payload: AdminUserRoleRequest,
+    db: SessionDep,
+    admin: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.role == "admin" and payload.role != "admin":
+        _protect_last_active_admin(db, user)
+    previous_role = user.role
+    user.role = payload.role
+    audit(db, admin, "admin_change_user_role", "user", user.id, previous_role=previous_role, role=user.role)
+    db.commit()
+    return _admin_user_dict(user)
+
+
+@router.patch("/admin/users/{user_id}/active", tags=["administration"], response_model=AdminUserResponse)
+def admin_update_active(
+    user_id: str,
+    payload: AdminUserActiveRequest,
+    db: SessionDep,
+    admin: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.is_active and not payload.is_active:
+        _protect_last_active_admin(db, user)
+    previous = user.is_active
+    user.is_active = payload.is_active
+    audit(db, admin, "admin_change_user_active", "user", user.id, previous_active=previous, is_active=user.is_active)
+    db.commit()
+    return _admin_user_dict(user)
+
+
+@router.post("/admin/users/{user_id}/password", tags=["administration"], response_model=AdminUserResponse)
+def admin_reset_password(
+    user_id: str,
+    payload: AdminPasswordResetRequest,
+    db: SessionDep,
+    admin: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.password_hash = hash_password(payload.password)
+    audit(db, admin, "admin_reset_user_password", "user", user.id)
+    db.commit()
+    return _admin_user_dict(user)
+
+
+@router.get("/admin/audit", tags=["administration"], response_model=AdminAuditPageResponse)
+def admin_audit_logs(
+    db: SessionDep,
+    _: Annotated[User, Depends(require_roles("admin"))],
+    action: str | None = Query(default=None, min_length=2, max_length=100),
+    actor: str | None = Query(default=None, min_length=2, max_length=100),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = []
+    if action:
+        filters.append(AuditLog.action == action)
+    if actor:
+        filters.append(AuditLog.username == actor)
+    total = db.scalar(select(func.count()).select_from(AuditLog).where(*filters)) or 0
+    logs = db.scalars(
+        select(AuditLog).where(*filters).order_by(desc(AuditLog.created_at), desc(AuditLog.id)).limit(limit).offset(offset)
+    ).all()
+    return {
+        "items": [{"id": item.id, "actor": item.username, "action": item.action, "target_type": item.resource_type, "target_id": item.resource_id, "outcome": "success", "created_at": iso(item.created_at)} for item in logs],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/sources", tags=["sources"])

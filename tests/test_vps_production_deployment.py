@@ -140,6 +140,12 @@ class VPSProductionDeploymentTests(unittest.TestCase):
     def test_frontend_keeps_bounded_long_pipeline_requests_connected(self) -> None:
         self.assertIn("proxy_read_timeout 7200s;", self.frontend_nginx)
 
+    def test_spa_and_assets_keep_security_headers_when_setting_cache_headers(self) -> None:
+        self.assertIn("try_files $uri $uri/ /index.html;", self.frontend_nginx)
+        self.assertEqual(self.frontend_nginx.count("add_header Content-Security-Policy"), 3)
+        self.assertEqual(self.frontend_nginx.count('add_header X-Content-Type-Options "nosniff"'), 3)
+        self.assertEqual(self.frontend_nginx.count('add_header X-Frame-Options "DENY"'), 3)
+
 
 if __name__ == "__main__":
     unittest.main()

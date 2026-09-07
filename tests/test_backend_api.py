@@ -63,6 +63,76 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(model.json()["model_priority"]["primary"], "dnrti_bert_ner")
         self.assertGreater(model.json()["held_out_test"]["bert"]["f1"], 0.75)
 
+    def test_admin_facade_rbac_lifecycle_last_admin_and_safe_audit(self) -> None:
+        current = self.client.get("/api/v1/auth/me", headers=self.headers).json()
+        protected = self.client.patch(
+            f"/api/v1/admin/users/{current['id']}/role",
+            headers=self.headers,
+            json={"role": "analyst"},
+        )
+        self.assertEqual(protected.status_code, 409)
+
+        created = self.client.post(
+            "/api/v1/admin/users",
+            headers=self.headers,
+            json={
+                "username": "phase3operator",
+                "password": "InitialAdminPassword123!",
+                "role": "viewer",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        user_id = created.json()["id"]
+        self.assertNotIn("password", created.json())
+        self.assertNotIn("hash", created.json())
+
+        duplicate = self.client.post(
+            "/api/v1/admin/users",
+            headers=self.headers,
+            json={"username": "phase3operator", "password": "AnotherPassword123!", "role": "viewer"},
+        )
+        self.assertEqual(duplicate.status_code, 409)
+        too_many = self.client.get("/api/v1/admin/users?limit=101", headers=self.headers)
+        self.assertEqual(too_many.status_code, 422)
+
+        role = self.client.patch(
+            f"/api/v1/admin/users/{user_id}/role",
+            headers=self.headers,
+            json={"role": "analyst"},
+        )
+        inactive = self.client.patch(
+            f"/api/v1/admin/users/{user_id}/active",
+            headers=self.headers,
+            json={"is_active": False},
+        )
+        reset = self.client.post(
+            f"/api/v1/admin/users/{user_id}/password",
+            headers=self.headers,
+            json={"password": "ReplacementPassword123!"},
+        )
+        self.assertEqual(role.json()["role"], "analyst")
+        self.assertFalse(inactive.json()["is_active"])
+        self.assertNotIn("password", reset.text.lower())
+
+        self.client.post(
+            "/api/v1/admin/users", headers=self.headers,
+            json={"username": "phase3viewer", "password": "ViewerPassword123!", "role": "viewer"},
+        )
+        viewer_login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "phase3viewer", "password": "ViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {viewer_login.json()['access_token']}"}
+        denied = self.client.get("/api/v1/admin/users", headers=viewer_headers)
+        self.assertEqual(denied.status_code, 403)
+
+        audit_page = self.client.get("/api/v1/admin/audit?limit=100", headers=self.headers)
+        self.assertEqual(audit_page.status_code, 200, audit_page.text)
+        self.assertTrue(any(item["action"] == "admin_reset_user_password" for item in audit_page.json()["items"]))
+        for item in audit_page.json()["items"]:
+            self.assertEqual(set(item), {"id", "actor", "action", "target_type", "target_id", "outcome", "created_at"})
+        self.assertNotIn("ReplacementPassword123!", audit_page.text)
+
     def test_external_control_routes_are_authenticated_and_frontend_ready(self) -> None:
         sources = [
             {

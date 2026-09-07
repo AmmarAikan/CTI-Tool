@@ -14,6 +14,7 @@ describe('Vite Backend proxy', () => {
       target: 'http://127.0.0.1:18000',
       changeOrigin: false,
     });
+    expect(config.build?.sourcemap).toBe(false);
   });
 
   it('keeps the development default local and rejects credentials or paths', () => {

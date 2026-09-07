@@ -64,3 +64,20 @@
 .intelligence-module td a { color: var(--ink); text-decoration-color: #d17a16; }
 .analysis-module tbody tr { cursor: pointer; }
 .misp-module .detail-panel li { overflow-wrap: anywhere; }
+
+/* Phase 3 administration and application-level fallbacks. */
+.nav-admin { border-right-color: #ef6b73; }
+.admin-module .eyebrow { color: #b4233d; }
+.admin-form-card { background: white; border: 1px solid var(--line); border-top: 4px solid #b4233d; padding: 24px; margin-bottom: 26px; }
+.admin-form-card h3 { margin: 0 0 16px; }
+.admin-form-card form { max-width: none; }
+.admin-form-grid { display: grid; grid-template-columns: 1.2fr .8fr 1.5fr; gap: 14px; align-items: end; margin-bottom: 16px; }
+.admin-form-grid label { margin: 0; }
+.admin-form-grid select, .admin-module table select { width: 100%; border: 1px solid #bcccdc; background: white; color: var(--ink); padding: 10px; }
+.password-field { display: flex; align-items: stretch; }
+.password-field input { min-width: 0; }
+.reset-card { max-width: 650px; margin-top: 20px; }
+.fatal-state { min-height: 100vh; display: grid; place-content: center; text-align: center; gap: 14px; padding: 30px; background: var(--ink); color: white; }
+.fatal-state p { color: #bcccdc; }
+.fatal-state a, .state-panel a { text-decoration: none; }
+@media (max-width: 900px) { .admin-form-grid { grid-template-columns: 1fr; } }

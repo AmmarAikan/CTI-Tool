@@ -307,3 +307,61 @@ class IntelligenceMISPDeliveryResponse(BaseModel):
     attributes_added: int = Field(ge=0)
     attributes_verified: int = Field(ge=0)
     published: bool
+
+
+class AdminUserCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$")
+    password: str = Field(min_length=10, max_length=200)
+    role: Literal["admin", "analyst", "viewer"] = "viewer"
+
+
+class AdminUserRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    role: Literal["admin", "analyst", "viewer"]
+
+
+class AdminUserActiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    is_active: bool
+
+
+class AdminPasswordResetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    password: str = Field(min_length=10, max_length=200)
+
+
+class AdminUserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=36)
+    username: str = Field(max_length=100)
+    role: Literal["admin", "analyst", "viewer"]
+    is_active: bool
+    created_at: str = Field(max_length=40)
+
+
+class AdminUserPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[AdminUserResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
+
+class AdminAuditResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=36)
+    actor: str | None = Field(default=None, max_length=100)
+    action: str = Field(max_length=100)
+    target_type: str = Field(max_length=100)
+    target_id: str | None = Field(default=None, max_length=100)
+    outcome: Literal["success"]
+    created_at: str = Field(max_length=40)
+
+
+class AdminAuditPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[AdminAuditResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
