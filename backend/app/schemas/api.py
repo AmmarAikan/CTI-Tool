@@ -111,3 +111,27 @@ class ExternalManualPreviewRejectedResponse(BaseModel):
     preview_id: str
     state: Literal["rejected"]
     decided_at: str
+
+
+class InternalEventResponse(BaseModel):
+    """Deliberately narrow projection: never expose raw sensor-derived text."""
+
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=64)
+    integration: Literal["dionaea", "host-auth", "web-access"]
+    source: Literal["Dionaea", "Host Auth", "Web Access"]
+    event_type: Literal["dionaea_session", "linux_auth_session", "web_access_session"]
+    category: str | None = Field(default=None, max_length=50)
+    severity: str | None = Field(default=None, max_length=30)
+    summary: str = Field(max_length=160)
+    first_seen: str | None = Field(default=None, max_length=40)
+    last_seen: str | None = Field(default=None, max_length=40)
+    created_at: str = Field(max_length=40)
+
+
+class InternalEventPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[InternalEventResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)

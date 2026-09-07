@@ -49,6 +49,7 @@ from backend.app.schemas.api import (
     ExternalManualPreviewResponse,
     ExternalManualPreviewRejectedResponse,
     ExternalSourceRunRequest,
+    InternalEventPageResponse,
     LoginRequest,
     MISPSendRequest,
     SourceCreate,
@@ -643,6 +644,72 @@ def collect_dionaea_log(
     audit(db, user, "collect_dionaea_log", "pipeline_run", result["run_id"], path=str(path))
     db.commit()
     return result
+
+
+_INTERNAL_EVENT_TYPES = {
+    "dionaea": ("Dionaea", "dionaea_session"),
+    "host-auth": ("Host Auth", "linux_auth_session"),
+    "web-access": ("Web Access", "web_access_session"),
+}
+
+
+@router.get(
+    "/internal/sources/{integration}/events",
+    tags=["internal"],
+    response_model=InternalEventPageResponse,
+)
+def list_internal_source_events(
+    integration: str,
+    db: SessionDep,
+    _: CurrentUser,
+    severity: str | None = Query(default=None, max_length=30),
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    """Return a bounded UI projection with no raw logs or sensor identifiers."""
+    profile = _INTERNAL_EVENT_TYPES.get(integration)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Internal integration not found")
+    source_name, event_type = profile
+    filters = [
+        ThreatEvent.source_pipeline == "internal",
+        ThreatEvent.source_type == event_type,
+    ]
+    if severity:
+        filters.append(ThreatEvent.severity == severity)
+    total = db.scalar(select(func.count()).select_from(ThreatEvent).where(*filters)) or 0
+    records = db.scalars(
+        select(ThreatEvent)
+        .where(*filters)
+        .order_by(desc(ThreatEvent.created_at), desc(ThreatEvent.id))
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    summary = {
+        "dionaea": "جلسة رصد من مصيدة Dionaea",
+        "host-auth": "حدث مصادقة مضيف تمت معالجته",
+        "web-access": "حدث وصول ويب تمت معالجته",
+    }[integration]
+    return {
+        "items": [
+            {
+                "id": item.id,
+                "integration": integration,
+                "source": source_name,
+                "event_type": event_type,
+                "category": item.classification_label,
+                "severity": item.severity,
+                "summary": summary,
+                "first_seen": iso(item.first_seen),
+                "last_seen": iso(item.last_seen),
+                "created_at": iso(item.created_at),
+            }
+            for item in records
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.get("/events", tags=["cti"])

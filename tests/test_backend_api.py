@@ -118,6 +118,54 @@ class BackendAPITests(unittest.TestCase):
         events = self.client.get("/api/v1/events?source_pipeline=internal", headers=self.headers)
         self.assertTrue(any(item["source_type"] == "dionaea_session" for item in events.json()))
 
+        safe_events = self.client.get(
+            "/api/v1/internal/sources/dionaea/events?limit=1&offset=0",
+            headers=self.headers,
+        )
+        self.assertEqual(safe_events.status_code, 200, safe_events.text)
+        page = safe_events.json()
+        self.assertEqual(page["limit"], 1)
+        self.assertGreaterEqual(page["total"], 1)
+        self.assertEqual(page["items"][0]["integration"], "dionaea")
+        self.assertNotIn("description", page["items"][0])
+        self.assertNotIn("source_ip", page["items"][0])
+
+    def test_internal_event_facade_is_bounded_and_viewer_pull_is_forbidden(self) -> None:
+        missing = self.client.get(
+            "/api/v1/internal/sources/unknown/events", headers=self.headers
+        )
+        too_large = self.client.get(
+            "/api/v1/internal/sources/host-auth/events?limit=101", headers=self.headers
+        )
+        self.assertEqual(missing.status_code, 404)
+        self.assertEqual(too_large.status_code, 422)
+
+        created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={
+                "username": "phase1viewer",
+                "password": "StrongViewerPassword123!",
+                "role": "viewer",
+            },
+        )
+        self.assertIn(created.status_code, {201, 409})
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "phase1viewer", "password": "StrongViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        listed = self.client.get(
+            "/api/v1/internal/sources/web-access/events", headers=viewer_headers
+        )
+        self.assertEqual(listed.status_code, 200)
+        with patch("backend.app.services.pipeline_service.PipelineService.run_security_sensor_api") as pull:
+            forbidden = self.client.post(
+                "/api/v1/integrations/web-access/pull", headers=viewer_headers
+            )
+        self.assertEqual(forbidden.status_code, 403)
+        pull.assert_not_called()
+
     def test_wazuh_upload_dashboard_stix_and_misp_dry_run(self) -> None:
         with SAMPLE_PATH.open("rb") as handle:
             response = self.client.post(

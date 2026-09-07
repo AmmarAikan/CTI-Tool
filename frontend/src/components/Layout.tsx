@@ -1,22 +1,20 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
-const links = [
-  ['/', 'لوحة المتابعة'],
-  ['/external-sources', 'المصادر الخارجية'],
-  ['/jobs', 'الوظائف'],
-  ['/manual', 'رابط يدوي'],
-  ['/exports', 'التصديرات'],
-  ['/reviews', 'المراجعات'],
+const groups = [
+  { label: 'لوحة المتابعة', accent: 'dashboard', links: [['/', 'لوحة المتابعة']] },
+  { label: 'المصادر الخارجية', accent: 'external', links: [['/external-sources', 'المصادر'], ['/manual', 'رابط يدوي'], ['/jobs', 'الوظائف'], ['/reviews', 'المراجعات'], ['/exports', 'التصديرات']] },
+  { label: 'المصادر الداخلية', accent: 'internal', links: [['/internal-sources', 'نظرة عامة'], ['/internal-sources/dionaea', 'Dionaea'], ['/internal-sources/host-auth', 'سجلات الدخول'], ['/internal-sources/web-access', 'الوصول إلى الويب']] },
+  { label: 'الاستخبارات والتحليل', accent: 'analysis', links: [['/analysis', 'قريبًا']] },
+  { label: 'الإدارة', accent: 'admin', adminOnly: true, links: [['/admin', 'قريبًا']] },
 ];
 
 export function Layout() {
   const { user, logout, can } = useAuth();
-  const visibleLinks = links.filter(([to]) => to !== '/manual' || can('analyst'));
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="brand"><span className="brand-mark">CTI</span><div><strong>مركز التهديدات</strong><small>عمليات استخباراتية</small></div></div>
-      <nav aria-label="التنقل الرئيسي">{visibleLinks.map(([to, label]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>{label}</NavLink>)}</nav>
+      <nav aria-label="التنقل الرئيسي">{groups.filter((group) => !group.adminOnly || user?.role === 'admin').map((group) => <section className={`nav-group nav-${group.accent}`} key={group.label} aria-label={group.label}><h2>{group.label}</h2>{group.links.filter(([to]) => to !== '/manual' || can('analyst')).map(([to, label]) => <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}>{label}</NavLink>)}</section>)}</nav>
       <div className="sidebar-foot"><span className="online-dot" />اتصال مركزي آمن</div>
     </aside>
     <main className="main-content">

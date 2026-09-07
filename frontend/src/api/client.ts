@@ -18,7 +18,21 @@ export interface HealthResponse {
   reachable: boolean;
   service?: string;
   api_version?: string;
+  contract_valid?: boolean;
+  hmac_verification?: boolean;
 }
+
+export interface SystemHealth { status: 'ok' | 'degraded'; database: boolean; }
+export type InternalIntegration = 'dionaea' | 'host-auth' | 'web-access';
+export interface IntegrationConfiguration {
+  external_control_api: { configured: boolean };
+  dionaea_sensor_api: { configured: boolean };
+  host_auth_sensor_api: { configured: boolean };
+  web_access_sensor_api: { configured: boolean };
+}
+export interface InternalEvent { id: string; integration: InternalIntegration; source: string; event_type: string; category?: string; severity?: string; summary: string; first_seen?: string; last_seen?: string; created_at: string; }
+export interface InternalEventPage { items: InternalEvent[]; total: number; limit: number; offset: number; }
+export interface PullResult { run_id: string; pipeline: 'internal'; status: string; collected_count: number; processed_count: number; stored_count: number; failed_count: number; }
 
 export interface Source {
   source_id: string;
@@ -124,7 +138,14 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), 15_000);
+  let response: Response;
+  try { response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, signal: options.signal || controller.signal }); }
+  catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw new ApiError(408, 'timeout', 'Request timed out');
+    throw error;
+  } finally { window.clearTimeout(timer); }
   if (response.status === 401) {
     clearToken();
     window.dispatchEvent(new Event('cti:unauthorized'));
@@ -135,7 +156,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const detail = typeof body.detail === 'object' && body.detail !== null ? body.detail as { code?: string; message?: string } : undefined;
     const code = detail?.code || body.code || 'request_failed';
     const message = detail?.message || body.message || (typeof body.detail === 'string' ? body.detail : 'Request failed');
-    throw new ApiError(response.status, sanitizeError(message), sanitizeError(code));
+    throw new ApiError(response.status, sanitizeError(code), sanitizeError(message));
   }
   return response.json() as Promise<T>;
 }
@@ -148,10 +169,46 @@ function parseLogin(value: unknown): LoginResponse {
 }
 
 function parseHealth(value: unknown): HealthResponse {
-  if (!value || typeof value !== 'object') throw new ApiError(502, 'invalid_response', 'Invalid health response');
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['configured', 'reachable', 'service', 'api_version', 'contract_valid', 'hmac_verification', 'error_type'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid health response');
   const body = value as Partial<HealthResponse>;
   if (typeof body.configured !== 'boolean' || typeof body.reachable !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
-  return { configured: body.configured, reachable: body.reachable, service: safeText(body.service), api_version: safeText(body.api_version) };
+  if (body.contract_valid !== undefined && typeof body.contract_valid !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
+  if (body.hmac_verification !== undefined && typeof body.hmac_verification !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
+  return { configured: body.configured, reachable: body.reachable, service: safeText(body.service), api_version: safeText(body.api_version), contract_valid: body.contract_valid, hmac_verification: body.hmac_verification };
+}
+
+function parseSystemHealth(value: unknown): SystemHealth {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['status', 'database'].includes(key)) || !['ok', 'degraded'].includes(String(value.status)) || typeof value.database !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid system health response');
+  return { status: value.status as SystemHealth['status'], database: value.database };
+}
+
+function parseIntegrationStatus(value: unknown): IntegrationConfiguration {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
+  const read = (key: string) => {
+    const entry = value[key];
+    if (!isPlainObject(entry) || typeof entry.configured !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
+    return { configured: entry.configured };
+  };
+  return { external_control_api: read('external_control_api'), dionaea_sensor_api: read('dionaea_sensor_api'), host_auth_sensor_api: read('host_auth_sensor_api'), web_access_sensor_api: read('web_access_sensor_api') };
+}
+
+function parseInternalEvents(value: unknown, integration: InternalIntegration): InternalEventPage {
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['items', 'total', 'limit', 'offset'].includes(key)) || !Array.isArray(value.items) || value.items.length > 100 || !Number.isSafeInteger(value.total) || (value.total as number) < 0 || !Number.isSafeInteger(value.limit) || (value.limit as number) < 1 || (value.limit as number) > 100 || !Number.isSafeInteger(value.offset) || (value.offset as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid internal events response');
+  const allowed = ['id', 'integration', 'source', 'event_type', 'category', 'severity', 'summary', 'first_seen', 'last_seen', 'created_at'];
+  const items = value.items.map((item): InternalEvent => {
+    if (!isPlainObject(item) || Object.keys(item).some((key) => !allowed.includes(key)) || item.integration !== integration || typeof item.id !== 'string' || item.id.length > 64 || typeof item.source !== 'string' || item.source.length > 40 || typeof item.event_type !== 'string' || item.event_type.length > 50 || typeof item.summary !== 'string' || item.summary.length > 160 || !validIsoTimestamp(item.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid internal events response');
+    for (const key of ['category', 'severity'] as const) if (item[key] !== null && item[key] !== undefined && (typeof item[key] !== 'string' || item[key].length > 50)) throw new ApiError(502, 'invalid_response', 'Invalid internal events response');
+    for (const key of ['first_seen', 'last_seen'] as const) if (item[key] !== null && item[key] !== undefined && !validIsoTimestamp(item[key])) throw new ApiError(502, 'invalid_response', 'Invalid internal events response');
+    return { id: item.id, integration, source: item.source, event_type: item.event_type, category: item.category as string | undefined, severity: item.severity as string | undefined, summary: sanitizeError(item.summary), first_seen: item.first_seen as string | undefined, last_seen: item.last_seen as string | undefined, created_at: item.created_at };
+  });
+  return { items, total: value.total as number, limit: value.limit as number, offset: value.offset as number };
+}
+
+function parsePullResult(value: unknown): PullResult {
+  const allowed = ['run_id', 'pipeline', 'status', 'collected_count', 'processed_count', 'stored_count', 'failed_count', 'details'];
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.run_id !== 'string' || value.pipeline !== 'internal' || typeof value.status !== 'string') throw new ApiError(502, 'invalid_response', 'Invalid pull response');
+  for (const key of ['collected_count', 'processed_count', 'stored_count', 'failed_count']) if (!Number.isSafeInteger(value[key]) || (value[key] as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid pull response');
+  return { run_id: value.run_id, pipeline: 'internal', status: sanitizeError(value.status), collected_count: value.collected_count as number, processed_count: value.processed_count as number, stored_count: value.stored_count as number, failed_count: value.failed_count as number };
 }
 
 function parseSources(value: unknown): Source[] {
@@ -208,6 +265,7 @@ function parseExternalJob(value: unknown): ExternalJob {
 }
 
 function validTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && value.endsWith('Z') && !Number.isNaN(Date.parse(value)); }
+function validIsoTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && !Number.isNaN(Date.parse(value)); }
 function optionalText(value: unknown, max = 200): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value !== 'string' || value.length > max) throw new ApiError(502, 'invalid_response', 'Invalid external response');
@@ -335,6 +393,11 @@ export const api = {
   externalHealth: async () => parseHealth(await request<unknown>('/integrations/external-control/health')),
   externalSources: async () => parseSources(await request<unknown>('/integrations/external-control/sources')),
   dashboardSummary: async () => parseDashboardSummary(await request<unknown>('/dashboard/summary')),
+  systemHealth: async () => parseSystemHealth(await request<unknown>('/health')),
+  integrationStatus: async () => parseIntegrationStatus(await request<unknown>('/integrations/status')),
+  internalHealth: async (integration: InternalIntegration) => parseHealth(await request<unknown>(`/integrations/${integration}/health`)),
+  internalEvents: async (integration: InternalIntegration, limit = 25, offset = 0, severity = '') => parseInternalEvents(await request<unknown>(`/internal/sources/${integration}/events?limit=${limit}&offset=${offset}${severity ? `&severity=${encodeURIComponent(severity)}` : ''}`), integration),
+  pullInternal: async (integration: InternalIntegration) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST' })),
   startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
   startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
   recheckManualSource: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources/recheck', { method: 'POST', body: JSON.stringify({ url, force: true }) })),
