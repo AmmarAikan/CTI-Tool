@@ -213,6 +213,22 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(client.session.calls[1][2]["headers"]["Idempotency-Key"], "approve-once")
         self.assertEqual(client.session.calls[2][2]["headers"]["Idempotency-Key"], "reject-once")
 
+    def test_manual_preview_accepts_deployed_exclude_none_response(self) -> None:
+        preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
+            "created_at": "2026-09-07T00:00:00Z", "expires_at": "2026-09-07T00:15:00Z",
+            "display_url": "https://example.test/report", "page_type": "article", "title": "Safe",
+            "excerpt": "Safe excerpt", "disposition": "accepted", "privacy_status": "reviewed",
+            "review_reasons": [], "content_sha256": "sha256:" + "a" * 64,
+            "items_preview": [{"item_index": 1, "title": "Safe", "excerpt": "Safe excerpt",
+                "page_type": "article", "disposition": "accepted", "privacy_status": "reviewed",
+                "review_reasons": [], "content_sha256": "sha256:" + "b" * 64}],
+            "items_preview_total": 1, "items_preview_truncated": False,
+            "counts": {"items": 1, "accepted": 1, "review": 0, "rejected": 0, "skipped": 0, "errors": 0}}
+        result = self.client([FakeResponse(preview)]).create_manual_preview("https://example.test/report")
+        self.assertIsNone(result["classification_label"])
+        self.assertIsNone(result["classification_confidence"])
+        self.assertNotIn("classification_label", result["items_preview"][0])
+
     def test_manual_preview_proxy_rejects_malformed_or_leaking_item_contract(self) -> None:
         base = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
             "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z",

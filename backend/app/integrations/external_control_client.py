@@ -276,23 +276,25 @@ class ExternalControlClient:
 
     @staticmethod
     def _preview_response(payload: Any) -> dict[str, Any]:
+        nullable = {"classification_label", "classification_confidence"}
         required = {"schema_version", "preview_id", "state", "created_at", "expires_at", "display_url", "page_type",
-                    "title", "excerpt", "disposition", "classification_label", "classification_confidence",
-                    "privacy_status", "review_reasons", "content_sha256", "counts", "items_preview",
-                    "items_preview_total", "items_preview_truncated"}
-        if not isinstance(payload, dict) or set(payload) != required or payload.get("schema_version") != "1.0" or payload.get("state") != "pending":
+                    "title", "excerpt", "disposition", "privacy_status", "review_reasons", "content_sha256", "counts",
+                    "items_preview", "items_preview_total", "items_preview_truncated"}
+        if (not isinstance(payload, dict) or not required <= set(payload) or not set(payload) <= required | nullable
+                or payload.get("schema_version") != "1.0" or payload.get("state") != "pending"):
             raise ExternalControlTransportError("External preview contract is invalid")
         if not isinstance(payload.get("preview_id"), str) or not isinstance(payload.get("counts"), dict):
             raise ExternalControlTransportError("External preview contract is invalid")
         items = payload.get("items_preview")
-        item_keys = {"item_index", "title", "excerpt", "page_type", "disposition", "classification_label",
-                     "classification_confidence", "privacy_status", "review_reasons", "content_sha256"}
+        item_keys = {"item_index", "title", "excerpt", "page_type", "disposition", "privacy_status",
+                     "review_reasons", "content_sha256"}
         if (not isinstance(items, list) or len(items) > 20 or type(payload.get("items_preview_total")) is not int
                 or payload["items_preview_total"] < len(items) or not isinstance(payload.get("items_preview_truncated"), bool)
                 or payload["items_preview_truncated"] != (payload["items_preview_total"] > len(items))):
             raise ExternalControlTransportError("External preview contract is invalid")
         for index, item in enumerate(items, start=1):
-            if not isinstance(item, dict) or set(item) not in (item_keys, item_keys | {"published"}):
+            if (not isinstance(item, dict) or not item_keys <= set(item)
+                    or not set(item) <= item_keys | nullable | {"published"}):
                 raise ExternalControlTransportError("External preview item contract is invalid")
             confidence = item.get("classification_confidence")
             label = item.get("classification_label")
@@ -314,7 +316,7 @@ class ExternalControlClient:
                     or (published is not None and (not isinstance(published, str) or len(published) > 40 or not published.endswith("Z")))
                     or ((item["privacy_status"] == "review_required" or item["disposition"] == "rejected") and item["excerpt"])):
                 raise ExternalControlTransportError("External preview item contract is invalid")
-        return {key: payload[key] for key in required}
+        return {key: payload.get(key) for key in required | nullable}
 
     @classmethod
     def _validate_source_id(cls, source_id: str) -> None:
