@@ -3,6 +3,9 @@
 .job-panel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .job-counts { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; }
 .job-counts div { min-width: 90px; padding: 10px; background: #f8fafb; }
+.run-all-panel { margin-bottom: 22px; padding: 18px; background: white; border: 1px solid var(--line); display: grid; justify-items: start; gap: 10px; }
+.source-result-list { display: grid; gap: 6px; }
+.source-result-list > div { display: grid; grid-template-columns: minmax(150px, 1fr) auto auto; gap: 12px; align-items: center; }
 .job-counts dt { color: var(--muted); font-size: 12px; }
 .job-counts dd { margin: 4px 0 0; font-weight: 700; }
 .job-error { color: var(--red); font-size: 13px; }

@@ -189,6 +189,30 @@ class ExternalControlClientTests(unittest.TestCase):
         with self.assertRaises(ExternalControlTransportError):
             self.client([FakeResponse(payload)]).list_jobs()
 
+    def test_job_and_source_projections_reject_unknown_or_sensitive_fields(self) -> None:
+        job = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "completed", "created_at": "2026-09-07T00:00:00Z", "updated_at": "2026-09-07T00:00:01Z",
+            "progress": {}, "result": {"status": "completed", "accepted_records": 1}, "error": None,
+            "request_body": {"token": "secret"}}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(job)]).get_job("job-1234567890")
+        nested = dict(job); nested.pop("request_body"); nested["result"] = {"status": "completed", "path": "/tmp/private"}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(nested)]).get_job("job-1234567890")
+        source = {"source_id": "safe", "name": "Safe", "source_type": "rss", "status": "enabled",
+                  "metadata": {"url": "https://private.test"}}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse([source])]).list_sources()
+
+        private = dict(job); private.pop("request_body"); private["result"] = {
+            "status": "completed", "accepted_records": 1, "canonical_url": "https://private.test/report",
+            "message": "private collector detail", "export": {"status": "completed", "run_id": "ext-run-123",
+                "dataset_sha256": "a" * 64, "accepted_records": 1, "review_records": 0,
+                "dataset_file": "final_dataset.json", "manifest_file": "manifest.json", "review_file": "review.json"}}
+        projected = self.client([FakeResponse(private)]).get_job("job-1234567890")
+        self.assertNotIn("canonical_url", str(projected))
+        self.assertNotIn("dataset_file", str(projected))
+
     def test_manual_preview_proxy_contract_and_decision_idempotency(self) -> None:
         preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
             "created_at": "2026-09-06T00:00:00Z", "expires_at": "2026-09-06T00:15:00Z",

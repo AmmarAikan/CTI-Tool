@@ -76,6 +76,7 @@ export interface ExternalJob {
   created_at: string;
   updated_at: string;
   counts: Partial<Record<'accepted_records' | 'review_records' | 'rejected_records' | 'skipped_records' | 'error_count', number>>;
+  sources: Record<string, { status: string; counts: ExternalJob['counts'] }>;
   error?: string;
 }
 
@@ -146,7 +147,10 @@ export function clearToken(): void {
   sessionStorage.removeItem('cti_access_token');
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
+const EXTERNAL_SYNC_TIMEOUT_MS = 40_000;
+
+async function request<T>(path: string, options: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
   const headers = new Headers(options.headers);
   headers.set('Accept', 'application/json');
   if (options.body) headers.set('Content-Type', 'application/json');
@@ -154,13 +158,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (token) headers.set('Authorization', `Bearer ${token}`);
 
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 15_000);
+  const externalSignal = options.signal;
+  const abortFromCaller = () => controller.abort(externalSignal?.reason);
+  if (externalSignal?.aborted) abortFromCaller(); else externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
-  try { response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, signal: options.signal || controller.signal }); }
+  try { response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, signal: controller.signal }); }
   catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') throw new ApiError(408, 'timeout', 'Request timed out');
     throw error;
-  } finally { window.clearTimeout(timer); }
+  } finally { window.clearTimeout(timer); externalSignal?.removeEventListener('abort', abortFromCaller); }
   if (response.status === 401) {
     clearToken();
     window.dispatchEvent(new Event('cti:unauthorized'));
@@ -262,9 +269,9 @@ function parseAdminAudit(value: unknown): AdminAudit { if (!isPlainObject(value)
 function parseSources(value: unknown): Source[] {
   if (!Array.isArray(value)) throw new ApiError(502, 'invalid_response', 'Invalid sources response');
   return value.map((item) => {
-    if (!item || typeof item !== 'object') throw new ApiError(502, 'invalid_response', 'Invalid sources response');
+    if (!isPlainObject(item) || Object.keys(item).some((key) => !['source_id', 'name', 'source_type', 'status', 'metadata'].includes(key)) || Object.keys(item).length !== 5) throw new ApiError(502, 'invalid_response', 'Invalid sources response');
     const source = item as Partial<Source>;
-    if (typeof source.source_id !== 'string' || typeof source.name !== 'string' || typeof source.source_type !== 'string' || typeof source.status !== 'string' || !source.metadata || typeof source.metadata !== 'object' || Array.isArray(source.metadata)) throw new ApiError(502, 'invalid_response', 'Invalid sources response');
+    if (typeof source.source_id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(source.source_id) || typeof source.name !== 'string' || !source.name || source.name.length > 200 || typeof source.source_type !== 'string' || !source.source_type || source.source_type.length > 80 || typeof source.status !== 'string' || !['enabled', 'disabled', 'pending_review'].includes(source.status) || !isPlainObject(source.metadata) || Object.keys(source.metadata).some((key) => !['category', 'method'].includes(key)) || Object.values(source.metadata).some((entry) => typeof entry !== 'string' || !entry || entry.length > 100)) throw new ApiError(502, 'invalid_response', 'Invalid sources response');
     return { source_id: source.source_id, name: source.name, source_type: source.source_type, status: source.status, metadata: redactSensitive(source.metadata) as Record<string, unknown> };
   });
 }
@@ -299,18 +306,34 @@ function isPlainObject(value: unknown): value is Record<string, unknown> { retur
 function parseExternalJob(value: unknown): ExternalJob {
   if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
   const body = value;
-  if (body.schema_version !== '1.0' || typeof body.job_id !== 'string' || body.job_id.length < 10 || typeof body.command_id !== 'string' || body.command_id.length < 10 || typeof body.state !== 'string' || !JOB_STATES.includes(body.state as JobState) || typeof body.created_at !== 'string' || !body.created_at.endsWith('Z') || typeof body.updated_at !== 'string' || !body.updated_at.endsWith('Z') || !isPlainObject(body.progress) || (body.result !== null && !isPlainObject(body.result)) || (body.error !== null && !isPlainObject(body.error))) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+  const topKeys = ['schema_version', 'job_id', 'command_id', 'state', 'created_at', 'updated_at', 'progress', 'result', 'error'];
+  if (Object.keys(body).length !== topKeys.length || Object.keys(body).some((key) => !topKeys.includes(key)) || body.schema_version !== '1.0' || typeof body.job_id !== 'string' || body.job_id.length < 10 || typeof body.command_id !== 'string' || body.command_id.length < 10 || typeof body.state !== 'string' || !JOB_STATES.includes(body.state as JobState) || !validTimestamp(body.created_at) || !validTimestamp(body.updated_at) || !validCounts(body.progress) || (body.result !== null && !isPlainObject(body.result)) || (body.error !== null && !isPlainObject(body.error))) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
   const counts: ExternalJob['counts'] = {};
-  if (body.result) for (const key of JOB_COUNT_KEYS) {
+  const sources: ExternalJob['sources'] = {};
+  if (body.result) {
+    const resultKeys = ['status', 'scope', 'run_id', 'source_id', 'source_count', 'registered_source_count', 'manual_source_count', 'records_created', 'records_updated', ...JOB_COUNT_KEYS, 'force', 'sources', 'manual_sources', 'export'];
+    if (Object.keys(body.result).some((key) => !resultKeys.includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+    for (const key of ['status', 'scope', 'run_id', 'source_id']) if (body.result[key] !== undefined && (typeof body.result[key] !== 'string' || !(body.result[key] as string) || (body.result[key] as string).length > 200)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+    for (const key of ['source_count', 'registered_source_count', 'manual_source_count', 'records_created', 'records_updated']) if (body.result[key] !== undefined && (!Number.isSafeInteger(body.result[key]) || (body.result[key] as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+    if (body.result.force !== undefined && typeof body.result.force !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+    for (const key of JOB_COUNT_KEYS) {
     const amount = body.result[key];
     if (amount !== undefined) {
       if (!Number.isSafeInteger(amount) || (amount as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
       counts[key] = amount as number;
     }
+    }
+    for (const group of ['sources', 'manual_sources']) if (body.result[group] !== undefined) parseJobSources(body.result[group], sources);
+    if (body.result.export !== undefined) validateJobExport(body.result.export);
   }
-  const message = body.error && typeof body.error.message === 'string' ? sanitizeError(body.error.message) : undefined;
-  return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at, updated_at: body.updated_at, counts, error: message };
+  if (body.error && (Object.keys(body.error).some((key) => !['code', 'message', 'retryable', 'details'].includes(key)) || typeof body.error.code !== 'string' || typeof body.error.message !== 'string' || typeof body.error.retryable !== 'boolean' || !isPlainObject(body.error.details) || Object.keys(body.error.details).length > 0)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
+  const message = body.error ? sanitizeError(body.error.message as string) : undefined;
+  return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at as string, updated_at: body.updated_at as string, counts, sources, error: message };
 }
+
+function validCounts(value: unknown): value is Record<string, number> { return isPlainObject(value) && Object.keys(value).every((key) => JOB_COUNT_KEYS.includes(key as typeof JOB_COUNT_KEYS[number])) && Object.values(value).every((amount) => Number.isSafeInteger(amount) && (amount as number) >= 0); }
+function parseJobSources(value: unknown, target: ExternalJob['sources']) { if (!isPlainObject(value) || Object.keys(value).length > 100) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); for (const [id, item] of Object.entries(value)) { if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(id) || !isPlainObject(item) || typeof item.status !== 'string' || !item.status || item.status.length > 40 || Object.keys(item).some((key) => key !== 'status' && !JOB_COUNT_KEYS.includes(key as typeof JOB_COUNT_KEYS[number]))) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); const sourceCounts: ExternalJob['counts'] = {}; for (const key of JOB_COUNT_KEYS) if (item[key] !== undefined) { if (!Number.isSafeInteger(item[key]) || (item[key] as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); sourceCounts[key] = item[key] as number; } target[id] = { status: sanitizeError(item.status), counts: sourceCounts }; } }
+function validateJobExport(value: unknown) { if (!isPlainObject(value) || Object.keys(value).some((key) => !['status', 'run_id', 'dataset_sha256', 'accepted_records', 'review_records', 'error', 'reason'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); for (const key of ['status', 'run_id', 'reason']) if (value[key] !== undefined && (typeof value[key] !== 'string' || !(value[key] as string) || (value[key] as string).length > 200)) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); if (value.dataset_sha256 !== undefined && value.dataset_sha256 !== null && (typeof value.dataset_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.dataset_sha256))) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); for (const key of ['accepted_records', 'review_records']) if (value[key] !== undefined && (!Number.isSafeInteger(value[key]) || (value[key] as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); if (value.error !== undefined && value.error !== null && (!isPlainObject(value.error) || Object.keys(value.error).some((key) => !['code', 'message', 'retryable', 'details'].includes(key)) || typeof value.error.code !== 'string' || typeof value.error.message !== 'string' || typeof value.error.retryable !== 'boolean' || !isPlainObject(value.error.details) || Object.keys(value.error.details).length > 0)) throw new ApiError(502, 'invalid_response', 'Invalid external job response'); }
 
 function validTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && value.endsWith('Z') && !Number.isNaN(Date.parse(value)); }
 function validIsoTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && !Number.isNaN(Date.parse(value)); }
@@ -465,9 +488,10 @@ export const api = {
   adminResetPassword: async (id: string, password: string) => parseAdminUser(await request<unknown>(`/admin/users/${encodeURIComponent(id)}/password`, { method: 'POST', body: JSON.stringify({ password }) })),
   adminAudit: async (limit = 25, offset = 0, action = '', actor = '') => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); if (action) params.set('action', action); if (actor) params.set('actor', actor); return parsePage(await request<unknown>(`/admin/audit?${params}`), parseAdminAudit); },
   startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
+  startAllExternalSources: async () => parseExternalJob(await request<unknown>('/integrations/external-control/jobs', { method: 'POST', body: JSON.stringify({ source_ids: [], scope: 'all_enabled', force: false }) })),
   startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
   recheckManualSource: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources/recheck', { method: 'POST', body: JSON.stringify({ url, force: true }) })),
-  createManualPreview: async (url: string) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }) })),
+  createManualPreview: async (url: string, signal?: AbortSignal) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }), signal }, EXTERNAL_SYNC_TIMEOUT_MS)),
   approveManualPreview: async (preview: ManualPreview) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) })),
   rejectManualPreview: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled') => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })),
   externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),

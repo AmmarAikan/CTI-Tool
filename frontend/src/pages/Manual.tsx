@@ -31,6 +31,7 @@ function safeError(error: unknown) {
 export function Manual() {
   const { can, loading } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
+  const previewAbort = useRef<AbortController | undefined>(undefined);
   const [url, setUrl] = useState('');
   const [preview, setPreview] = useState<ManualPreview>();
   const [job, setJob] = useState<ExternalJob>();
@@ -40,7 +41,7 @@ export function Manual() {
   const [recheckUrl, setRecheckUrl] = useState('');
   const [recheckValidationError, setRecheckValidationError] = useState('');
   const [recheckJob, setRecheckJob] = useState<ExternalJob>();
-  const create = useMutation({ mutationFn: api.createManualPreview, onSuccess: (value) => { setPreview(value); setUrl(''); setMessage(''); } });
+  const create = useMutation({ mutationFn: (value: string) => { previewAbort.current?.abort(); const controller = new AbortController(); previewAbort.current = controller; return api.createManualPreview(value, controller.signal).finally(() => { if (previewAbort.current === controller) previewAbort.current = undefined; }); }, onSuccess: (value) => { setPreview(value); setUrl(''); setMessage(''); } });
   const clearConsumed = (error: unknown) => { if (error instanceof ApiError && [401, 409, 410].includes(error.status)) setPreview(undefined); };
   const approve = useMutation({ mutationFn: api.approveManualPreview, onSuccess: (value) => { setJob(value); setPreview(undefined); setMessage('تم قبول طلب الاعتماد، وجار متابعة الحفظ والتصدير.'); }, onError: clearConsumed });
   const reject = useMutation({ mutationFn: () => preview ? api.rejectManualPreview(preview.preview_id, reason) : Promise.reject(new Error('missing preview')), onSuccess: () => { setPreview(undefined); setMessage('تم تجاهل المعاينة دون تسجيل الرابط أو حفظ محتواه.'); window.setTimeout(() => inputRef.current?.focus(), 0); }, onError: clearConsumed });
@@ -55,6 +56,7 @@ export function Manual() {
     );
     return () => window.clearTimeout(timer);
   }, [preview]);
+  useEffect(() => () => previewAbort.current?.abort(), []);
 
   if (loading) return <LoadingState label="جار التحقق من الصلاحيات..." />;
   if (!can('analyst')) return <Navigate to="/" replace />;

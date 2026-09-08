@@ -4,6 +4,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote, urlparse
 
@@ -34,6 +35,9 @@ class ExternalControlClient:
     """Bounded client for the loopback-only VPS External Sources adapter."""
 
     SOURCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+    JOB_STATES = frozenset({"queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"})
+    COUNT_KEYS = frozenset({"accepted_records", "review_records", "rejected_records", "skipped_records", "error_count"})
+    SOURCE_METADATA_KEYS = frozenset({"category", "method"})
 
     def __init__(
         self,
@@ -78,7 +82,7 @@ class ExternalControlClient:
         payload = self._request("GET", "/sources")
         if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
             raise ExternalControlTransportError("External source list contract is invalid")
-        return payload
+        return [self._source_response(item) for item in payload]
 
     def start_collection(
         self,
@@ -268,11 +272,149 @@ class ExternalControlClient:
 
     @staticmethod
     def _job_response(payload: Any) -> dict[str, Any]:
-        if not isinstance(payload, dict):
+        allowed = {"schema_version", "job_id", "command_id", "state", "created_at", "updated_at", "progress", "result", "error"}
+        if not isinstance(payload, dict) or set(payload) != allowed or payload.get("schema_version") != "1.0":
             raise ExternalControlTransportError("External job contract is invalid")
-        if not isinstance(payload.get("job_id"), str) or not isinstance(payload.get("state"), str):
+        if (not ExternalControlClient._safe_id(payload.get("job_id"), minimum=10)
+                or not ExternalControlClient._safe_id(payload.get("command_id"), minimum=10)
+                or payload.get("state") not in ExternalControlClient.JOB_STATES
+                or not ExternalControlClient._timestamp(payload.get("created_at"))
+                or not ExternalControlClient._timestamp(payload.get("updated_at"))):
             raise ExternalControlTransportError("External job identity or state is invalid")
-        return payload
+        progress = ExternalControlClient._counts(payload.get("progress"), "External job progress contract is invalid")
+        result = ExternalControlClient._job_result(payload.get("result"))
+        error = ExternalControlClient._safe_error(payload.get("error"))
+        return {"schema_version": "1.0", "job_id": payload["job_id"], "command_id": payload["command_id"],
+                "state": payload["state"], "created_at": payload["created_at"], "updated_at": payload["updated_at"],
+                "progress": progress, "result": result, "error": error}
+
+    @classmethod
+    def _source_response(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        if set(payload) != {"source_id", "name", "source_type", "status", "metadata"}:
+            raise ExternalControlTransportError("External source contract is invalid")
+        if (not cls._safe_id(payload.get("source_id"), minimum=1)
+                or not cls._safe_text(payload.get("name"), 200)
+                or not cls._safe_text(payload.get("source_type"), 80)
+                or payload.get("status") not in {"enabled", "disabled", "pending_review"}
+                or not isinstance(payload.get("metadata"), dict)
+                or not set(payload["metadata"]) <= cls.SOURCE_METADATA_KEYS):
+            raise ExternalControlTransportError("External source contract is invalid")
+        metadata: dict[str, Any] = {}
+        for key, value in payload["metadata"].items():
+            if not cls._safe_text(value, 100) or cls._unsafe_text(value):
+                raise ExternalControlTransportError("External source metadata contract is invalid")
+            metadata[key] = value
+        return {"source_id": payload["source_id"], "name": payload["name"], "source_type": payload["source_type"],
+                "status": payload["status"], "metadata": metadata}
+
+    @classmethod
+    def _job_result(cls, value: Any) -> dict[str, Any] | None:
+        if value is None: return None
+        if not isinstance(value, dict): raise ExternalControlTransportError("External job result contract is invalid")
+        scalar_keys = {"status", "scope", "run_id", "source_id"}
+        integer_keys = cls.COUNT_KEYS | {"source_count", "registered_source_count", "manual_source_count",
+                                        "records_created", "records_updated"}
+        boolean_keys = {"force"}
+        nested_keys = {"sources", "manual_sources"}
+        private_keys = {"message", "canonical_url", "job_id"}
+        allowed = scalar_keys | integer_keys | boolean_keys | nested_keys | {"export"} | private_keys
+        if not set(value) <= allowed: raise ExternalControlTransportError("External job result contract is invalid")
+        result: dict[str, Any] = {}
+        for key in scalar_keys & set(value):
+            item = value[key]
+            if not cls._safe_text(item, 200) or cls._unsafe_text(item):
+                raise ExternalControlTransportError("External job result contract is invalid")
+            result[key] = item
+        for key in integer_keys & set(value):
+            item = value[key]
+            if type(item) is not int or item < 0: raise ExternalControlTransportError("External job result contract is invalid")
+            result[key] = item
+        for key in boolean_keys & set(value):
+            if not isinstance(value[key], bool): raise ExternalControlTransportError("External job result contract is invalid")
+            result[key] = value[key]
+        for key in nested_keys & set(value): result[key] = cls._source_counts(value[key])
+        if "export" in value: result["export"] = cls._export_result(value["export"])
+        for key in private_keys & set(value):
+            if value[key] is not None and not isinstance(value[key], str):
+                raise ExternalControlTransportError("External job result contract is invalid")
+        return result
+
+    @classmethod
+    def _source_counts(cls, value: Any) -> dict[str, dict[str, Any]]:
+        if not isinstance(value, dict) or len(value) > 100: raise ExternalControlTransportError("External source result contract is invalid")
+        projected = {}
+        for source_id, summary in value.items():
+            if not cls._safe_id(source_id, minimum=1) or not isinstance(summary, dict):
+                raise ExternalControlTransportError("External source result contract is invalid")
+            allowed = cls.COUNT_KEYS | {"status"}
+            if not set(summary) <= allowed or not cls._safe_text(summary.get("status"), 40):
+                raise ExternalControlTransportError("External source result contract is invalid")
+            projected[source_id] = {"status": summary["status"], **cls._counts(
+                {key: summary[key] for key in cls.COUNT_KEYS if key in summary}, "External source result contract is invalid")}
+        return projected
+
+    @classmethod
+    def _export_result(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict): raise ExternalControlTransportError("External export result contract is invalid")
+        private_keys = {"dataset_file", "manifest_file", "review_file"}
+        allowed = {"status", "run_id", "dataset_sha256", "accepted_records", "review_records", "error", "reason"} | private_keys
+        if not set(value) <= allowed: raise ExternalControlTransportError("External export result contract is invalid")
+        result: dict[str, Any] = {}
+        for key in {"status", "run_id", "reason"} & set(value):
+            if not cls._safe_text(value[key], 200) or cls._unsafe_text(value[key]):
+                raise ExternalControlTransportError("External export result contract is invalid")
+            result[key] = value[key]
+        if "dataset_sha256" in value:
+            digest = value["dataset_sha256"]
+            if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+                raise ExternalControlTransportError("External export result contract is invalid")
+            result["dataset_sha256"] = digest
+        result.update(cls._counts({key: value[key] for key in ("accepted_records", "review_records") if key in value},
+                                  "External export result contract is invalid"))
+        if "error" in value: result["error"] = cls._safe_error(value["error"])
+        for key in private_keys & set(value):
+            item = value[key]
+            if not isinstance(item, str) or not item or len(item) > 255 or item != item.rsplit("/", 1)[-1]:
+                raise ExternalControlTransportError("External export result contract is invalid")
+        return result
+
+    @classmethod
+    def _safe_error(cls, value: Any) -> dict[str, Any] | None:
+        if value is None: return None
+        if not isinstance(value, dict) or not set(value) <= {"code", "message", "retryable", "details"}:
+            raise ExternalControlTransportError("External job error contract is invalid")
+        code, message = value.get("code"), value.get("message", "external operation failed safely")
+        if not cls._safe_text(code, 100) or not cls._safe_text(message, 300) or cls._unsafe_text(message):
+            raise ExternalControlTransportError("External job error contract is invalid")
+        if "retryable" in value and not isinstance(value["retryable"], bool):
+            raise ExternalControlTransportError("External job error contract is invalid")
+        if "details" in value and value["details"] not in ({}, None):
+            raise ExternalControlTransportError("External job error contract is invalid")
+        return {"code": code, "message": message, "retryable": bool(value.get("retryable", False)), "details": {}}
+
+    @classmethod
+    def _counts(cls, value: Any, message: str) -> dict[str, int]:
+        if not isinstance(value, dict) or not set(value) <= cls.COUNT_KEYS: raise ExternalControlTransportError(message)
+        if any(type(item) is not int or item < 0 for item in value.values()): raise ExternalControlTransportError(message)
+        return dict(value)
+
+    @classmethod
+    def _safe_id(cls, value: Any, *, minimum: int) -> bool:
+        return isinstance(value, str) and len(value) >= minimum and bool(cls.SOURCE_ID.fullmatch(value))
+
+    @staticmethod
+    def _safe_text(value: Any, maximum: int) -> bool:
+        return isinstance(value, str) and bool(value) and len(value) <= maximum
+
+    @staticmethod
+    def _unsafe_text(value: str) -> bool:
+        return bool(re.search(r"https?://|\.onion\b|(?:token|password|secret|authorization|cookie|api[_-]?key)\s*[=:]|(?:^|[\\/])(?:home|etc|opt|var|tmp)[\\/]", value, re.I))
+
+    @staticmethod
+    def _timestamp(value: Any) -> bool:
+        if not isinstance(value, str) or len(value) > 40 or not value.endswith("Z"): return False
+        try: datetime.fromisoformat(value[:-1] + "+00:00"); return True
+        except ValueError: return False
 
     @staticmethod
     def _preview_response(payload: Any) -> dict[str, Any]:

@@ -61,8 +61,22 @@ describe('single external source job', () => {
   });
 
   it('shows failed jobs with sanitized errors', async () => {
-    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('failed', { error_count: 1 }, { message: 'failure at http://private.local token=secret' })) : response(job('failed', { error_count: 1 }, { message: 'failure at http://private.local token=secret' })));
+    const failure = { code: 'job_failed', message: 'failure at http://private.local token=secret', retryable: false, details: {} };
+    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('failed', { error_count: 1 }, failure)) : response(job('failed', { error_count: 1 }, failure)));
     vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />); await userEvent.setup().click(await screen.findByRole('button', { name: `تشغيل ${enabled.name}` })); await screen.findByText(/فشلت/); expect(document.body).not.toHaveTextContent('private.local'); expect(document.body).not.toHaveTextContent('token=secret');
+  });
+
+  it('runs all enabled sources once for analysts, monitors aggregate results, and hides it from viewers', async () => {
+    mockRole('viewer'); renderWithProviders(<Sources />); await screen.findByText(enabled.name); expect(screen.queryByRole('button', { name: 'تشغيل جميع المصادر المفعّلة' })).not.toBeInTheDocument(); cleanup();
+    let resolveStart!: (value: Response) => void; const pending = new Promise<Response>((resolve) => { resolveStart = resolve; });
+    const fetchMock = mockRole('analyst', (path, init) => path.endsWith('/integrations/external-control/jobs') && init?.method === 'POST' ? pending : response(job('completed', { accepted_records: 4, sources: { 'source-one': { status: 'completed', accepted_records: 4 } } })));
+    vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />); const button = await screen.findByRole('button', { name: 'تشغيل جميع المصادر المفعّلة' });
+    await userEvent.setup().click(button); expect(button).toBeDisabled(); await userEvent.setup().click(button);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/integrations/external-control/jobs'))).toHaveLength(1);
+    const body = JSON.parse(String((fetchMock.mock.calls.find(([input]) => String(input).endsWith('/integrations/external-control/jobs'))?.[1] as RequestInit).body));
+    expect(body).toEqual({ source_ids: [], scope: 'all_enabled', force: false });
+    resolveStart(await response(job('completed', { accepted_records: 4, sources: { 'source-one': { status: 'completed', accepted_records: 4 } } })));
+    await screen.findByText('source-one'); expect(screen.getByText('4')).toBeInTheDocument();
   });
 
   it('times out bounded polling and cleans polling up on unmount', async () => {

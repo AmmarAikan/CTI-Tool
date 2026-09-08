@@ -183,5 +183,25 @@ class UnifiedCollectionTests(unittest.TestCase):
         self.assertTrue(replacement.job_id.startswith("job-"))
         release.set(); runner.shutdown()
 
+    def test_submission_is_bounded_and_shutdown_leaves_no_external_workers(self):
+        started, release = threading.Event(), threading.Event()
+        runner = InProcessJobRunner(max_workers=1)
+        service = CanonicalCollectionService(runner, {"rss-one": registry()["rss-one"]},
+            Executor({"rss-one": SourceExecutionResult("rss-one", "completed")}), manual_service=ManualService())
+        original = service.executor
+        class BlockingExecutor:
+            def execute(self, source, *, force, command_id):
+                started.set(); release.wait(3)
+                return original.execute(source, force=force, command_id=command_id)
+        service.executor = BlockingExecutor()
+        before = time.monotonic()
+        accepted = service.start_collection(CollectionRequest(scope="all_enabled"))
+        self.assertLess(time.monotonic() - before, .5)
+        self.assertEqual(accepted.state, "queued")
+        self.assertTrue(started.wait(1))
+        release.set(); runner.shutdown()
+        self.assertFalse(any(thread.name.startswith("external-api-dev") and thread.is_alive()
+                             for thread in threading.enumerate()))
+
 
 if __name__ == "__main__": unittest.main()

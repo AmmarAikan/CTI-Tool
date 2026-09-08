@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { api, type ExternalJob, type JobState, type Source } from '../api/client';
+import { api, ApiError, type ExternalJob, type JobState, type Source } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
@@ -16,7 +16,7 @@ function JobPanel({ job, pollingError, timedOut, onRefresh }: { job?: ExternalJo
   if (timedOut) return <div className="job-panel error-panel" role="alert"><strong>انتهت مهلة متابعة الوظيفة</strong><span>يمكن طلب تحديث الحالة يدويًا.</span><button className="button button-secondary" onClick={onRefresh}>تحديث الحالة</button></div>;
   if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>تعذر تحديث حالة الوظيفة</strong><span>تحقق من الاتصال بالخدمة المركزية.</span><button className="button button-secondary" onClick={onRefresh}>إعادة المحاولة</button></div>;
   if (!job) return null;
-  return <div className="job-panel" role="status" aria-live="polite"><div><strong>حالة آخر تشغيل: {STATE_LABELS[job.state]}</strong><StatusBadge status={job.state} /></div>{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{COUNT_LABELS[key as keyof typeof COUNT_LABELS]}</dt><dd>{value}</dd></div>)}</dl>}{job.error && <span className="job-error">{job.error}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>تحديث الحالة</button>}</div>;
+  return <div className="job-panel" role="status" aria-live="polite"><div><strong>حالة آخر تشغيل: {STATE_LABELS[job.state]}</strong><StatusBadge status={job.state} /></div>{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{COUNT_LABELS[key as keyof typeof COUNT_LABELS]}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{Object.values(value.counts).reduce((sum, count) => sum + (count || 0), 0).toLocaleString('ar')} سجل</small></div>)}</div>}{job.error && <span className="job-error">{job.error}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>تحديث الحالة</button>}</div>;
 }
 
 function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onRun: (source: Source) => void }) {
@@ -54,8 +54,11 @@ export function Sources() {
   const [jobs, setJobs] = useState<Record<string, ExternalJob>>({});
   const [pending, setPending] = useState<Record<string, boolean>>({});
   const [submissionErrors, setSubmissionErrors] = useState<Record<string, string>>({});
+  const [allJob, setAllJob] = useState<ExternalJob>();
+  const [allError, setAllError] = useState('');
   const query = useQuery({ queryKey: ['external-sources'], queryFn: api.externalSources, retry: false });
   const start = useMutation({ mutationFn: (sourceId: string) => api.startExternalSourceJob(sourceId), onMutate: (sourceId) => { setPending((value) => ({ ...value, [sourceId]: true })); setSubmissionErrors((value) => { const next = { ...value }; delete next[sourceId]; return next; }); }, onSuccess: (job, sourceId) => setJobs((value) => ({ ...value, [sourceId]: job })), onError: (error, sourceId) => setSubmissionErrors((value) => ({ ...value, [sourceId]: error instanceof TypeError ? 'الخدمة المركزية غير متصلة.' : 'لم تقبل الخدمة طلب التشغيل.' })), onSettled: (_data, _error, sourceId) => setPending((value) => ({ ...value, [sourceId]: false })) });
+  const startAll = useMutation({ mutationFn: api.startAllExternalSources, onMutate: () => setAllError(''), onSuccess: setAllJob, onError: (error) => { if (error instanceof TypeError) setAllError('الخدمة المركزية غير متصلة.'); else if (error instanceof ApiError && error.status === 409) setAllError('توجد وظيفة تشغيل شاملة نشطة بالفعل.'); else if (error instanceof ApiError && error.status === 401) setAllError('انتهت الجلسة. سجّل الدخول مجددًا.'); else if (error instanceof ApiError && error.status === 403) setAllError('لا تملك صلاحية تشغيل جميع المصادر.'); else if (error instanceof ApiError && error.status === 408) setAllError('انتهت مهلة إرسال الطلب.'); else setAllError('لم تقبل الخدمة طلب التشغيل الشامل.'); } });
   const sources = query.data || [];
   const types = [...new Set(sources.map((source) => source.source_type))];
   const filtered = useMemo(() => sources.filter((source) => `${source.name} ${source.source_id}`.toLowerCase().includes(search.toLowerCase()) && (status === 'all' || source.status === status) && (type === 'all' || source.source_type === type)), [sources, search, status, type]);
@@ -64,8 +67,11 @@ export function Sources() {
     if (window.confirm(`هل تريد تشغيل المصدر «${source.name}»؟`)) start.mutate(source.source_id);
   }
   function updateJob(sourceId: string, job: ExternalJob) { setJobs((value) => value[sourceId] === job ? value : { ...value, [sourceId]: job }); }
+  const allActive = Boolean(allJob && !TERMINAL_STATES.includes(allJob.state));
+  function runAll() { if (startAll.isPending || allActive) return; if (window.confirm('هل تريد تشغيل جميع المصادر المفعّلة؟ لن تُشغّل المصادر المعطّلة.')) startAll.mutate(); }
 
   return <section className="page-section"><div className="section-heading"><div><span className="eyebrow">المصادر / 02</span><h2>المصادر الخارجية</h2><p>المصادر المسجلة وحالتها التشغيلية الآمنة.</p></div><span className="count-label">{filtered.length} مصدر</span></div>
+    {can('analyst') && <section className="run-all-panel" aria-label="تشغيل جميع المصادر"><button className="button" type="button" disabled={startAll.isPending || allActive} onClick={runAll}>{startAll.isPending ? 'جار الإرسال...' : 'تشغيل جميع المصادر المفعّلة'}</button><p className="muted-text">يشمل المصادر المفعّلة والجذور اليدوية النشطة فقط.</p>{allError && <div className="job-panel error-panel" role="alert">{allError}</div>}{allJob && <JobMonitor sourceId="all-enabled" job={allJob} onUpdate={(_id, job) => setAllJob(job)} />}</section>}
     <div className="filters"><label className="search-wrap"><span className="sr-only">بحث</span><input placeholder="بحث بالاسم أو المعرّف" value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label="تصفية الحالة" value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">كل الحالات</option><option value="enabled">مفعّل</option><option value="disabled">معطّل</option><option value="pending_review">قيد المراجعة</option></select><select aria-label="تصفية النوع" value={type} onChange={(event) => setType(event.target.value)}><option value="all">كل الأنواع</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
     {query.isLoading && <LoadingState label="جار تحميل المصادر..." />}{query.isError && <ErrorState onRetry={() => void query.refetch()} />}{!query.isLoading && !query.isError && sources.length === 0 && <EmptyState label="لا توجد مصادر مسجلة حاليًا." />}{!query.isLoading && !query.isError && sources.length > 0 && filtered.length === 0 && <EmptyState label="لا توجد نتائج مطابقة للفلاتر الحالية." />}
     {filtered.length > 0 && <div className="table-shell"><table><thead><tr><th>المصدر</th><th>النوع</th><th>الحالة</th><th>بيانات آمنة</th>{can('analyst') && <th>إجراء</th>}</tr></thead><tbody>{filtered.map((source) => <SourceRows key={source.source_id} source={source} canRun={can('analyst')} pending={Boolean(pending[source.source_id])} job={jobs[source.source_id]} submissionError={submissionErrors[source.source_id]} onRun={run} onUpdate={updateJob} />)}</tbody></table></div>}
