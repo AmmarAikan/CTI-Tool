@@ -59,7 +59,7 @@
 .detail-list h3, .detail-panel h3, .subheading { margin: 0 0 14px; }
 .copy-feedback { color: var(--teal); margin-inline-start: 12px; }
 .select-block { display: grid; gap: 8px; max-width: 620px; margin: 22px 0; font-weight: 600; }
-.select-block select { padding: 12px; border: 1px solid #bcccdc; background: white; color: var(--ink); }
+.select-block select, .select-block input { padding: 12px; border: 1px solid #bcccdc; background: white; color: var(--ink); }
 .intelligence-module td small { display: block; color: var(--muted); margin-top: 5px; max-width: 520px; }
 .intelligence-module td a { color: var(--ink); text-decoration-color: #d17a16; }
 .analysis-module tbody tr { cursor: pointer; }

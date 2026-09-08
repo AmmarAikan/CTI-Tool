@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -68,6 +68,7 @@ from backend.app.schemas.api import (
     IntelligenceRunPageResponse,
     IntelligenceRunResponse,
     InternalEventPageResponse,
+    InternalPullResponse,
     LoginRequest,
     MISPSendRequest,
     SourceCreate,
@@ -82,7 +83,11 @@ SessionDep = Annotated[Session, Depends(get_db)]
 
 
 def iso(value: datetime | None) -> str | None:
-    return value.isoformat() if value else None
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def get_current_user(
@@ -728,7 +733,19 @@ def dionaea_api_health(_: CurrentUser) -> dict[str, Any]:
     return PipelineService.dionaea_api_health()
 
 
-@router.post("/integrations/dionaea/pull", tags=["integrations"])
+def _safe_internal_pull_result(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "run_id": result["run_id"],
+        "pipeline": "internal",
+        "status": result["status"],
+        "collected_count": result["collected_count"],
+        "processed_count": result["processed_count"],
+        "stored_count": result["stored_count"],
+        "failed_count": result["failed_count"],
+    }
+
+
+@router.post("/integrations/dionaea/pull", tags=["integrations"], response_model=InternalPullResponse)
 def pull_dionaea_api(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
@@ -742,7 +759,7 @@ def pull_dionaea_api(
         ) from exc
     audit(db, user, "pull_dionaea_api", "pipeline_run", result["run_id"], details=result["details"])
     db.commit()
-    return result
+    return _safe_internal_pull_result(result)
 
 
 @router.get("/integrations/host-auth/health", tags=["integrations"])
@@ -750,7 +767,7 @@ def host_auth_api_health(_: CurrentUser) -> dict[str, Any]:
     return PipelineService.security_sensor_health("linux_auth")
 
 
-@router.post("/integrations/host-auth/pull", tags=["integrations"])
+@router.post("/integrations/host-auth/pull", tags=["integrations"], response_model=InternalPullResponse)
 def pull_host_auth_api(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
@@ -764,7 +781,7 @@ def pull_host_auth_api(
         ) from exc
     audit(db, user, "pull_host_auth_sensor", "pipeline_run", result["run_id"], details=result["details"])
     db.commit()
-    return result
+    return _safe_internal_pull_result(result)
 
 
 @router.get("/integrations/web-access/health", tags=["integrations"])
@@ -772,7 +789,7 @@ def web_access_api_health(_: CurrentUser) -> dict[str, Any]:
     return PipelineService.security_sensor_health("web_access")
 
 
-@router.post("/integrations/web-access/pull", tags=["integrations"])
+@router.post("/integrations/web-access/pull", tags=["integrations"], response_model=InternalPullResponse)
 def pull_web_access_api(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
@@ -786,7 +803,7 @@ def pull_web_access_api(
         ) from exc
     audit(db, user, "pull_web_access_sensor", "pipeline_run", result["run_id"], details=result["details"])
     db.commit()
-    return result
+    return _safe_internal_pull_result(result)
 
 
 @router.post("/internal/dionaea/collect", tags=["internal"])

@@ -35,4 +35,13 @@ describe('Phase 1 API paths', () => {
       expect(String(input)).not.toMatch(/^https?:\/\//);
     }
   });
+
+  it('rejects unknown credential-bearing authentication fields', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ ...responses['/api/v1/auth/me'], password_hash: 'secret' }),
+    } as Response));
+    await expect(api.me()).rejects.toMatchObject({ status: 502, code: 'invalid_response' });
+  });
 });

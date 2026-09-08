@@ -38,8 +38,13 @@ describe('internal sources', () => {
     await userEvent.setup().click(buttons[0]);
     expect(screen.getByRole('button', { name: 'جار السحب...' })).toBeDisabled();
     expect(fetchMock.mock.calls.filter(([, options]) => options?.method === 'POST')).toHaveLength(1);
-    resolvePull?.(await json({ run_id: 'run-1', pipeline: 'internal', status: 'completed', collected_count: 2, processed_count: 2, stored_count: 1, failed_count: 0, details: { upstream: 'ignored' } }));
+    resolvePull?.(await json({ run_id: 'run-1', pipeline: 'internal', status: 'completed', collected_count: 2, processed_count: 2, stored_count: 1, failed_count: 0 }));
     await waitFor(() => expect(screen.getByText(/اكتمل التشغيل/)).toBeInTheDocument());
+  });
+
+  it('rejects private pull details instead of silently accepting them', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ run_id: 'run-1', pipeline: 'internal', status: 'completed', collected_count: 1, processed_count: 1, stored_count: 1, failed_count: 0, details: { token: 'secret' } }));
+    await expect(api.pullInternal('dionaea')).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
   it('renders a bounded safe event page and rejects unknown sensitive fields', async () => {

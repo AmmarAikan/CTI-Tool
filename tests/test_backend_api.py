@@ -236,6 +236,30 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(forbidden.status_code, 403)
         pull.assert_not_called()
 
+        private_result = {
+            "run_id": "12345678-1234-1234-1234-123456789012",
+            "pipeline": "internal",
+            "status": "completed",
+            "collected_count": 2,
+            "processed_count": 2,
+            "stored_count": 1,
+            "failed_count": 0,
+            "details": {"checkpoint": "private", "upstream_path": "/var/log/private"},
+        }
+        with patch(
+            "backend.app.services.pipeline_service.PipelineService.run_security_sensor_api",
+            return_value=private_result,
+        ):
+            pulled = self.client.post(
+                "/api/v1/integrations/web-access/pull", headers=self.headers
+            )
+        self.assertEqual(pulled.status_code, 200, pulled.text)
+        self.assertEqual(
+            set(pulled.json()),
+            {"run_id", "pipeline", "status", "collected_count", "processed_count", "stored_count", "failed_count"},
+        )
+        self.assertNotIn("private", pulled.text)
+
     def test_intelligence_facades_are_bounded_typed_and_sanitized(self) -> None:
         events = self.client.get(
             "/api/v1/intelligence/events?source_pipeline=internal&limit=1&offset=0",

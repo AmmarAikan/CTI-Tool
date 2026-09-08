@@ -149,6 +149,7 @@ export function clearToken(): void {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
 const EXTERNAL_SYNC_TIMEOUT_MS = 40_000;
+const INTERNAL_PULL_TIMEOUT_MS = 120_000;
 
 async function request<T>(path: string, options: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
   const headers = new Headers(options.headers);
@@ -184,7 +185,7 @@ async function request<T>(path: string, options: RequestInit = {}, timeoutMs = D
 }
 
 function parseLogin(value: unknown): LoginResponse {
-  if (!value || typeof value !== 'object') throw new ApiError(502, 'invalid_response', 'Invalid authentication response');
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['access_token', 'token_type', 'role'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid authentication response');
   const body = value as Partial<LoginResponse>;
   if (typeof body.access_token !== 'string' || body.token_type !== 'bearer' || !isRole(body.role)) throw new ApiError(502, 'invalid_response', 'Invalid authentication response');
   return { access_token: body.access_token, token_type: 'bearer', role: body.role };
@@ -205,10 +206,19 @@ function parseSystemHealth(value: unknown): SystemHealth {
 }
 
 function parseIntegrationStatus(value: unknown): IntegrationConfiguration {
-  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
+  const profiles: Record<string, string[]> = {
+    external_feed: ['configured', 'tls_verification', 'hmac_verification'],
+    external_control_api: ['configured', 'deployment_status', 'tls_verification', 'transport'],
+    wazuh_indexer: ['configured', 'deployment_status', 'tls_verification', 'authentication'],
+    dionaea_sensor_api: ['configured', 'tls_verification', 'hmac_verification'],
+    host_auth_sensor_api: ['configured', 'tls_verification', 'hmac_verification'],
+    web_access_sensor_api: ['configured', 'tls_verification', 'hmac_verification'],
+    misp: ['configured', 'tls_verification'],
+  };
+  if (!isPlainObject(value) || Object.keys(value).length !== Object.keys(profiles).length || Object.keys(value).some((key) => !(key in profiles))) throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
   const read = (key: string) => {
     const entry = value[key];
-    if (!isPlainObject(entry) || typeof entry.configured !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
+    if (!isPlainObject(entry) || Object.keys(entry).some((field) => !profiles[key].includes(field)) || typeof entry.configured !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid integration status response');
     return { configured: entry.configured };
   };
   return { external_control_api: read('external_control_api'), dionaea_sensor_api: read('dionaea_sensor_api'), host_auth_sensor_api: read('host_auth_sensor_api'), web_access_sensor_api: read('web_access_sensor_api') };
@@ -227,7 +237,7 @@ function parseInternalEvents(value: unknown, integration: InternalIntegration): 
 }
 
 function parsePullResult(value: unknown): PullResult {
-  const allowed = ['run_id', 'pipeline', 'status', 'collected_count', 'processed_count', 'stored_count', 'failed_count', 'details'];
+  const allowed = ['run_id', 'pipeline', 'status', 'collected_count', 'processed_count', 'stored_count', 'failed_count'];
   if (!isPlainObject(value) || Object.keys(value).some((key) => !allowed.includes(key)) || typeof value.run_id !== 'string' || value.pipeline !== 'internal' || typeof value.status !== 'string') throw new ApiError(502, 'invalid_response', 'Invalid pull response');
   for (const key of ['collected_count', 'processed_count', 'stored_count', 'failed_count']) if (!Number.isSafeInteger(value[key]) || (value[key] as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid pull response');
   return { run_id: value.run_id, pipeline: 'internal', status: sanitizeError(value.status), collected_count: value.collected_count as number, processed_count: value.processed_count as number, stored_count: value.stored_count as number, failed_count: value.failed_count as number };
@@ -452,7 +462,7 @@ function redactSensitive(value: unknown): unknown {
 }
 
 function parseUser(value: unknown): User {
-  if (!value || typeof value !== 'object') throw new ApiError(502, 'invalid_response', 'Invalid user response');
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['id', 'username', 'role', 'is_active'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid user response');
   const body = value as Partial<User>;
   if (typeof body.id !== 'string' || typeof body.username !== 'string' || !isRole(body.role) || typeof body.is_active !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid user response');
   return { id: body.id, username: body.username, role: body.role, is_active: body.is_active };
@@ -468,7 +478,7 @@ export const api = {
   integrationStatus: async () => parseIntegrationStatus(await request<unknown>('/integrations/status')),
   internalHealth: async (integration: InternalIntegration) => parseHealth(await request<unknown>(`/integrations/${integration}/health`)),
   internalEvents: async (integration: InternalIntegration, limit = 25, offset = 0, severity = '') => parseInternalEvents(await request<unknown>(`/internal/sources/${integration}/events?limit=${limit}&offset=${offset}${severity ? `&severity=${encodeURIComponent(severity)}` : ''}`), integration),
-  pullInternal: async (integration: InternalIntegration) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST' })),
+  pullInternal: async (integration: InternalIntegration) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST' }, INTERNAL_PULL_TIMEOUT_MS)),
   intelligenceEvents: async (limit = 25, offset = 0, filters: { severity?: string; source_pipeline?: string; processing_status?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parsePage(await request<unknown>(`/intelligence/events?${params}`), parseCTIEvent); },
   intelligenceEvent: async (id: string) => parseEventDetail(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}`)),
   intelligenceIndicators: async (limit = 25, offset = 0, type = '', search = '') => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); if (type) params.set('indicator_type', type); if (search) params.set('search', search); return parsePage(await request<unknown>(`/intelligence/indicators?${params}`), parseIndicator); },

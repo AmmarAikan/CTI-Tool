@@ -137,6 +137,19 @@ class InternalEventPageResponse(BaseModel):
     offset: int = Field(ge=0)
 
 
+class InternalPullResponse(BaseModel):
+    """Safe synchronous-pull result; connector details remain server-side."""
+
+    model_config = ConfigDict(extra="forbid")
+    run_id: str = Field(max_length=36)
+    pipeline: Literal["internal"]
+    status: str = Field(max_length=30)
+    collected_count: int = Field(ge=0)
+    processed_count: int = Field(ge=0)
+    stored_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+
+
 class IntelligenceIndicatorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(max_length=36)
