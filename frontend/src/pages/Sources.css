@@ -1,9 +1,9 @@
 .button:disabled { cursor: not-allowed; opacity: .55; transform: none; }
-.job-panel { margin: 0 0 20px; padding: 18px 20px; background: white; border: 1px solid var(--line); display: grid; gap: 12px; }
+.job-panel { margin: 0 0 20px; padding: 18px 20px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 12px; box-shadow: var(--shadow-sm); }
 .job-panel > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .job-counts { display: flex; flex-wrap: wrap; gap: 12px; margin: 0; }
-.job-counts div { min-width: 90px; padding: 10px; background: #f8fafb; }
-.run-all-panel { margin-bottom: 22px; padding: 18px; background: white; border: 1px solid var(--line); display: grid; justify-items: start; gap: 10px; }
+.job-counts div { min-width: 90px; padding: 10px; background: var(--canvas-soft); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
+.run-all-panel { margin-bottom: 22px; padding: 18px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); display: grid; justify-items: start; gap: 10px; box-shadow: var(--shadow-sm); }
 .source-result-list { display: grid; gap: 6px; }
 .source-result-list > div { display: grid; grid-template-columns: minmax(150px, 1fr) auto auto; gap: 12px; align-items: center; }
 .job-counts dt { color: var(--muted); font-size: 12px; }

@@ -347,6 +347,20 @@ function validateJobExport(value: unknown) { if (!isPlainObject(value) || Object
 
 function validTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && value.endsWith('Z') && !Number.isNaN(Date.parse(value)); }
 function validIsoTimestamp(value: unknown): value is string { return typeof value === 'string' && value.length <= 40 && !Number.isNaN(Date.parse(value)); }
+function normalizePublishedDate(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'string' || value.length > 64) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+  const iso = /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d{1,6})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+  const rfc = /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s)?(\d{2})\s(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s(\d{4})\s(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?\s(?:GMT|UT|[+-](?:[01]\d|2[0-3])[0-5]\d)$/;
+  const isoMatch = value.match(iso); const rfcMatch = value.match(rfc);
+  if (!isoMatch && !rfcMatch) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const year = Number(isoMatch?.[1] || rfcMatch?.[3]); const month = isoMatch ? Number(isoMatch[2]) : months.indexOf(rfcMatch![2]) + 1; const day = Number(isoMatch?.[3] || rfcMatch?.[1]);
+  if (month < 1 || month > 12 || day < 1 || day > new Date(Date.UTC(year, month, 0)).getUTCDate()) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+  return new Date(parsed).toISOString();
+}
 function optionalText(value: unknown, max = 200): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value !== 'string' || value.length > max) throw new ApiError(502, 'invalid_response', 'Invalid external response');
@@ -356,10 +370,11 @@ function optionalText(value: unknown, max = 200): string | undefined {
 function parseExportSummary(value: unknown): ExportSummary {
   if (!isPlainObject(value) || Object.keys(value).some((key) => !['run_id', 'status', 'dataset_sha256', 'accepted_records', 'review_records', 'completed_at'].includes(key))
     || typeof value.run_id !== 'string' || value.run_id.length > 200 || typeof value.status !== 'string' || value.status.length > 40
-    || (value.dataset_sha256 !== null && value.dataset_sha256 !== undefined && (typeof value.dataset_sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(value.dataset_sha256)))
+    || (value.dataset_sha256 !== null && value.dataset_sha256 !== undefined && (typeof value.dataset_sha256 !== 'string' || !/^(?:sha256:)?[0-9a-f]{64}$/.test(value.dataset_sha256)))
     || !Number.isSafeInteger(value.accepted_records) || (value.accepted_records as number) < 0 || !Number.isSafeInteger(value.review_records) || (value.review_records as number) < 0
     || (value.completed_at !== null && value.completed_at !== undefined && !validTimestamp(value.completed_at))) throw new ApiError(502, 'invalid_response', 'Invalid export summary response');
-  return { run_id: value.run_id, status: value.status, dataset_sha256: value.dataset_sha256 as string | undefined, accepted_records: value.accepted_records as number, review_records: value.review_records as number, completed_at: value.completed_at as string | undefined };
+  const digest = typeof value.dataset_sha256 === 'string' ? value.dataset_sha256.replace(/^sha256:/, '') : undefined;
+  return { run_id: value.run_id, status: value.status, dataset_sha256: digest, accepted_records: value.accepted_records as number, review_records: value.review_records as number, completed_at: value.completed_at as string | undefined };
 }
 
 function parseReviews(value: unknown): LatestReviews {
@@ -369,8 +384,8 @@ function parseReviews(value: unknown): LatestReviews {
     if (!isPlainObject(item) || Object.keys(item).some((key) => !allowed.includes(key)) || typeof item.record_id !== 'string' || !item.record_id || item.record_id.length > 200
       || typeof item.review_reason !== 'string' || item.review_reason.length > 200 || !Array.isArray(item.review_reasons) || item.review_reasons.length > 20
       || item.review_reasons.some((reason) => typeof reason !== 'string' || reason.length > 200)
-      || (item.collected_at !== null && item.collected_at !== undefined && !validTimestamp(item.collected_at)) || (item.published !== null && item.published !== undefined && !validTimestamp(item.published))) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
-    return { record_id: item.record_id, title: optionalText(item.title, 300), source_type: optionalText(item.source_type, 100), review_reason: sanitizeError(item.review_reason), review_reasons: item.review_reasons.map((reason) => sanitizeError(reason as string)), classification_label: optionalText(item.classification_label, 100), privacy_status: optionalText(item.privacy_status, 100), collected_at: item.collected_at as string | undefined, published: item.published as string | undefined };
+      || (item.collected_at !== null && item.collected_at !== undefined && !validTimestamp(item.collected_at))) throw new ApiError(502, 'invalid_response', 'Invalid reviews response');
+    return { record_id: item.record_id, title: optionalText(item.title, 300), source_type: optionalText(item.source_type, 100), review_reason: sanitizeError(item.review_reason), review_reasons: item.review_reasons.map((reason) => sanitizeError(reason as string)), classification_label: optionalText(item.classification_label, 100), privacy_status: optionalText(item.privacy_status, 100), collected_at: item.collected_at as string | undefined, published: normalizePublishedDate(item.published) };
   });
   return { run_id: value.run_id, records };
 }

@@ -64,4 +64,15 @@ describe('external dashboard and sources', () => {
     sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Navigation />); await waitFor(() => expect(screen.getAllByText('viewer').length).toBeGreaterThan(0)); expect(screen.queryByText('رابط يدوي')).not.toBeInTheDocument();
     cleanup(); sessionStorage.setItem('cti_access_token', 'token'); vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me') ? json({ id: 'u1', username: 'analyst', role: 'analyst', is_active: true }) : json({})); renderWithProviders(<Navigation />); await waitFor(() => expect(screen.getAllByText('analyst').length).toBeGreaterThan(0)); expect(screen.getByText('رابط يدوي')).toBeInTheDocument();
   });
+  it('provides grouped navigation, an active route, and an accessible mobile menu', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me') ? json(user) : json({}));
+    sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Layout />, ['/jobs']);
+    await waitFor(() => expect(screen.getByText('analyst')).toBeInTheDocument());
+    expect(screen.getByRole('navigation', { name: 'التنقل الرئيسي' })).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'المصادر الخارجية' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'الوظائف' })).toHaveClass('active');
+    const open = screen.getByRole('button', { name: 'فتح قائمة التنقل' });
+    expect(open).toHaveAttribute('aria-expanded', 'false'); await userEvent.setup().click(open); expect(open).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'إغلاق قائمة التنقل' })); expect(open).toHaveAttribute('aria-expanded', 'false');
+  });
 });

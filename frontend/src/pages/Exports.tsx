@@ -5,9 +5,9 @@ import { StatusBadge } from '../components/StatusBadge';
 import './ExternalFeatures.css';
 
 function Failure({ error, retry }: { error: Error; retry: () => void }) {
-  if (error instanceof ApiError && error.status === 404) return <EmptyState label="لا يوجد تصدير متحقق منه حاليًا." />;
+  if (error instanceof ApiError && error.status === 404 && error.code === 'export_not_found') return <EmptyState label="لا يوجد تصدير متاح حتى الآن" />;
   if (error instanceof ApiError && error.status === 401) return <div className="state-panel error-panel" role="alert">انتهت جلسة الدخول.</div>;
-  if (error instanceof TypeError) return <div className="state-panel error-panel" role="alert"><strong>الخدمة المركزية غير متصلة</strong><button className="button button-secondary" onClick={retry}>إعادة المحاولة</button></div>;
+  if (error instanceof TypeError || (error instanceof ApiError && (error.status === 408 || error.status === 503))) return <div className="state-panel error-panel" role="alert"><strong>خدمة التصدير غير متاحة حاليًا</strong><button className="button button-secondary" onClick={retry}>إعادة المحاولة</button></div>;
   return <ErrorState onRetry={retry} />;
 }
 

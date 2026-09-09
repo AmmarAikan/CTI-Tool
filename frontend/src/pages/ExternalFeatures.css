@@ -1,4 +1,4 @@
-.safe-summary { margin-top: 18px; padding: 22px; background: white; border: 1px solid var(--line); }
+.safe-summary { margin-top: 18px; padding: 22px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
 .safe-summary dl, .review-card dl { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .safe-summary dt, .review-card dt { color: var(--muted); font-size: 12px; }
 .safe-summary dd, .review-card dd { margin: 4px 0 0; overflow-wrap: anywhere; }
@@ -6,7 +6,7 @@
 .safe-summary p { margin-top: 16px; }
 .compact-value { font-size: 17px !important; }
 .card-list { display: grid; gap: 14px; }
-.review-card { background: white; border: 1px solid var(--line); padding: 20px; }
+.review-card { background: var(--paper); border: 1px solid var(--line); border-inline-start: 3px solid var(--amber); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); }
 .review-card > div { display: flex; justify-content: space-between; gap: 12px; }
-.button-danger { background: #fff1f0; color: var(--red); border: 1px solid #efb5b0; margin-inline-start: 8px; }
+.button-danger { background: #361c25; color: #ff9d9d; border: 1px solid #6e313c; margin-inline-start: 8px; }
 @media (max-width: 800px) { .safe-summary dl, .review-card dl { grid-template-columns: 1fr; } .review-card > div { flex-direction: column; } }
