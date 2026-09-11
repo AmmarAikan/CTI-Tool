@@ -88,6 +88,51 @@ class ManualPreviewRejectedResponse(StrictModel):
     state: Literal["rejected"]
     decided_at: str
 
+class DarkWebWatchCreateBody(StrictModel):
+    keyword: str = Field(min_length=2, max_length=100)
+
+class DarkWebWatchPatchBody(StrictModel):
+    enabled: bool
+
+class DarkWebWatchResponse(StrictModel):
+    watch_id: str
+    keyword: str = Field(min_length=2, max_length=100)
+    enabled: bool
+    created_at: str
+    updated_at: str
+    last_scan_at: str | None = None
+    last_success_at: str | None = None
+    result_count: int = Field(ge=0)
+    new_result_count: int = Field(ge=0)
+    checkpoint_hash: str | None = None
+
+class DarkWebWatchListResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[DarkWebWatchResponse]
+
+class DarkWebResultResponse(StrictModel):
+    result_id: str
+    watch_id: str
+    onion_reference: str
+    title: str = Field(max_length=200)
+    excerpt: str = Field(max_length=240)
+    provider: str = Field(max_length=100)
+    first_seen_at: str
+    last_seen_at: str
+    status: Literal["new", "known"]
+    classification_label: str | None = None
+    classification_confidence: float | None = None
+    privacy_status: Literal["reviewed", "review_required"]
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    review_reasons: list[str]
+
+class DarkWebResultPageResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[DarkWebResultResponse]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
 
 class JobStatusResponse(StrictModel):
     schema_version: Literal["1.0"] = "1.0"

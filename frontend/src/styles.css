@@ -79,6 +79,7 @@
 .attack-grid article span { display: block; margin-top: 7px; color: var(--muted-strong); font-size: 11px; }
 .attack-grid article p { margin: 7px 0 0; }
 .misp-attributes code { overflow-wrap: anywhere; word-break: break-word; }
+.watch-form { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }.watch-form label{width:100%}.watch-form input{padding:12px}.watch-grid{display:grid;gap:12px;margin:18px 0}.watch-grid>article,.dark-result{padding:15px;border:1px solid var(--line-soft);border-radius:var(--radius-sm);background:var(--canvas-soft)}.watch-grid>article{display:flex;gap:10px;justify-content:space-between}.watch-grid>article>button:first-child{display:grid;text-align:right}.dark-result{margin:10px 0}.dark-result mark{background:#ffd86b;color:#151515}@media(max-width:700px){.watch-grid>article{flex-direction:column}}
 .analysis-module tbody tr { cursor: pointer; }
 .misp-module .detail-panel li { overflow-wrap: anywhere; }
 

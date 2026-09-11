@@ -112,6 +112,13 @@ class ExternalManualPreviewRejectedResponse(BaseModel):
     state: Literal["rejected"]
     decided_at: str
 
+class DarkWebWatchCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keyword: str = Field(min_length=2,max_length=100)
+class DarkWebWatchPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+
 
 class InternalEventResponse(BaseModel):
     """Deliberately narrow projection: never expose raw sensor-derived text."""

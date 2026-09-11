@@ -124,6 +124,8 @@ export interface ManualPreviewItem {
   published?: string;
 }
 export interface ManualPreviewRejection { preview_id: string; state: 'rejected'; decided_at: string; }
+export interface DarkWebWatch { watch_id:string; keyword:string; enabled:boolean; created_at:string; updated_at:string; last_scan_at?:string; last_success_at?:string; result_count:number; new_result_count:number; checkpoint_hash?:string; }
+export interface DarkWebResult { result_id:string; watch_id:string; onion_reference:string; title:string; excerpt:string; provider:string; first_seen_at:string; last_seen_at:string; status:'new'|'known'; classification_label?:string; classification_confidence?:number; privacy_status:'reviewed'|'review_required'; content_sha256:string; review_reasons:string[]; }
 
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
@@ -460,6 +462,10 @@ function validManualPreviewItem(value: unknown, index: number): boolean {
     && (!('published' in value) || (typeof value.published === 'string' && value.published.length <= 40 && value.published.endsWith('Z')));
 }
 
+function parseDarkWebWatch(value:unknown):DarkWebWatch { if(!isPlainObject(value)){throw new ApiError(502,'invalid_response','Invalid dark web response');} const keys=['watch_id','keyword','enabled','created_at','updated_at','last_scan_at','last_success_at','result_count','new_result_count','checkpoint_hash']; exactKeys(value,keys); if(typeof value.enabled!=='boolean'||!validIsoTimestamp(value.created_at)||!validIsoTimestamp(value.updated_at))throw new ApiError(502,'invalid_response','Invalid dark web response'); return {watch_id:requiredText(value.watch_id,40),keyword:requiredText(value.keyword,100),enabled:value.enabled,created_at:value.created_at,updated_at:value.updated_at,last_scan_at:optionalTimestamp(value.last_scan_at),last_success_at:optionalTimestamp(value.last_success_at),result_count:boundedNumber(value.result_count),new_result_count:boundedNumber(value.new_result_count),checkpoint_hash:optionalSafeText(value.checkpoint_hash,64)}; }
+function parseDarkWebWatches(value:unknown):{items:DarkWebWatch[]} {if(!isPlainObject(value)||value.schema_version!=='1.0'||!Array.isArray(value.items)||value.items.length>100||Object.keys(value).some(k=>!['schema_version','items'].includes(k)))throw new ApiError(502,'invalid_response','Invalid dark web response'); return {items:value.items.map(parseDarkWebWatch)};}
+function parseDarkWebResults(value:unknown):Page<DarkWebResult>{if(!isPlainObject(value)||value.schema_version!=='1.0'||Object.keys(value).some(k=>!['schema_version','items','total','limit','offset'].includes(k)))throw new ApiError(502,'invalid_response','Invalid dark web response'); const page={items:value.items,total:value.total,limit:value.limit,offset:value.offset};return parsePage(page,(item)=>{if(!isPlainObject(item))throw new ApiError(502,'invalid_response','Invalid dark web response'); const keys=['result_id','watch_id','onion_reference','title','excerpt','provider','first_seen_at','last_seen_at','status','classification_label','classification_confidence','privacy_status','content_sha256','review_reasons'];exactKeys(item,keys);const raw=JSON.stringify(item);if(/https?:\/\/|\.onion\b|[?&](?:token|key|secret)=/i.test(raw)||!['new','known'].includes(String(item.status))||!Array.isArray(item.review_reasons)||!validIsoTimestamp(item.first_seen_at)||!validIsoTimestamp(item.last_seen_at))throw new ApiError(502,'invalid_response','Invalid dark web response');return item as unknown as DarkWebResult;});}
+
 function parseManualPreviewRejection(value: unknown): ManualPreviewRejection {
   if (!isPlainObject(value) || Object.keys(value).length !== 4 || value.schema_version !== '1.0'
     || typeof value.preview_id !== 'string' || value.preview_id.length < 20 || value.state !== 'rejected'
@@ -535,4 +541,9 @@ export const api = {
   latestExternalReviews: async () => parseReviews(await request<unknown>('/integrations/external-control/reviews/latest')),
   externalJobs: async () => parseJobHistory(await request<unknown>('/integrations/external-control/jobs?limit=50')),
   cancelExternalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}/cancel`, { method: 'POST' })),
+  darkWebWatches: async()=>parseDarkWebWatches(await request<unknown>('/dark-web/watches')),
+  createDarkWebWatch: async(keyword:string)=>parseDarkWebWatch(await request<unknown>('/dark-web/watches',{method:'POST',body:JSON.stringify({keyword})})),
+  patchDarkWebWatch: async(watchId:string,enabled:boolean)=>parseDarkWebWatch(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}`,{method:'PATCH',body:JSON.stringify({enabled})})),
+  scanDarkWebWatch: async(watchId:string)=>parseExternalJob(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}/scan`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()}})),
+  darkWebResults: async(watchId:string,limit=25,offset=0)=>parseDarkWebResults(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}/results?limit=${limit}&offset=${offset}`)),
 };

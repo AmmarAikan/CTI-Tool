@@ -26,6 +26,9 @@ from backend.app.pipeline.ingestion.external.application.manual_source_service i
 from backend.app.pipeline.ingestion.external.application.manual_preview_service import (
     ManualPreviewService, PreviewConsumed, PreviewExpired, PreviewHashMismatch, PreviewNotFound,
 )
+from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import (
+    DarkWebWatchService, WatchConflict, WatchNotFound, WatchValidationError,
+)
 from backend.app.pipeline.ingestion.external.application.review_service import (
     ReviewService,
 )
@@ -65,6 +68,8 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
     ManualURLRequestBody,
     SourceCollectionRequestBody,
     SourceResponse,
+    DarkWebWatchCreateBody, DarkWebWatchPatchBody, DarkWebWatchListResponse,
+    DarkWebWatchResponse, DarkWebResultPageResponse,
 )
 
 API_PREFIX = "/api/v1/external-sources"
@@ -98,6 +103,7 @@ class AdapterServices:
     idempotency: IdempotencyStore
     review_service: ReviewService | None = None
     manual_preview_service: ManualPreviewService | None = None
+    dark_web_watch_service: DarkWebWatchService | None = None
 
 
 def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> FastAPI:
@@ -232,6 +238,46 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     @app.get(f"{API_PREFIX}/sources", response_model=list[SourceResponse])
     def list_sources(_current: Principal = Depends(permitted("sources:read"))) -> list[SourceResponse]:
         return [_source(value) for value in services.source_service.list_sources()]
+
+    def watches() -> DarkWebWatchService:
+        if services.dark_web_watch_service is None: raise APIError(503, "dark_web_unconfigured", "dark web monitoring is not configured")
+        return services.dark_web_watch_service
+
+    @app.get(f"{API_PREFIX}/dark-web/watches", response_model=DarkWebWatchListResponse)
+    def list_dark_web_watches(_current: Principal = Depends(permitted("dark_web_watches:read"))):
+        return {"schema_version":"1.0","items":watches().store.list_watches()}
+
+    @app.post(f"{API_PREFIX}/dark-web/watches", response_model=DarkWebWatchResponse, status_code=201)
+    def create_dark_web_watch(body: DarkWebWatchCreateBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
+        try: return watches().store.create(body.keyword)
+        except WatchValidationError: raise APIError(422,"invalid_keyword","keyword is not permitted") from None
+        except WatchConflict as exc: raise APIError(409,str(exc),"watch could not be created") from None
+
+    @app.patch(f"{API_PREFIX}/dark-web/watches/{{watch_id}}", response_model=DarkWebWatchResponse)
+    def patch_dark_web_watch(watch_id: str, body: DarkWebWatchPatchBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
+        try: return watches().store.set_enabled(watch_id,body.enabled)
+        except WatchNotFound: raise APIError(404,"watch_not_found","watch was not found") from None
+
+    @app.post(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/scan", response_model=JobStatusResponse, status_code=202)
+    def scan_dark_web_watch(watch_id: str, current: Principal = Depends(permitted("dark_web_watches:scan")), idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
+        cached=_cached(services,current,f"scan_watch:{watch_id}",idempotency_key)
+        if cached: return JobStatusResponse.model_validate(cached)
+        try: watches().store.get(watch_id)
+        except WatchNotFound: raise APIError(404,"watch_not_found","watch was not found") from None
+        command_id=_id("cmd")
+        job=services.job_runner.submit(command_id,lambda: watches().scan(watch_id),safe_context={"source_id":"dark-web-watch"})
+        response=_queued(job.job_id,command_id); _remember(services,current,f"scan_watch:{watch_id}",idempotency_key,response.model_dump())
+        return response
+
+    @app.get(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/results", response_model=DarkWebResultPageResponse)
+    def dark_web_watch_results(watch_id: str, limit: int=Query(25,ge=1,le=100), offset: int=Query(0,ge=0), _current: Principal=Depends(permitted("dark_web_watches:read"))):
+        try: page=watches().store.results(watch_id,limit,offset)
+        except WatchNotFound: raise APIError(404,"watch_not_found","watch was not found") from None
+        watch=watches().store.get(watch_id); last=watch.get("last_scan_at")
+        items=[]
+        for row in page["items"]:
+            items.append({k:row[k] for k in ("result_id","watch_id","onion_reference","title","excerpt","provider","first_seen_at","last_seen_at","classification_label","classification_confidence","privacy_status","content_sha256")} | {"status":"new" if row["first_seen_at"]==last else "known","review_reasons":[v for v in row["review_reasons"].split(",") if v]})
+        return {"schema_version":"1.0","items":items,"total":page["total"],"limit":limit,"offset":offset}
 
     @app.get(f"{API_PREFIX}/sources/{{source_id}}", response_model=SourceResponse)
     def get_source(source_id: str, _current: Principal = Depends(permitted("sources:read"))) -> SourceResponse:

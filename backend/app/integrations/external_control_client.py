@@ -183,6 +183,25 @@ class ExternalControlClient:
         self._validate_job_id(job_id)
         return self._job_response(self._request("POST", f"/jobs/{quote(job_id, safe='')}/cancel"))
 
+    def list_dark_web_watches(self) -> dict[str, Any]:
+        return self._dark_web_payload(self._request("GET","/dark-web/watches"), "list")
+    def create_dark_web_watch(self, keyword: str) -> dict[str, Any]:
+        return self._dark_web_payload(self._request("POST","/dark-web/watches",payload={"keyword":keyword}), "watch")
+    def patch_dark_web_watch(self, watch_id: str, enabled: bool) -> dict[str, Any]:
+        self._validate_source_id(watch_id); return self._dark_web_payload(self._request("PATCH",f"/dark-web/watches/{quote(watch_id,safe='')}",payload={"enabled":enabled}),"watch")
+    def scan_dark_web_watch(self, watch_id: str, idempotency_key: str) -> dict[str, Any]:
+        self._validate_source_id(watch_id); return self._job_response(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/scan",idempotency_key=idempotency_key))
+    def dark_web_watch_results(self, watch_id: str, limit: int, offset: int) -> dict[str, Any]:
+        self._validate_source_id(watch_id); return self._dark_web_payload(self._request("GET",f"/dark-web/watches/{quote(watch_id,safe='')}/results?limit={limit}&offset={offset}"),"results")
+
+    @classmethod
+    def _dark_web_payload(cls, value: Any, kind: str) -> dict[str, Any]:
+        if not isinstance(value,dict): raise ExternalControlTransportError("Dark web response contract is invalid")
+        raw=str(value)
+        if re.search(r"https?://|\.onion\b|(?:token|password|secret)=",raw,re.I): raise ExternalControlTransportError("Dark web response leaked restricted data")
+        if kind in {"list","results"} and value.get("schema_version")!="1.0": raise ExternalControlTransportError("Dark web response contract is invalid")
+        return value
+
     def latest_reviews(self) -> dict[str, Any]:
         payload = self._request("GET", "/reviews/latest")
         if not isinstance(payload, dict) or set(payload) != {"run_id", "records"} or not isinstance(payload.get("run_id"), str) or not isinstance(payload.get("records"), list):

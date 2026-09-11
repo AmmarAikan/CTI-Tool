@@ -55,6 +55,7 @@ from backend.app.schemas.api import (
     ExternalManualPreviewApproveRequest,
     ExternalManualPreviewRejectRequest,
     ExternalManualPreviewRequest,
+    DarkWebWatchCreateRequest, DarkWebWatchPatchRequest,
     ExternalManualPreviewResponse,
     ExternalManualPreviewRejectedResponse,
     ExternalSourceRunRequest,
@@ -700,6 +701,25 @@ def external_control_latest_export(_: CurrentUser) -> dict[str, Any]:
 @router.get("/integrations/external-control/reviews/latest", tags=["external-control"])
 def external_control_latest_reviews(_: CurrentUser) -> dict[str, Any]:
     return external_control_call(lambda client: client.latest_reviews())
+
+@router.get("/dark-web/watches", tags=["dark-web"])
+def dark_web_watches(_: CurrentUser): return external_control_call(lambda c:c.list_dark_web_watches())
+
+@router.post("/dark-web/watches", tags=["dark-web"], status_code=201)
+def dark_web_watch_create(payload: DarkWebWatchCreateRequest, db: SessionDep, user: Annotated[User,Depends(require_roles("admin","analyst"))]):
+    result=external_control_call(lambda c:c.create_dark_web_watch(payload.keyword)); audit(db,user,"create_dark_web_watch","dark_web_watch",result["watch_id"]); db.commit(); return result
+
+@router.patch("/dark-web/watches/{watch_id}", tags=["dark-web"])
+def dark_web_watch_patch(watch_id:str,payload:DarkWebWatchPatchRequest,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))]):
+    result=external_control_call(lambda c:c.patch_dark_web_watch(watch_id,payload.enabled)); audit(db,user,"update_dark_web_watch","dark_web_watch",watch_id,enabled=payload.enabled); db.commit(); return result
+
+@router.post("/dark-web/watches/{watch_id}/scan",tags=["dark-web"],status_code=202)
+def dark_web_watch_scan(watch_id:str,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))],idempotency_key:Annotated[str|None,Header(alias="Idempotency-Key")]=None):
+    result=external_control_call(lambda c:c.scan_dark_web_watch(watch_id,idempotency_key or str(uuid.uuid4()))); audit(db,user,"scan_dark_web_watch","dark_web_watch",watch_id,job_id=result["job_id"]); db.commit(); return result
+
+@router.get("/dark-web/watches/{watch_id}/results",tags=["dark-web"])
+def dark_web_watch_results(watch_id:str,_:CurrentUser,limit:int=Query(25,ge=1,le=100),offset:int=Query(0,ge=0)):
+    return external_control_call(lambda c:c.dark_web_watch_results(watch_id,limit,offset))
 
 
 @router.post("/integrations/external-feed/pull", tags=["integrations"])

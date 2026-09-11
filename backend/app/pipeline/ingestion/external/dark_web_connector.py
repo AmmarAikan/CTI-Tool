@@ -92,8 +92,8 @@ class TorHttpClient:
     """GET-only onion client whose DNS resolution stays inside Tor."""
 
     def __init__(self, proxy: TorProxy, *, session: requests.Session | None = None,
-                 connect_timeout: float = 15, read_timeout: float = 45,
-                 max_response_bytes: int = 2_000_000, retries: int = 1,
+                 connect_timeout: float = 5, read_timeout: float = 15,
+                 max_response_bytes: int = 2_000_000, retries: int = 0,
                  backoff_seconds: float = 1, max_redirects: int = 3,
                  sleeper: Callable[[float], None] = time.sleep) -> None:
         if not proxy.host.strip() or not 1 <= proxy.port <= 65535:

@@ -16,6 +16,7 @@ from backend.app.pipeline.ingestion.external.application.manual_source_service i
     CanonicalManualSourceService, ManualAdapter, ManualSourceResult, ManualSourceService,
 )
 from backend.app.pipeline.ingestion.external.application.manual_preview_service import ManualPreviewService, SQLiteManualPreviewStore
+from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import SQLiteDarkWebWatchStore, DarkWebWatchScanner, DarkWebWatchService
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem
@@ -565,9 +566,12 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
         manual_delegate, preview_store,
         lambda bundle, actor: manual.commit_preview(bundle, requested_by=actor),
     )
+    watch_service = (DarkWebWatchService(SQLiteDarkWebWatchStore(state_directory / "dark_web_watches.sqlite3"),
+                                         DarkWebWatchScanner(dark_sources, resolved_dark_client))
+                     if resolved_dark_client is not None and dark_sources else None)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
         manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner,
-        InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader), previews),
+        InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader), previews, watch_service),
         docs_enabled=docs_enabled)
 
 
