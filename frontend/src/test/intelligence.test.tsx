@@ -1,8 +1,9 @@
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
-import { AnalysisPage, CorrelationsPage, EventsPage, IndicatorsPage, MISPPage, OutliersPage } from '../pages/Intelligence';
+import { AnalysisPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, MISPPage, OutliersPage } from '../pages/Intelligence';
 import { renderWithProviders } from './fixtures';
 
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
@@ -23,13 +24,26 @@ describe('threat intelligence pages', () => {
     await expect(api.intelligenceEvents()).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
-  it('masks sensitive indicator values while retaining an accessible copy action', async () => {
-    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'ipv4', value: '203.0.113.7', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null };
+  it('shows and copies complete indicator values without redaction', async () => {
+    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'url', value: 'https://example.org/report?id=42', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null };
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([indicator])));
     renderWithProviders(<IndicatorsPage />);
-    await waitFor(() => expect(screen.getByText('••••••••')).toBeInTheDocument());
-    expect(document.body).not.toHaveTextContent('203.0.113.7');
-    expect(screen.getByRole('button', { name: 'نسخ' })).toBeInTheDocument();
+    const actor = userEvent.setup();
+    await waitFor(() => expect(screen.getByText(indicator.value)).toBeInTheDocument());
+    expect(document.body).not.toHaveTextContent('[redacted]');
+    expect(document.body).not.toHaveTextContent('••••••••');
+    await actor.click(screen.getByRole('button', { name: 'نسخ' }));
+    expect(await navigator.clipboard.readText()).toBe(indicator.value);
+    expect(screen.getByRole('status')).toHaveTextContent('تم النسخ');
+  });
+
+  it('shows complete indicator values in event details', async () => {
+    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'ipv4', value: '203.0.113.7', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ ...event, indicators: [indicator], entities: [], relationships: [] }));
+    renderWithProviders(<Routes><Route path="/intelligence/events/:eventId" element={<EventDetailPage />} /></Routes>, ['/intelligence/events/cti-1']);
+    await waitFor(() => expect(screen.getByText(`ipv4: ${indicator.value}`)).toBeInTheDocument());
+    expect(document.body).not.toHaveTextContent('[redacted]');
+    expect(document.body).not.toHaveTextContent('••••••••');
   });
 
   it('renders correlations and outliers without arbitrary evidence, features, or IPs', async () => {
@@ -71,7 +85,9 @@ describe('analysis and MISP', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'a1', username: 'admin', role: 'admin', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.endsWith('/misp-preview')) return json({ event_id: 'cti-1', title: 'CVE campaign', configured: true, published: false, distribution: 0, attributes: [{ type: 'vulnerability', category: 'External analysis', value: 'CVE-2026-1', to_ids: false }] }); if (options?.method === 'POST') return pending; return json({ ...page([event]), limit: 50 }); });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderWithProviders(<MISPPage />);
-    await userEvent.setup().selectOptions(await screen.findByLabelText('الحدث'), 'cti-1');
+    const eventSelect = await screen.findByLabelText('الحدث');
+    await screen.findByRole('option', { name: 'CVE campaign' });
+    await userEvent.setup().selectOptions(eventSelect, 'cti-1');
     const send = await screen.findByRole('button', { name: 'إرسال إلى MISP' });
     await userEvent.setup().click(send);
     expect(screen.getByRole('button', { name: 'جار الإرسال...' })).toBeDisabled();

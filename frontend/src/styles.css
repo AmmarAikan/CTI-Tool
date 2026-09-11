@@ -62,6 +62,7 @@
 .select-block select, .select-block input { padding: 12px; border: 1px solid #bcccdc; background: white; color: var(--ink); }
 .intelligence-module td small { display: block; color: var(--muted); margin-top: 5px; max-width: 520px; }
 .intelligence-module td a { color: var(--ink); text-decoration-color: #d17a16; }
+.intelligence-module .indicator-value { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
 .analysis-module tbody tr { cursor: pointer; }
 .misp-module .detail-panel li { overflow-wrap: anywhere; }
 
