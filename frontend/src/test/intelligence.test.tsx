@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
-import { AnalysisPage, AttackPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, MISPPage, OutliersPage } from '../pages/Intelligence';
+import { AnalysisPage, AttackPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, IntelligenceOverview, MISPPage, OutliersPage } from '../pages/Intelligence';
 import { renderWithProviders } from './fixtures';
 
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
@@ -15,6 +15,13 @@ beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
 afterEach(cleanup);
 
 describe('threat intelligence pages', () => {
+  it('renders the localized intelligence overview from API metrics', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ events: 2, observables: 3, indicators: 1, correlations: 0, sessions: 0, outliers: 0, by_severity: { high: 2 }, by_pipeline: { external: 2 } }));
+    renderWithProviders(<IntelligenceOverview />);
+    expect(await screen.findByRole('heading', { name: 'نظرة عامة' })).toBeInTheDocument();
+    expect(await screen.findByText('كل القيم المرصودة')).toBeInTheDocument();
+  });
+
   it('renders event filters/list and rejects unknown sensitive fields', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([event])));
     renderWithProviders(<EventsPage />);

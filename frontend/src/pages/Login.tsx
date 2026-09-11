@@ -2,9 +2,11 @@ import { FormEvent, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useI18n } from '../i18n/I18nContext';
 
 export function Login() {
   const { login } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -13,11 +15,11 @@ export function Login() {
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent) {
     event.preventDefault(); setError('');
-    if (!username.trim() || !password) { setError('أدخل اسم المستخدم وكلمة المرور.'); return; }
+    if (!username.trim() || !password) { setError(t('loginRequired')); return; }
     setBusy(true);
     try { await login(username.trim(), password); const from = (location.state as { from?: unknown } | null)?.from; navigate(typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : '/', { replace: true }); }
-    catch (reason) { setError(reason instanceof ApiError && reason.status === 401 ? 'بيانات الدخول غير صحيحة.' : 'تعذر تسجيل الدخول. حاول مرة أخرى.'); }
+    catch (reason) { setError(reason instanceof ApiError && reason.status === 401 ? t('invalidCredentials') : t('loginFailed')); }
     finally { setBusy(false); }
   }
-  return <main className="login-page"><section className="login-panel"><div className="brand"><span className="brand-mark">CTI</span><div><strong>مركز التهديدات</strong><small>عمليات استخباراتية</small></div></div><div className="login-copy"><span className="eyebrow">وصول آمن</span><h1>أهلًا بك في مساحة العمليات</h1><p>سجّل الدخول للوصول إلى مصادر استخبارات التهديدات.</p></div><form onSubmit={submit} noValidate><label htmlFor="username">اسم المستخدم</label><input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} /><label htmlFor="password">كلمة المرور</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary full-width" disabled={busy}>{busy ? 'جار التحقق...' : 'تسجيل الدخول'}</button></form></section><aside className="login-aside"><span className="aside-kicker">01 / CENTRAL INTELLIGENCE</span><h2>رؤية أوضح.<br /><em>استجابة أسرع.</em></h2><p>واجهة تشغيل موحدة للبيانات الخارجية والإشارات الأمنية.</p></aside></main>;
+  return <main className="login-page"><section className="login-panel"><div className="brand"><span className="brand-mark">CTI</span><div><strong>{t('brand')}</strong><small>{t('intelligenceOperations')}</small></div></div><div className="login-copy"><span className="eyebrow">{t('secureAccess')}</span><h1>{t('welcome')}</h1><p>{t('loginIntro')}</p></div><form onSubmit={submit} noValidate><label htmlFor="username">{t('username')}</label><input id="username" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} /><label htmlFor="password">{t('password')}</label><input id="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />{error && <div className="form-error" role="alert">{error}</div>}<button className="button button-primary full-width" disabled={busy}>{busy ? t('signingIn') : t('signIn')}</button></form></section><aside className="login-aside"><span className="aside-kicker">01 / CENTRAL INTELLIGENCE</span><h2>{t('clearerVision')}<br /><em>{t('fasterResponse')}</em></h2><p>{t('unifiedInterface')}</p></aside></main>;
 }

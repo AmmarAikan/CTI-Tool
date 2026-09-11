@@ -9,6 +9,7 @@ import { AppErrorBoundary, NotFound } from '../components/AppErrorBoundary';
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
 const admin = { id: 'a1', username: 'admin', role: 'admin', is_active: true };
 const viewer = { id: 'v1', username: 'viewer', role: 'viewer', is_active: true };
+const analyst = { id: 'n1', username: 'analyst', role: 'analyst', is_active: true };
 const managed = { id: 'u1', username: 'operator', role: 'viewer', is_active: true, created_at: '2026-09-07T10:00:00Z' };
 const audit = { id: 'l1', actor: 'admin', action: 'admin_create_user', target_type: 'user', target_id: 'u1', outcome: 'success', created_at: '2026-09-07T10:01:00Z' };
 
@@ -35,10 +36,18 @@ describe('administration frontend', () => {
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/admin/users'))).toBe(false);
   });
 
+  it('denies a direct analyst route without calling administration APIs', async () => {
+    sessionStorage.setItem('cti_access_token', 'token');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me') ? json(analyst) : json({}));
+    renderWithProviders(<AdminGuard><AdminPage /></AdminGuard>);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('الوصول غير مسموح'));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/admin/'))).toBe(false);
+  });
+
   it('lists users and safe audit records for administrators', async () => {
     mockAdmin(); renderWithProviders(<AdminGuard><AdminPage /></AdminGuard>);
     await waitFor(() => expect(screen.getByText('operator')).toBeInTheDocument());
-    expect(screen.getByText('admin_create_user')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'إنشاء مستخدم' })).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('password_hash');
     expect(document.body).not.toHaveTextContent('details');
   });
