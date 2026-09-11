@@ -4,6 +4,7 @@ import hashlib
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
@@ -1044,21 +1045,27 @@ def intelligence_indicators(
     response_model=IntelligenceIndicatorSummaryResponse,
 )
 def intelligence_indicator_summary(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
-    rows = db.execute(
-        select(IndicatorRecord, ThreatEvent)
-        .join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id)
-        .options(
-            selectinload(IndicatorRecord.enrichments),
-            selectinload(ThreatEvent.indicators).selectinload(IndicatorRecord.enrichments),
-        )
+    # Summary classification only needs indicators, enrichments, and the URL
+    # values in the same event. Avoid loading every large ThreatEvent row and
+    # its complete relationship graph; that exceeded the live proxy timeout.
+    items = db.scalars(
+        select(IndicatorRecord).options(selectinload(IndicatorRecord.enrichments))
     ).unique().all()
+    urls_by_event: dict[str, list[IndicatorRecord]] = {}
+    for item in items:
+        if item.indicator_type.lower() == "url":
+            urls_by_event.setdefault(item.event_id, []).append(item)
+    event_contexts = {
+        event_id: SimpleNamespace(indicators=urls)
+        for event_id, urls in urls_by_event.items()
+    }
     by_role: dict[str, int] = {}
     by_assessment: dict[str, int] = {}
     by_validation: dict[str, int] = {}
     by_type: dict[str, int] = {}
     assessor = ObservableAssessor()
-    for item, event in rows:
-        result = assessor.assess(item, event)
+    for item in items:
+        result = assessor.assess(item, event_contexts.get(item.event_id))
         for bucket, key in (
             (by_role, result.semantic_role),
             (by_assessment, result.assessment),
@@ -1067,7 +1074,7 @@ def intelligence_indicator_summary(db: SessionDep, _: CurrentUser) -> dict[str, 
         ):
             bucket[key] = bucket.get(key, 0) + 1
     return {
-        "total": len(rows),
+        "total": len(items),
         "by_role": by_role,
         "by_assessment": by_assessment,
         "by_validation": by_validation,
