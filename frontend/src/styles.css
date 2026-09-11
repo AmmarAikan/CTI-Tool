@@ -63,6 +63,22 @@
 .intelligence-module td small { display: block; color: var(--muted); margin-top: 5px; max-width: 520px; }
 .intelligence-module td a { color: var(--ink); text-decoration-color: #d17a16; }
 .intelligence-module .indicator-value { white-space: normal; overflow-wrap: anywhere; word-break: break-word; }
+.compact-metrics { margin-bottom: 14px; }
+.compact-metrics .metric-card { min-height: 100px; padding: 16px; }
+.compact-metrics .metric-card strong { font-size: 23px; }
+.indicator-notice { margin-bottom: 16px; }
+.indicator-table { min-width: 1120px; }
+.indicator-table td:nth-child(2) { min-width: 340px; max-width: 520px; }
+.indicator-table td small, .assessment-title { display: block; margin-top: 5px; }
+.assessment-title { color: var(--ink); font-size: 12px; }
+.attack-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.attack-heading h3 { margin: 0; }
+.attack-grid { display: grid; gap: 12px; }
+.attack-grid article { padding: 15px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--canvas-soft); }
+.attack-grid article > a { color: var(--cyan); }
+.attack-grid article span { display: block; margin-top: 7px; color: var(--muted-strong); font-size: 11px; }
+.attack-grid article p { margin: 7px 0 0; }
+.misp-attributes code { overflow-wrap: anywhere; word-break: break-word; }
 .analysis-module tbody tr { cursor: pointer; }
 .misp-module .detail-panel li { overflow-wrap: anywhere; }
 

@@ -672,7 +672,7 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertFalse(first["Event"]["published"])
         self.assertEqual(first["Event"]["Attribute"][0]["category"], "Payload delivery")
         self.assertFalse(first["Event"]["Attribute"][0]["to_ids"])
-        self.assertIn("maliciousness-not-asserted", first["Event"]["Attribute"][0]["comment"])
+        self.assertIn("assessment=unknown", first["Event"]["Attribute"][0]["comment"])
         self.assertEqual(first["Event"]["Attribute"][0]["first_seen"], seen.isoformat())
 
     def test_time_bounds_are_normalized_before_persistence_and_misp_mapping(self) -> None:
@@ -712,7 +712,7 @@ class BackendEnhancementTests(unittest.TestCase):
             indicators=[
                 SimpleNamespace(
                     indicator_type="ipv4",
-                    value="198.51.100.77",
+                    value="8.8.8.8",
                     extractor="regex",
                     confidence=1.0,
                     first_seen=seen,

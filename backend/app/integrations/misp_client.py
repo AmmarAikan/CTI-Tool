@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import requests
 
 from backend.app.core.config import get_settings
+from backend.app.pipeline.enrichment.observable_assessor import ObservableAssessor
 
 
 class MISPClient:
@@ -55,9 +56,22 @@ class MISPClient:
 
     def event_payload(self, event) -> dict[str, Any]:
         attributes = []
+        omitted = {"external_reference": 0, "invalid": 0, "non_actionable": 0, "unsupported": 0}
+        assessor = ObservableAssessor()
         for indicator in event.indicators:
             mapping = self.ATTRIBUTE_TYPES.get(indicator.indicator_type)
             if not mapping:
+                omitted["unsupported"] += 1
+                continue
+            assessment = assessor.assess(indicator, event)
+            if assessment.validation_status != "valid":
+                omitted["invalid"] += 1
+                continue
+            if assessment.semantic_role == "external_reference":
+                omitted["external_reference"] += 1
+                continue
+            if assessment.assessment == "non_actionable":
+                omitted["non_actionable"] += 1
                 continue
             misp_type, category, to_ids = mapping
             attribute = {
@@ -70,11 +84,12 @@ class MISPClient:
                 "type": misp_type,
                 "category": category,
                 "value": indicator.value,
-                "to_ids": to_ids,
+                "to_ids": bool(to_ids or assessment.actionable),
                 "comment": (
                     f"Observed by {indicator.extractor}; "
                     f"extraction-confidence={indicator.confidence:.2f}; "
-                    "maliciousness-not-asserted"
+                    f"assessment={assessment.assessment}; "
+                    f"assessment-reason={assessment.reason_code}"
                 ),
             }
             first_seen, last_seen = self._time_bounds(
@@ -106,7 +121,14 @@ class MISPClient:
                 misp_event["date"] = datetime.fromisoformat(first_seen.replace("Z", "+00:00")).date().isoformat()
             except ValueError:
                 pass
-        return {"Event": misp_event}
+        return {
+            "Event": misp_event,
+            "cti_filtering": {
+                "included": len(attributes),
+                "omitted": sum(omitted.values()),
+                "omitted_by_reason": omitted,
+            },
+        }
 
     def send_event(self, event, dry_run: bool = True) -> dict[str, Any]:
         payload = self.event_payload(event)

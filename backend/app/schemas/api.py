@@ -161,6 +161,14 @@ class IntelligenceIndicatorResponse(BaseModel):
     severity: str | None = Field(default=None, max_length=30)
     first_seen: str | None = Field(default=None, max_length=40)
     last_seen: str | None = Field(default=None, max_length=40)
+    semantic_role: Literal["external_reference", "vulnerability", "observable", "indicator"]
+    validation_status: Literal["valid", "invalid"]
+    assessment: Literal["reference", "non_actionable", "unknown", "suspicious", "malicious"]
+    assessment_confidence: float = Field(ge=0, le=1)
+    actionable: bool
+    evidence_count: int = Field(ge=0)
+    evidence_providers: list[str]
+    reason_code: str = Field(max_length=80)
 
 
 class IntelligenceEventSummaryResponse(BaseModel):
@@ -217,6 +225,15 @@ class IntelligenceIndicatorPageResponse(BaseModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+
+
+class IntelligenceIndicatorSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    total: int = Field(ge=0)
+    by_role: dict[str, int]
+    by_assessment: dict[str, int]
+    by_validation: dict[str, int]
+    by_type: dict[str, int]
 
 
 class IntelligenceCorrelationResponse(BaseModel):
@@ -310,6 +327,9 @@ class IntelligenceMISPPreviewResponse(BaseModel):
     published: Literal[False]
     distribution: Literal[0]
     attributes: list[IntelligenceMISPAttributeResponse]
+    included: int = Field(ge=0)
+    omitted: int = Field(ge=0)
+    omitted_by_reason: dict[str, int]
 
 
 class IntelligenceMISPDeliveryResponse(BaseModel):
@@ -320,6 +340,43 @@ class IntelligenceMISPDeliveryResponse(BaseModel):
     attributes_added: int = Field(ge=0)
     attributes_verified: int = Field(ge=0)
     published: bool
+
+
+class IntelligenceMISPDeliveryHistoryItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=36)
+    event_id: str | None = Field(default=None, max_length=64)
+    username: str | None = Field(default=None, max_length=100)
+    created_at: str = Field(max_length=40)
+    created: bool | None = None
+    attributes_requested: int | None = Field(default=None, ge=0)
+    attributes_added: int | None = Field(default=None, ge=0)
+    attributes_verified: int | None = Field(default=None, ge=0)
+    published: bool | None = None
+
+
+class IntelligenceMISPDeliveryHistoryResponse(IntelligencePageMeta):
+    items: list[IntelligenceMISPDeliveryHistoryItem]
+
+
+class IntelligenceAttackTechniqueResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    technique_id: str = Field(max_length=20)
+    name: str = Field(max_length=150)
+    tactic: str = Field(max_length=80)
+    confidence: float = Field(ge=0, le=1)
+    mapping_source: Literal["explicit_id", "rule_based_candidate"]
+    evidence: str = Field(max_length=240)
+    url: str = Field(max_length=300)
+
+
+class IntelligenceAttackMappingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(max_length=64)
+    catalog_version: str = Field(max_length=50)
+    source: Literal["built_in_subset"]
+    official_dataset_url: str = Field(max_length=300)
+    techniques: list[IntelligenceAttackTechniqueResponse]
 
 
 class AdminUserCreateRequest(BaseModel):

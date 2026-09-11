@@ -287,6 +287,19 @@ class BackendAPITests(unittest.TestCase):
         runs = self.client.get("/api/v1/intelligence/runs?limit=1", headers=self.headers)
         self.assertNotIn("details", runs.json()["items"][0])
         self.assertNotIn("error_message", runs.json()["items"][0])
+        indicators = self.client.get("/api/v1/intelligence/indicators?limit=1", headers=self.headers)
+        self.assertEqual(indicators.status_code, 200, indicators.text)
+        self.assertTrue({"semantic_role", "validation_status", "assessment", "actionable", "reason_code"}.issubset(indicators.json()["items"][0]))
+        summary = self.client.get("/api/v1/intelligence/indicators-summary", headers=self.headers)
+        self.assertEqual(summary.status_code, 200, summary.text)
+        self.assertEqual(summary.json()["total"], sum(summary.json()["by_role"].values()))
+
+        attack = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}/attack", headers=self.headers
+        )
+        self.assertEqual(attack.status_code, 200, attack.text)
+        self.assertEqual(attack.json()["source"], "built_in_subset")
+        self.assertIn("attack-stix-data", attack.json()["official_dataset_url"])
 
         ml = self.client.get("/api/v1/intelligence/ml/status", headers=self.headers)
         self.assertEqual(ml.json()["execution_model"], "central_backend")
@@ -303,6 +316,8 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(preview.status_code, 200, preview.text)
         self.assertFalse(preview.json()["published"])
         self.assertEqual(preview.json()["distribution"], 0)
+        self.assertEqual(preview.json()["included"], len(preview.json()["attributes"]))
+        self.assertIn("omitted_by_reason", preview.json())
         self.assertNotIn("uuid", preview.json())
 
         viewer_created = self.client.post(
@@ -349,6 +364,11 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(sent.status_code, 200, sent.text)
         self.assertEqual(sent.json()["attributes_verified"], 2)
         self.assertNotIn("Event", sent.json())
+        history = self.client.get(
+            "/api/v1/intelligence/misp/deliveries", headers=self.headers
+        )
+        self.assertEqual(history.status_code, 200, history.text)
+        self.assertEqual(history.json()["items"][0]["attributes_verified"], 2)
 
         with patch(
             "backend.app.api.v1.router.MISPClient.send_event",

@@ -3,12 +3,13 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 import { api } from '../api/client';
-import { AnalysisPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, MISPPage, OutliersPage } from '../pages/Intelligence';
+import { AnalysisPage, AttackPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, MISPPage, OutliersPage } from '../pages/Intelligence';
 import { renderWithProviders } from './fixtures';
 
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
 const event = { id: 'cti-1', title: 'CVE campaign', summary: 'Safe CTI summary', source_type: 'feed', source_pipeline: 'external', category: 'cti_related', severity: 'high', risk_score: 8, confidence: .9, processing_status: 'transformed', first_seen: '2026-09-07T10:00:00Z', last_seen: null, created_at: '2026-09-07T10:00:00Z', indicator_count: 1, entity_count: 1 };
 const page = <T,>(items: T[]) => ({ items, total: items.length, limit: 20, offset: 0 });
+const assessed = { semantic_role: 'observable', validation_status: 'valid', assessment: 'unknown', assessment_confidence: 0, actionable: false, evidence_count: 0, evidence_providers: [], reason_code: 'needs_enrichment' } as const;
 
 beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
 afterEach(cleanup);
@@ -25,8 +26,8 @@ describe('threat intelligence pages', () => {
   });
 
   it('shows and copies complete indicator values without redaction', async () => {
-    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'url', value: 'https://example.org/report?id=42', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null };
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([indicator])));
+    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'url', value: 'https://example.org/report?id=42', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null, ...assessed };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).includes('indicators-summary') ? json({ total: 1, by_role: { observable: 1 }, by_assessment: { unknown: 1 }, by_validation: { valid: 1 }, by_type: { url: 1 } }) : json(page([indicator])));
     renderWithProviders(<IndicatorsPage />);
     const actor = userEvent.setup();
     await waitFor(() => expect(screen.getByText(indicator.value)).toBeInTheDocument());
@@ -38,10 +39,10 @@ describe('threat intelligence pages', () => {
   });
 
   it('shows complete indicator values in event details', async () => {
-    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'ipv4', value: '203.0.113.7', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null };
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ ...event, indicators: [indicator], entities: [], relationships: [] }));
+    const indicator = { id: 'i-1', event_id: 'cti-1', type: 'ipv4', value: '203.0.113.7', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null, ...assessed };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/attack') ? json({ event_id: 'cti-1', catalog_version: 'ATT&CK v19.1', source: 'built_in_subset', official_dataset_url: 'https://github.com/mitre-attack/attack-stix-data', techniques: [] }) : json({ ...event, indicators: [indicator], entities: [], relationships: [] }));
     renderWithProviders(<Routes><Route path="/intelligence/events/:eventId" element={<EventDetailPage />} /></Routes>, ['/intelligence/events/cti-1']);
-    await waitFor(() => expect(screen.getByText(`ipv4: ${indicator.value}`)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(new RegExp(`ipv4: ${indicator.value.replaceAll('.', '\\.')}`))).toBeInTheDocument());
     expect(document.body).not.toHaveTextContent('[redacted]');
     expect(document.body).not.toHaveTextContent('••••••••');
   });
@@ -72,7 +73,7 @@ describe('analysis and MISP', () => {
 
   it('keeps viewers read-only on MISP', async () => {
     sessionStorage.setItem('cti_access_token', 'token');
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'u1', username: 'viewer', role: 'viewer', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); return json({ ...page([event]), limit: 50 }); });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'u1', username: 'viewer', role: 'viewer', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.includes('/misp/deliveries')) return json(page([])); return json({ ...page([event]), limit: 50 }); });
     renderWithProviders(<MISPPage />);
     await waitFor(() => expect(screen.getByText('متصل')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'إرسال إلى MISP' })).not.toBeInTheDocument();
@@ -82,7 +83,7 @@ describe('analysis and MISP', () => {
     sessionStorage.setItem('cti_access_token', 'token');
     let resolveSend: ((response: Response) => void) | undefined;
     const pending = new Promise<Response>((resolve) => { resolveSend = resolve; });
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'a1', username: 'admin', role: 'admin', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.endsWith('/misp-preview')) return json({ event_id: 'cti-1', title: 'CVE campaign', configured: true, published: false, distribution: 0, attributes: [{ type: 'vulnerability', category: 'External analysis', value: 'CVE-2026-1', to_ids: false }] }); if (options?.method === 'POST') return pending; return json({ ...page([event]), limit: 50 }); });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'a1', username: 'admin', role: 'admin', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.includes('/misp/deliveries')) return json(page([])); if (path.endsWith('/misp-preview')) return json({ event_id: 'cti-1', title: 'CVE campaign', configured: true, published: false, distribution: 0, attributes: [{ type: 'vulnerability', category: 'External analysis', value: 'CVE-2026-1', to_ids: false }], included: 1, omitted: 0, omitted_by_reason: { external_reference: 0, invalid: 0, non_actionable: 0, unsupported: 0 } }); if (options?.method === 'POST') return pending; return json({ ...page([event]), limit: 50 }); });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderWithProviders(<MISPPage />);
     const eventSelect = await screen.findByLabelText('الحدث');
@@ -90,8 +91,17 @@ describe('analysis and MISP', () => {
     await userEvent.setup().selectOptions(eventSelect, 'cti-1');
     const send = await screen.findByRole('button', { name: 'إرسال إلى MISP' });
     await userEvent.setup().click(send);
-    expect(screen.getByRole('button', { name: 'جار الإرسال...' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'جار الإرسال والتحقق...' })).toBeDisabled();
     resolveSend?.(await json({ event_id: 'cti-1', created: true, attributes_requested: 1, attributes_added: 1, attributes_verified: 1, published: false }));
-    await waitFor(() => expect(screen.getByText(/اكتمل التحقق/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/وتحققنا من 1/)).toBeInTheDocument());
+  });
+
+  it('shows evidence-backed MITRE ATT&CK candidates', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/attack') ? json({ event_id: 'cti-1', catalog_version: 'ATT&CK v19.1', source: 'built_in_subset', official_dataset_url: 'https://github.com/mitre-attack/attack-stix-data', techniques: [{ technique_id: 'T1059.001', name: 'PowerShell', tactic: 'execution', confidence: .65, mapping_source: 'rule_based_candidate', evidence: 'PowerShell was used', url: 'https://attack.mitre.org/techniques/T1059/001/' }] }) : json(page([event])));
+    renderWithProviders(<AttackPage />);
+    await screen.findByRole('option', { name: 'CVE campaign' });
+    await userEvent.setup().selectOptions(screen.getByLabelText('الحدث'), 'cti-1');
+    expect(await screen.findByText(/T1059.001/)).toBeInTheDocument();
+    expect(screen.getByText(/مرشح آلي للمراجعة/)).toBeInTheDocument();
   });
 });

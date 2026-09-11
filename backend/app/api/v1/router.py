@@ -23,6 +23,7 @@ from backend.app.db.database import get_db
 from backend.app.db.models import (
     AuditLog,
     CorrelationRecord,
+    EnrichmentRecord,
     IndicatorRecord,
     OutlierSessionRecord,
     PipelineRun,
@@ -60,7 +61,10 @@ from backend.app.schemas.api import (
     IntelligenceEventDetailResponse,
     IntelligenceEventPageResponse,
     IntelligenceIndicatorPageResponse,
+    IntelligenceIndicatorSummaryResponse,
+    IntelligenceAttackMappingResponse,
     IntelligenceMISPDeliveryResponse,
+    IntelligenceMISPDeliveryHistoryResponse,
     IntelligenceMISPHealthResponse,
     IntelligenceMISPPreviewResponse,
     IntelligenceMLStatusResponse,
@@ -75,6 +79,8 @@ from backend.app.schemas.api import (
     UserCreate,
 )
 from backend.app.services.model_evidence_service import ModelEvidenceService
+from backend.app.pipeline.enrichment.observable_assessor import ObservableAssessor
+from backend.app.services.attack_mapping_service import AttackMappingService
 from backend.app.services.pipeline_service import PipelineService
 
 router = APIRouter()
@@ -905,6 +911,7 @@ def _safe_event_summary(event: ThreatEvent) -> str:
 
 
 def _indicator_dict(item: IndicatorRecord, event: ThreatEvent) -> dict[str, Any]:
+    assessment = ObservableAssessor().assess(item, event).to_dict()
     return {
         "id": item.id,
         "event_id": item.event_id,
@@ -915,6 +922,7 @@ def _indicator_dict(item: IndicatorRecord, event: ThreatEvent) -> dict[str, Any]
         "severity": event.severity,
         "first_seen": iso(item.first_seen),
         "last_seen": iso(item.last_seen),
+        **assessment,
     }
 
 
@@ -988,6 +996,9 @@ def intelligence_event_detail(event_id: str, db: SessionDep, _: CurrentUser) -> 
 def intelligence_indicators(
     db: SessionDep, _: CurrentUser,
     indicator_type: str | None = Query(default=None, max_length=50),
+    semantic_role: str | None = Query(default=None, max_length=30),
+    assessment: str | None = Query(default=None, max_length=30),
+    validation_status: str | None = Query(default=None, max_length=20),
     search: str | None = Query(default=None, min_length=2, max_length=100),
     limit: int = Query(default=25, ge=1, le=100), offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
@@ -996,10 +1007,91 @@ def intelligence_indicators(
         filters.append(IndicatorRecord.indicator_type == indicator_type)
     if search:
         filters.append(IndicatorRecord.value.ilike(f"%{search}%"))
-    joined = select(IndicatorRecord, ThreatEvent).join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id).where(*filters)
-    total = db.scalar(select(func.count()).select_from(IndicatorRecord).where(*filters)) or 0
-    rows = db.execute(joined.order_by(desc(ThreatEvent.created_at), IndicatorRecord.id).limit(limit).offset(offset)).all()
-    return {"items": [_indicator_dict(item, event) for item, event in rows], "total": total, "limit": limit, "offset": offset}
+    joined = (
+        select(IndicatorRecord, ThreatEvent)
+        .join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id)
+        .where(*filters)
+        .options(
+            selectinload(IndicatorRecord.enrichments),
+            selectinload(ThreatEvent.indicators).selectinload(IndicatorRecord.enrichments),
+        )
+        .order_by(desc(ThreatEvent.created_at), IndicatorRecord.id)
+    )
+    derived_filters = any((semantic_role, assessment, validation_status))
+    if derived_filters:
+        candidates = [
+            _indicator_dict(item, event) for item, event in db.execute(joined).unique().all()
+        ]
+        records = [
+            item
+            for item in candidates
+            if (not semantic_role or item["semantic_role"] == semantic_role)
+            and (not assessment or item["assessment"] == assessment)
+            and (not validation_status or item["validation_status"] == validation_status)
+        ]
+        total = len(records)
+        items = records[offset : offset + limit]
+    else:
+        total = db.scalar(select(func.count()).select_from(IndicatorRecord).where(*filters)) or 0
+        rows = db.execute(joined.limit(limit).offset(offset)).unique().all()
+        items = [_indicator_dict(item, event) for item, event in rows]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get(
+    "/intelligence/indicators-summary",
+    tags=["intelligence"],
+    response_model=IntelligenceIndicatorSummaryResponse,
+)
+def intelligence_indicator_summary(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    rows = db.execute(
+        select(IndicatorRecord, ThreatEvent)
+        .join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id)
+        .options(
+            selectinload(IndicatorRecord.enrichments),
+            selectinload(ThreatEvent.indicators).selectinload(IndicatorRecord.enrichments),
+        )
+    ).unique().all()
+    by_role: dict[str, int] = {}
+    by_assessment: dict[str, int] = {}
+    by_validation: dict[str, int] = {}
+    by_type: dict[str, int] = {}
+    assessor = ObservableAssessor()
+    for item, event in rows:
+        result = assessor.assess(item, event)
+        for bucket, key in (
+            (by_role, result.semantic_role),
+            (by_assessment, result.assessment),
+            (by_validation, result.validation_status),
+            (by_type, item.indicator_type),
+        ):
+            bucket[key] = bucket.get(key, 0) + 1
+    return {
+        "total": len(rows),
+        "by_role": by_role,
+        "by_assessment": by_assessment,
+        "by_validation": by_validation,
+        "by_type": by_type,
+    }
+
+
+@router.get(
+    "/intelligence/events/{event_id}/attack",
+    tags=["intelligence"],
+    response_model=IntelligenceAttackMappingResponse,
+)
+def intelligence_event_attack(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    mapper = AttackMappingService()
+    return {
+        "event_id": event.id,
+        "catalog_version": mapper.CATALOG_VERSION,
+        "source": "built_in_subset",
+        "official_dataset_url": "https://github.com/mitre-attack/attack-stix-data",
+        "techniques": mapper.map_event(event),
+    }
 
 
 @router.get("/intelligence/correlations", tags=["intelligence"], response_model=IntelligenceCorrelationPageResponse)
@@ -1062,10 +1154,22 @@ def intelligence_misp_preview(event_id: str, db: SessionDep, _: CurrentUser) -> 
         raise HTTPException(status_code=404, detail="Threat event not found")
     try:
         client = MISPClient()
-        mapped = client.event_payload(event)["Event"]
+        payload = client.event_payload(event)
+        mapped = payload["Event"]
+        filtering = payload["cti_filtering"]
     except (ValueError, RuntimeError, TypeError) as exc:
         raise HTTPException(status_code=503, detail=f"MISP preview unavailable: {type(exc).__name__}") from exc
-    return {"event_id": event.id, "title": str(mapped["info"]), "configured": client.configured, "published": False, "distribution": 0, "attributes": [{"type": item["type"], "category": item["category"], "value": item["value"], "to_ids": item["to_ids"]} for item in mapped.get("Attribute", [])]}
+    return {
+        "event_id": event.id,
+        "title": str(mapped["info"]),
+        "configured": client.configured,
+        "published": False,
+        "distribution": 0,
+        "attributes": [{"type": item["type"], "category": item["category"], "value": item["value"], "to_ids": item["to_ids"]} for item in mapped.get("Attribute", [])],
+        "included": filtering["included"],
+        "omitted": filtering["omitted"],
+        "omitted_by_reason": filtering["omitted_by_reason"],
+    }
 
 
 @router.post("/intelligence/events/{event_id}/misp", tags=["intelligence"], response_model=IntelligenceMISPDeliveryResponse)
@@ -1077,9 +1181,48 @@ def intelligence_misp_send(event_id: str, db: SessionDep, user: Annotated[User, 
         result = MISPClient().send_event(event, dry_run=False)["cti_delivery"]
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"MISP delivery failed: {type(exc).__name__}") from exc
-    audit(db, user, "misp_send", "threat_event", event_id)
+    audit(db, user, "misp_send", "threat_event", event_id, **result)
     db.commit()
     return {"event_id": event_id, "created": result["created"], "attributes_requested": result["attributes_requested"], "attributes_added": result["attributes_added"], "attributes_verified": result["attributes_verified"], "published": result["published"]}
+
+
+@router.get(
+    "/intelligence/misp/deliveries",
+    tags=["intelligence"],
+    response_model=IntelligenceMISPDeliveryHistoryResponse,
+)
+def intelligence_misp_deliveries(
+    db: SessionDep,
+    _: CurrentUser,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = [AuditLog.action == "misp_send", AuditLog.resource_type == "threat_event"]
+    total = db.scalar(select(func.count()).select_from(AuditLog).where(*filters)) or 0
+    rows = db.scalars(
+        select(AuditLog)
+        .where(*filters)
+        .order_by(desc(AuditLog.created_at), desc(AuditLog.id))
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    items = []
+    for row in rows:
+        details = row.details if isinstance(row.details, dict) else {}
+        items.append(
+            {
+                "id": row.id,
+                "event_id": row.resource_id,
+                "username": row.username,
+                "created_at": iso(row.created_at),
+                "created": details.get("created"),
+                "attributes_requested": details.get("attributes_requested"),
+                "attributes_added": details.get("attributes_added"),
+                "attributes_verified": details.get("attributes_verified"),
+                "published": details.get("published"),
+            }
+        )
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/events", tags=["cti"])
@@ -1232,10 +1375,16 @@ def list_runs(db: SessionDep, _: CurrentUser, limit: int = Query(100, ge=1, le=5
 def dashboard_summary(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
     severity_rows = db.execute(select(ThreatEvent.severity, func.count()).group_by(ThreatEvent.severity)).all()
     pipeline_rows = db.execute(select(ThreatEvent.source_pipeline, func.count()).group_by(ThreatEvent.source_pipeline)).all()
+    observable_total = db.scalar(select(func.count()).select_from(IndicatorRecord)) or 0
+    confirmed_indicator_ids = {
+        row.indicator_id
+        for row in db.scalars(select(EnrichmentRecord)).all()
+        if ObservableAssessor._explicit_verdict([row]) is not None
+    }
     return {
         "events": db.scalar(select(func.count()).select_from(ThreatEvent)) or 0,
-        "indicators": db.scalar(select(func.count()).select_from(IndicatorRecord)) or 0,
-        "observables": db.scalar(select(func.count()).select_from(IndicatorRecord)) or 0,
+        "indicators": len(confirmed_indicator_ids),
+        "observables": observable_total,
         "correlations": db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0,
         "sessions": db.scalar(select(func.count()).select_from(OutlierSessionRecord)) or 0,
         "outliers": db.scalar(
