@@ -69,7 +69,8 @@ class AttackMappingService:
                 continue
             name, tactic = self.CATALOG[technique_id]
             item = self._item(technique_id, name, tactic, 0.65, "rule_based_candidate", text, match.start())
-            results[technique_id] = AttackTechnique(**{**asdict(item), "evidence": f"{reason}: {item.evidence}"})
+            evidence = f"{reason}: {item.evidence}"[:240]
+            results[technique_id] = AttackTechnique(**{**asdict(item), "evidence": evidence})
         return [results[key].to_dict() for key in sorted(results)]
 
     @staticmethod

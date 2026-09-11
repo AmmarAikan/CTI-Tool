@@ -89,6 +89,7 @@ class AttackMappingTests(unittest.TestCase):
         self.assertEqual(result[0]["technique_id"], "T1003")
         self.assertEqual(result[0]["mapping_source"], "rule_based_candidate")
         self.assertTrue(result[0]["evidence"])
+        self.assertLessEqual(len(result[0]["evidence"]), 240)
 
 
 if __name__ == "__main__":
