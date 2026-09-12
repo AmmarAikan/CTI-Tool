@@ -57,6 +57,24 @@ def render_production() -> dict:
     return json.loads(completed.stdout)
 
 
+class FrontendImageDefinitionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.frontend_dockerfile = FRONTEND_DOCKERFILE.read_text(encoding="utf-8")
+
+    def test_nginx_config_is_world_readable_by_the_runtime_user(self) -> None:
+        self.assertIn("FROM nginxinc/nginx-unprivileged:1.27-alpine", self.frontend_dockerfile)
+        self.assertIn(
+            "COPY --chmod=0644 nginx.conf /etc/nginx/conf.d/default.conf",
+            self.frontend_dockerfile,
+        )
+        self.assertIn(
+            "test \"$(stat -c '%a' /etc/nginx/conf.d/default.conf)\" = \"644\"",
+            self.frontend_dockerfile,
+        )
+        self.assertIn("test -r /etc/nginx/conf.d/default.conf", self.frontend_dockerfile)
+        self.assertNotIn("USER root", self.frontend_dockerfile)
+
+
 class VPSProductionDeploymentTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

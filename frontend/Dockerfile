@@ -8,7 +8,9 @@ RUN npm run lint && npm test && npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=0644 nginx.conf /etc/nginx/conf.d/default.conf
+RUN test "$(stat -c '%a' /etc/nginx/conf.d/default.conf)" = "644" \
+    && test -r /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
 EXPOSE 8080
