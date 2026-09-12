@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import ClassVar
 
+from backend.app.services.attack_mapping_service import AttackMappingService
+
 
 def stix_id(object_type: str, _value: str = "") -> str:
     # STIX Domain Objects use UUIDv4 identifiers. The source event ID is kept in
@@ -57,6 +59,7 @@ class STIXExporter:
     def export_event(self, event) -> dict:
         now = stix_timestamp()
         identity_id = stix_id("identity", "AI-Based CTI Platform")
+        report_id = stix_id("report", event.id)
         objects = [
             {
                 "type": "identity",
@@ -91,7 +94,52 @@ class STIXExporter:
             objects.append(observable)
             object_id = observable["id"]
             refs.append(object_id)
-        report_id = stix_id("report", event.id)
+        attack_relationships = []
+        for technique in AttackMappingService().map_event(event):
+            attack_id = stix_id("attack-pattern", technique["technique_id"])
+            relationship_id = stix_id("relationship", f"{event.id}:{technique['technique_id']}")
+            objects.append(
+                {
+                    "type": "attack-pattern",
+                    "spec_version": "2.1",
+                    "id": attack_id,
+                    "created": now,
+                    "modified": now,
+                    "created_by_ref": identity_id,
+                    "name": technique["name"],
+                    "description": technique["evidence"],
+                    "external_references": [
+                        {
+                            "source_name": "mitre-attack",
+                            "external_id": technique["technique_id"],
+                            "url": technique["url"],
+                        }
+                    ],
+                    "kill_chain_phases": [
+                        {"kill_chain_name": "mitre-attack", "phase_name": technique["tactic"]}
+                    ],
+                    "confidence": round(float(technique["confidence"]) * 100),
+                    "x_cti_mapping_source": technique["mapping_source"],
+                    "x_cti_analyst_review_required": technique["mapping_source"] != "explicit_id",
+                }
+            )
+            attack_relationships.append(
+                {
+                    "type": "relationship",
+                    "spec_version": "2.1",
+                    "id": relationship_id,
+                    "created": now,
+                    "modified": now,
+                    "created_by_ref": identity_id,
+                    "relationship_type": "related-to",
+                    "source_ref": report_id,
+                    "target_ref": attack_id,
+                    "description": technique["evidence"],
+                    "confidence": round(float(technique["confidence"]) * 100),
+                    "x_cti_mapping_source": technique["mapping_source"],
+                }
+            )
+            refs.extend([attack_id, relationship_id])
         objects.append(
             {
                 "type": "report",
@@ -109,6 +157,7 @@ class STIXExporter:
                 "object_refs": refs or [identity_id],
             }
         )
+        objects.extend(attack_relationships)
         return {
             "type": "bundle",
             "id": stix_id("bundle", event.id),

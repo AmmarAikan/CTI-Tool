@@ -624,6 +624,30 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual(observable["id"], repeated_observable["id"])
         self.assertEqual(uuid.UUID(observable["id"].split("--", 1)[1]).version, 5)
 
+    def test_stix_exports_attack_pattern_and_evidence_relationship(self) -> None:
+        seen = datetime(2026, 9, 3, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            id="cti-attack-event",
+            title="Scheduled task activity",
+            summary="A scheduled task was created for persistence.",
+            normalized_text="",
+            description="A scheduled task was created for persistence.",
+            indicators=[],
+            tags=["external"],
+            confidence=0.8,
+            first_seen=seen,
+            created_at=seen,
+        )
+        bundle = STIXExporter().export_event(event)
+        pattern = next(item for item in bundle["objects"] if item["type"] == "attack-pattern")
+        relationship = next(item for item in bundle["objects"] if item["type"] == "relationship")
+        report = next(item for item in bundle["objects"] if item["type"] == "report")
+        self.assertEqual(pattern["external_references"][0]["external_id"], "T1053")
+        self.assertTrue(pattern["x_cti_analyst_review_required"])
+        self.assertEqual(relationship["source_ref"], report["id"])
+        self.assertEqual(relationship["target_ref"], pattern["id"])
+        self.assertIn(pattern["id"], report["object_refs"])
+
     def test_risk_score_is_explainable_and_does_not_compound_derived_severity(self) -> None:
         event = SimpleNamespace(
             severity="critical",
@@ -674,6 +698,23 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertFalse(first["Event"]["Attribute"][0]["to_ids"])
         self.assertIn("assessment=unknown", first["Event"]["Attribute"][0]["comment"])
         self.assertEqual(first["Event"]["Attribute"][0]["first_seen"], seen.isoformat())
+
+    def test_misp_payload_adds_attack_galaxy_and_review_tags(self) -> None:
+        seen = datetime(2026, 8, 24, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            id="cti-misp-attack",
+            title="Scheduled task activity",
+            summary="A scheduled task was created for persistence.",
+            normalized_text="",
+            indicators=[],
+            severity="medium",
+            tags=[],
+            source_pipeline="external",
+            first_seen=seen,
+        )
+        tags = {item["name"] for item in MISPClient().event_payload(event)["Event"]["Tag"]}
+        self.assertIn('misp-galaxy:mitre-attack-pattern="Scheduled Task/Job - T1053"', tags)
+        self.assertIn("cti-platform:attack-mapping=analyst-review-required", tags)
 
     def test_time_bounds_are_normalized_before_persistence_and_misp_mapping(self) -> None:
         later = datetime(2026, 8, 29, 0, 14, tzinfo=timezone.utc)

@@ -334,6 +334,7 @@ class IntelligenceMISPPreviewResponse(BaseModel):
     published: Literal[False]
     distribution: Literal[0]
     attributes: list[IntelligenceMISPAttributeResponse]
+    tags: list[str] = Field(max_length=100)
     included: int = Field(ge=0)
     omitted: int = Field(ge=0)
     omitted_by_reason: dict[str, int]

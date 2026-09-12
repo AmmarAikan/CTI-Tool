@@ -9,6 +9,7 @@ import requests
 
 from backend.app.core.config import get_settings
 from backend.app.pipeline.enrichment.observable_assessor import ObservableAssessor
+from backend.app.services.attack_mapping_service import AttackMappingService
 
 
 class MISPClient:
@@ -323,4 +324,12 @@ class MISPClient:
                 f"cti-platform:severity={event.severity or 'unknown'}",
             ]
         )
+        techniques = AttackMappingService().map_event(event)
+        for item in techniques:
+            tags.append(
+                f'misp-galaxy:mitre-attack-pattern="{item["name"]} - {item["technique_id"]}"'
+            )
+            tags.append(f'cti-platform:attack-technique="{item["technique_id"]}"')
+            if item["mapping_source"] == "rule_based_candidate":
+                tags.append("cti-platform:attack-mapping=analyst-review-required")
         return sorted(set(tags))

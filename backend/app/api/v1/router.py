@@ -1121,6 +1121,14 @@ def intelligence_event_attack(event_id: str, db: SessionDep, _: CurrentUser) -> 
     }
 
 
+@router.get("/intelligence/events/{event_id}/attack-navigator", tags=["intelligence"])
+def intelligence_event_attack_navigator(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    return AttackMappingService().navigator_layer(event)
+
+
 @router.get("/intelligence/correlations", tags=["intelligence"], response_model=IntelligenceCorrelationPageResponse)
 def intelligence_correlations(db: SessionDep, _: CurrentUser, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
     total = db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0
@@ -1193,6 +1201,7 @@ def intelligence_misp_preview(event_id: str, db: SessionDep, _: CurrentUser) -> 
         "published": False,
         "distribution": 0,
         "attributes": [{"type": item["type"], "category": item["category"], "value": item["value"], "to_ids": item["to_ids"]} for item in mapped.get("Attribute", [])],
+        "tags": [str(item.get("name")) for item in mapped.get("Tag", []) if item.get("name")],
         "included": filtering["included"],
         "omitted": filtering["omitted"],
         "omitted_by_reason": filtering["omitted_by_reason"],

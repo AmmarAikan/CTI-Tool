@@ -51,6 +51,8 @@ class AttackMappingService:
     )
     EXPLICIT_RE = re.compile(r"(?<![A-Z0-9])T\d{4}(?:\.\d{3})?(?![A-Z0-9])", re.I)
 
+    OFFICIAL_DATASET_URL = "https://github.com/mitre-attack/attack-stix-data"
+
     def map_event(self, event: Any) -> list[dict[str, Any]]:
         text = "\n".join(
             str(part or "")
@@ -72,6 +74,51 @@ class AttackMappingService:
             evidence = f"{reason}: {item.evidence}"[:240]
             results[technique_id] = AttackTechnique(**{**asdict(item), "evidence": evidence})
         return [results[key].to_dict() for key in sorted(results)]
+
+    def navigator_layer(self, event: Any) -> dict[str, Any]:
+        """Return an ATT&CK Navigator layer without upgrading candidates to facts."""
+        techniques = self.map_event(event)
+        return {
+            "name": f"CTI event {getattr(event, 'id', 'unknown')}",
+            "versions": {"attack": "19.1", "navigator": "5.1.0", "layer": "4.5"},
+            "domain": "enterprise-attack",
+            "description": "Evidence-backed ATT&CK mappings from the AI-Based CTI Platform.",
+            "filters": {"platforms": ["Windows", "Linux", "macOS", "Network", "Containers", "IaaS"]},
+            "sorting": 0,
+            "layout": {
+                "layout": "side",
+                "aggregateFunction": "average",
+                "showID": True,
+                "showName": True,
+                "showAggregateScores": False,
+                "countUnscored": False,
+            },
+            "hideDisabled": False,
+            "techniques": [
+                {
+                    "techniqueID": item["technique_id"],
+                    "tactic": item["tactic"],
+                    "score": round(float(item["confidence"]) * 100),
+                    "color": "#dc2626" if item["mapping_source"] == "explicit_id" else "#f59e0b",
+                    "comment": item["evidence"],
+                    "enabled": True,
+                    "metadata": [
+                        {"name": "mapping-source", "value": item["mapping_source"]},
+                        {"name": "review-status", "value": "confirmed-id" if item["mapping_source"] == "explicit_id" else "analyst-review-required"},
+                    ],
+                }
+                for item in techniques
+            ],
+            "gradient": {"colors": ["#fff7ed", "#f59e0b", "#dc2626"], "minValue": 0, "maxValue": 100},
+            "legendItems": [
+                {"label": "Explicit ATT&CK ID", "color": "#dc2626"},
+                {"label": "Analyst review required", "color": "#f59e0b"},
+            ],
+            "showTacticRowBackground": True,
+            "tacticRowBackground": "#e5e7eb",
+            "selectTechniquesAcrossTactics": True,
+            "selectSubtechniquesWithParent": False,
+        }
 
     @staticmethod
     def _item(

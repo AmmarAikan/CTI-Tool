@@ -91,6 +91,17 @@ class AttackMappingTests(unittest.TestCase):
         self.assertTrue(result[0]["evidence"])
         self.assertLessEqual(len(result[0]["evidence"]), 240)
 
+    def test_navigator_layer_preserves_review_status(self) -> None:
+        event = SimpleNamespace(id="cti-nav", title="Incident", summary="PowerShell execution", normalized_text="")
+        layer = AttackMappingService().navigator_layer(event)
+        self.assertEqual(layer["domain"], "enterprise-attack")
+        self.assertEqual(layer["techniques"][0]["techniqueID"], "T1059.001")
+        self.assertEqual(layer["techniques"][0]["score"], 65)
+        self.assertIn(
+            {"name": "review-status", "value": "analyst-review-required"},
+            layer["techniques"][0]["metadata"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

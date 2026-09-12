@@ -73,6 +73,12 @@
 .assessment-title { color: var(--ink); font-size: 12px; }
 .attack-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .attack-heading h3 { margin: 0; }
+.action-row, .integration-links, .tag-list { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.integration-links { margin: 0 0 18px; }
+.integration-links a, .tag-list code { border: 1px solid var(--line); border-radius: 999px; padding: 7px 11px; background: var(--paper); }
+.tag-list { margin: 14px 0; }
+.tag-list code { max-width: 100%; overflow-wrap: anywhere; }
+.sharing-guide { margin-bottom: 18px; }
 .attack-grid { display: grid; gap: 12px; }
 .attack-grid article { padding: 15px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--canvas-soft); }
 .attack-grid article > a { color: var(--cyan); }
