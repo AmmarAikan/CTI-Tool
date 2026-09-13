@@ -9,7 +9,8 @@ function Failure({ error, retry }: { error: Error; retry: () => void }) {
   const {t}=useI18n();
   if (error instanceof ApiError && error.status === 404 && error.code === 'export_not_found') return <EmptyState label={t('noExport')} />;
   if (error instanceof ApiError && error.status === 401) return <div className="state-panel error-panel" role="alert">{t('sessionExpired')}</div>;
-  if (error instanceof TypeError || (error instanceof ApiError && (error.status === 408 || error.status === 503))) return <div className="state-panel error-panel" role="alert"><strong>{t('exportUnavailable')}</strong><button className="button button-secondary" onClick={retry}>{t('retry')}</button></div>;
+  if (error instanceof ApiError && error.status === 403) return <div className="state-panel error-panel" role="alert">{t('forbidden')}</div>;
+  if (error instanceof TypeError || (error instanceof ApiError && [408, 502, 503, 504].includes(error.status))) return <div className="state-panel error-panel" role="alert"><strong>{t('exportUnavailable')}</strong><button className="button button-secondary" onClick={retry}>{t('retry')}</button></div>;
   return <ErrorState onRetry={retry} />;
 }
 

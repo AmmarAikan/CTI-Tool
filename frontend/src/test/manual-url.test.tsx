@@ -81,6 +81,7 @@ describe('manual preview workflow', () => {
 
   it('rejects with a controlled reason and removes preview content', async () => {
     mockRole('analyst', (path) => path.endsWith('/previews') ? response(preview) : response({ schema_version: '1.0', preview_id: preview.preview_id, state: 'rejected', decided_at: '2026-09-06T00:01:00Z' }));
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     await actor.selectOptions(await screen.findByRole('combobox'), 'duplicate'); await actor.click(screen.getByRole('button', { name: 'تجاهل' }));
     expect(await screen.findByText(/تم تجاهل المعاينة/)).toBeInTheDocument(); expect(screen.queryByText(preview.title)).not.toBeInTheDocument(); expect(screen.queryByText(preview.excerpt)).not.toBeInTheDocument();
@@ -134,7 +135,7 @@ describe('manual preview workflow', () => {
     await actor.type(await screen.findByRole('textbox', { name: 'رابط المصدر لإعادة الفحص' }), 'https://example.org/existing');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await actor.click(screen.getByRole('button', { name: 'إعادة الفحص' }));
-    expect(await screen.findByText('تعذر تنفيذ العملية بأمان.')).toBeInTheDocument();
+    expect(await screen.findByText('خدمة التحكم بالمصادر الخارجية غير متاحة حاليًا')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('hidden.onion');
     expect(document.body).not.toHaveTextContent('10.0.0.1');
     expect(document.body).not.toHaveTextContent('token=secret');

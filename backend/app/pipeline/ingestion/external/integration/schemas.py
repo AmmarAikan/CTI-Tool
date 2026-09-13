@@ -111,20 +111,20 @@ class DarkWebWatchListResponse(StrictModel):
     items: list[DarkWebWatchResponse]
 
 class DarkWebResultResponse(StrictModel):
-    result_id: str
-    watch_id: str
-    onion_reference: str
+    result_id: str = Field(pattern=r"^dwr-[0-9a-f]{32}$")
+    watch_id: str = Field(min_length=10, max_length=40, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]+$")
+    onion_reference: str = Field(pattern=r"^onion-ref:[0-9a-f]{12,64}$")
     title: str = Field(max_length=200)
     excerpt: str = Field(max_length=240)
     provider: str = Field(max_length=100)
     first_seen_at: str
     last_seen_at: str
     status: Literal["new", "known"]
-    classification_label: str | None = None
-    classification_confidence: float | None = None
+    classification_label: str | None = Field(default=None, max_length=80)
+    classification_confidence: float | None = Field(default=None, ge=0, le=1)
     privacy_status: Literal["reviewed", "review_required"]
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    review_reasons: list[str]
+    review_reasons: list[str] = Field(max_length=10)
 
 class DarkWebResultPageResponse(StrictModel):
     schema_version: Literal["1.0"] = "1.0"

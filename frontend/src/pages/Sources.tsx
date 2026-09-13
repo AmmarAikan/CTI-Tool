@@ -14,12 +14,12 @@ export const jobPollingRetryDelay = (attempt: number) => Math.min(2_000 * (2 ** 
 export const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
 const COUNT_LABELS = { accepted_records: 'accepted', review_records: 'forReview', rejected_records: 'rejected', skipped_records: 'skipped', error_count: 'errors' } as const;
 
-function safePollingError(error: unknown, t: ReturnType<typeof useI18n>['t']) {
+export function safePollingError(error: unknown, t: ReturnType<typeof useI18n>['t']) {
   if (error instanceof ApiError && error.status === 401) return t('sessionExpired');
   if (error instanceof ApiError && error.status === 403) return t('forbidden');
   if (error instanceof ApiError && error.status === 404) return t('jobNotFound');
   if (error instanceof ApiError && error.status === 408) return t('jobPollingTimeout');
-  if (error instanceof ApiError && error.status === 503) return t('externalControlUnavailable');
+  if (error instanceof ApiError && [502, 503, 504].includes(error.status)) return t('externalControlUnavailable');
   if (error instanceof ApiError && error.code === 'invalid_response') return t('malformed');
   if (error instanceof TypeError) return t('disconnected');
   return t('jobPollingFailed');
@@ -49,6 +49,7 @@ export function JobMonitor({ sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MA
   const terminal = TERMINAL_STATES.includes(job.state);
   const queryKey = ['external-job', job.job_id] as const;
   const query = useQuery({ queryKey, queryFn: ({ signal }) => api.externalJob(job.job_id, signal), enabled: !terminal && !timedOut, retry: (failureCount, error) => isRetryableJobPollingError(error) && failureCount < JOB_POLL_TRANSIENT_RETRIES, retryDelay: jobPollingRetryDelay, refetchInterval: JOB_POLL_INTERVAL_MS });
+  useEffect(() => { setTimedOut(false); }, [job.job_id]);
   useEffect(() => { if (query.data?.job_id === job.job_id) onUpdate(sourceId, query.data); }, [job.job_id, onUpdate, query.data, sourceId]);
   useEffect(() => {
     if (terminal || timedOut) return;
@@ -90,7 +91,7 @@ export function Sources() {
     if (source.status !== 'enabled' || pending[source.source_id] || (jobs[source.source_id] && !TERMINAL_STATES.includes(jobs[source.source_id].state))) return;
     if (window.confirm(t('confirmRunSource',{name:source.name}))) start.mutate(source.source_id);
   }
-  function updateJob(sourceId: string, job: ExternalJob) { setJobs((value) => value[sourceId] === job ? value : { ...value, [sourceId]: job }); }
+  function updateJob(sourceId: string, job: ExternalJob) { setJobs((value) => value[sourceId]?.job_id !== job.job_id || value[sourceId] === job ? value : { ...value, [sourceId]: job }); }
   const allActive = Boolean(allJob && !TERMINAL_STATES.includes(allJob.state));
   function runAll() { if (startAll.isPending || allActive) return; if (window.confirm(t('confirmRunAll'))) startAll.mutate(); }
 

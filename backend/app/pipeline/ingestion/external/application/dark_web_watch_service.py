@@ -5,6 +5,7 @@ import html
 import os
 import re
 import sqlite3
+import stat
 import threading
 import unicodedata
 import uuid
@@ -52,7 +53,11 @@ class SQLiteDarkWebWatchStore:
         if self.path.is_symlink() or self.path.parent.is_symlink(): raise RuntimeError("watch database path is unsafe")
         resolved_parent = self.path.parent.resolve(); resolved = self.path.resolve(strict=False)
         if resolved.parent != resolved_parent or (self.path.exists() and not self.path.is_file()): raise RuntimeError("watch database path is unsafe")
-        if self.path.exists(): os.chmod(self.path, 0o600)
+        if self.path.exists():
+            details=self.path.stat()
+            if details.st_uid != os.geteuid() or stat.S_IMODE(details.st_mode) & 0o077: raise RuntimeError("watch database permissions are unsafe")
+        else:
+            descriptor=os.open(self.path,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600);os.close(descriptor)
 
     def _connect(self):
         db = sqlite3.connect(self.path, timeout=5); db.row_factory = sqlite3.Row

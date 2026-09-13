@@ -20,4 +20,12 @@ class DarkWebWatchTests(unittest.TestCase):
             first=store.commit_scan(watch["watch_id"],[item],partial=False); second=store.commit_scan(watch["watch_id"],[item],partial=False)
             self.assertEqual((first["new_result_count"],second["new_result_count"]),(1,0)); self.assertEqual(store.results(watch["watch_id"],25,0)["total"],1)
 
+    def test_rejects_symlink_and_existing_unsafe_database_permissions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder); target=root/"target.sqlite3"; target.write_bytes(b"")
+            link=root/"linked.sqlite3"; link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError,"unsafe"): SQLiteDarkWebWatchStore(link)
+            unsafe=root/"unsafe.sqlite3"; unsafe.write_bytes(b""); unsafe.chmod(0o644)
+            with self.assertRaisesRegex(RuntimeError,"permissions"): SQLiteDarkWebWatchStore(unsafe)
+
 if __name__ == "__main__": unittest.main()
