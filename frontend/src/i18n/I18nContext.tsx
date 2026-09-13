@@ -1,7 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 export const ar = {
-  languageToggle: 'Switch to English', languageName: 'AR', themeLight: 'تفعيل المظهر الفاتح', themeDark: 'تفعيل المظهر الداكن', light: 'فاتح', dark: 'داكن',
+  languageToggle: 'Switch to English', languageActionSymbol: 'E', languageName: 'AR', themeLight: 'تفعيل المظهر الفاتح', themeDark: 'تفعيل المظهر الداكن', light: 'فاتح', dark: 'داكن',
   sessionActive: 'جلسة نشطة', secureSession: 'جلسة محمية', secureConnection: 'اتصال مركزي آمن', logout: 'تسجيل الخروج',
   openNav: 'فتح قائمة التنقل', closeNav: 'إغلاق قائمة التنقل', collapseNav: 'طي القائمة', expandNav: 'توسيع القائمة', primaryNav: 'التنقل الرئيسي',
   platform: 'منصة CTI', workspace: 'مساحة العمليات', brand: 'مركز التهديدات', brandSub: 'Cyber Intelligence Center', operations: 'العمليات', dashboard: 'لوحة المتابعة',
@@ -10,7 +10,7 @@ export const ar = {
   indicators: 'القيم والمؤشرات', attack: 'MITRE ATT&CK', correlations: 'الارتباطات', outliers: 'القيم الشاذة', analysisRuns: 'عمليات التحليل', misp: 'MISP',
   processingCenter: 'مركز المعالجة والتحليل', administration: 'الإدارة', admin: 'المستخدمون والتدقيق', analyst: 'محلل تهديدات', administrator: 'مسؤول النظام', viewer: 'مشاهد',
   loading: 'جار التحميل...', loadFailed: 'تعذر تحميل البيانات', connectionHint: 'تحقق من الاتصال بالخدمة المركزية وحاول مرة أخرى.', retry: 'إعادة المحاولة',
-  forbidden: 'الوصول غير مسموح', forbiddenHint: 'لا تملك صلاحية تنفيذ هذه العملية.', sessionExpired: 'انتهت جلسة الدخول', timeout: 'انتهت مهلة الطلب', disconnected: 'الخدمة المركزية غير متصلة', malformed: 'أعادت الخدمة استجابة غير صالحة.', unknownError: 'تعذر تنفيذ العملية بأمان.',
+  forbidden: 'الوصول غير مسموح', forbiddenHint: 'لا تملك صلاحية تنفيذ هذه العملية.', sessionExpired: 'انتهت جلسة الدخول', timeout: 'انتهت مهلة الطلب', disconnected: 'الخدمة المركزية غير متصلة', externalControlUnavailable: 'خدمة التحكم بالمصادر الخارجية غير متاحة حاليًا', jobNotFound: 'لم تعد الوظيفة موجودة', jobReportedFailure: 'أبلغت الوظيفة عن فشل آمن. راجع السجل التشغيلي المصرح به.', malformed: 'أعادت الخدمة استجابة غير صالحة.', unknownError: 'تعذر تنفيذ العملية بأمان.',
   centerEyebrow: 'التشغيل والتحليل', centerDescription: 'نقطة تشغيل تربط المدخلات الحقيقية بحالة الوظائف والنتائج المؤكدة دون اختلاق تقدم.', selectInput: 'اختيار المدخل', inputType: 'نوع المدخل',
   externalSource: 'مصدر خارجي مفعّل', internalSource: 'مصدر داخلي', savedWatch: 'مراقبة Dark Web محفوظة', choose: 'اختر', startProcessing: 'بدء المعالجة', running: 'جار التشغيل...',
   confirmRun: 'هل تريد بدء عملية المعالجة المحددة؟', confirmApprove: 'هل تريد اعتماد المعاينة وحفظها؟', readonly: 'حساب المشاهد للقراءة فقط.', unconfigured: 'غير مهيأ', noInputs: 'لا توجد مدخلات متاحة.',
@@ -44,7 +44,7 @@ export const ar = {
 export type TranslationKey = keyof typeof ar;
 
 export const en: Record<TranslationKey, string> = {
-  languageToggle: 'التبديل إلى العربية', languageName: 'EN', themeLight: 'Use light theme', themeDark: 'Use dark theme', light: 'Light', dark: 'Dark',
+  languageToggle: 'التبديل إلى العربية', languageActionSymbol: 'ع', languageName: 'EN', themeLight: 'Use light theme', themeDark: 'Use dark theme', light: 'Light', dark: 'Dark',
   sessionActive: 'Active session', secureSession: 'Protected session', secureConnection: 'Secure central connection', logout: 'Sign out',
   openNav: 'Open navigation', closeNav: 'Close navigation', collapseNav: 'Collapse sidebar', expandNav: 'Expand sidebar', primaryNav: 'Primary navigation',
   platform: 'CTI Platform', workspace: 'Operations workspace', brand: 'Threat Intelligence Center', brandSub: 'Cyber Intelligence Center', operations: 'Operations', dashboard: 'Dashboard',
@@ -53,7 +53,7 @@ export const en: Record<TranslationKey, string> = {
   indicators: 'Observables & Indicators', attack: 'MITRE ATT&CK', correlations: 'Correlations', outliers: 'Outliers', analysisRuns: 'Analysis Runs', misp: 'MISP',
   processingCenter: 'Processing & Analysis Center', administration: 'Administration', admin: 'Users & Audit', analyst: 'Threat analyst', administrator: 'Administrator', viewer: 'Viewer',
   loading: 'Loading…', loadFailed: 'Unable to load data', connectionHint: 'Check the central service connection and try again.', retry: 'Retry',
-  forbidden: 'Access denied', forbiddenHint: 'You do not have permission to perform this operation.', sessionExpired: 'Your session has expired', timeout: 'The request timed out', disconnected: 'Central service is disconnected', malformed: 'The service returned an invalid response.', unknownError: 'The operation could not be completed safely.',
+  forbidden: 'Access denied', forbiddenHint: 'You do not have permission to perform this operation.', sessionExpired: 'Your session has expired', timeout: 'The request timed out', disconnected: 'Central service is disconnected', externalControlUnavailable: 'External Control is currently unavailable', jobNotFound: 'The job is no longer available', jobReportedFailure: 'The job reported a safe failure. Review the authorized operational log.', malformed: 'The service returned an invalid response.', unknownError: 'The operation could not be completed safely.',
   centerEyebrow: 'Operations & Analysis', centerDescription: 'An operational entry point joining real inputs, job states, and confirmed results without fabricated progress.', selectInput: 'Select input', inputType: 'Input type',
   externalSource: 'Enabled external source', internalSource: 'Internal source', savedWatch: 'Saved Dark Web watch', choose: 'Choose', startProcessing: 'Start processing', running: 'Starting…',
   confirmRun: 'Start the selected processing operation?', confirmApprove: 'Approve and save this preview?', readonly: 'Viewer accounts are read-only.', unconfigured: 'Unconfigured', noInputs: 'No inputs are available.',

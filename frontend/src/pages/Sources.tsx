@@ -12,12 +12,23 @@ export const JOB_POLL_MAX_MS = 120_000;
 export const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
 const COUNT_LABELS = { accepted_records: 'accepted', review_records: 'forReview', rejected_records: 'rejected', skipped_records: 'skipped', error_count: 'errors' } as const;
 
-function JobPanel({ job, pollingError, timedOut, onRefresh }: { job?: ExternalJob; pollingError: boolean; timedOut: boolean; onRefresh: () => void }) {
+function safePollingError(error: unknown, t: ReturnType<typeof useI18n>['t']) {
+  if (error instanceof ApiError && error.status === 401) return t('sessionExpired');
+  if (error instanceof ApiError && error.status === 403) return t('forbidden');
+  if (error instanceof ApiError && error.status === 404) return t('jobNotFound');
+  if (error instanceof ApiError && error.status === 408) return t('jobPollingTimeout');
+  if (error instanceof ApiError && error.status === 503) return t('externalControlUnavailable');
+  if (error instanceof ApiError && error.code === 'invalid_response') return t('malformed');
+  if (error instanceof TypeError) return t('disconnected');
+  return t('jobPollingFailed');
+}
+
+function JobPanel({ job, pollingError, timedOut, onRefresh }: { job?: ExternalJob; pollingError?: unknown; timedOut: boolean; onRefresh: () => void }) {
   const {t,number}=useI18n();
   if (timedOut) return <div className="job-panel error-panel" role="alert"><strong>{t('jobPollingTimeout')}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button></div>;
-  if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>{t('jobPollingFailed')}</strong><span>{t('connectionHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('retry')}</button></div>;
+  if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>{safePollingError(pollingError, t)}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('retry')}</button></div>;
   if (!job) return null;
-  return <div className="job-panel" role="status" aria-live="polite"><div><strong>{t('status')}</strong><StatusBadge status={job.state} /></div>{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{job.error}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
+  return <div className="job-panel" role="status" aria-live="polite"><div><strong>{t('status')}</strong><StatusBadge status={job.state} /></div>{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{t('jobReportedFailure')}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
 }
 
 function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onRun: (source: Source) => void }) {
@@ -29,15 +40,15 @@ function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onR
 export function JobMonitor({ sourceId, job, onUpdate }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
   const [timedOut, setTimedOut] = useState(false);
   const terminal = TERMINAL_STATES.includes(job.state);
-  const query = useQuery({ queryKey: ['external-job', job.job_id], queryFn: () => api.externalJob(job.job_id), enabled: !terminal && !timedOut, retry: false, refetchInterval: JOB_POLL_INTERVAL_MS });
-  useEffect(() => { if (query.data) onUpdate(sourceId, query.data); }, [onUpdate, query.data, sourceId]);
+  const query = useQuery({ queryKey: ['external-job', job.job_id], queryFn: ({ signal }) => api.externalJob(job.job_id, signal), enabled: !terminal && !timedOut, retry: false, refetchInterval: JOB_POLL_INTERVAL_MS });
+  useEffect(() => { if (query.data?.job_id === job.job_id) onUpdate(sourceId, query.data); }, [job.job_id, onUpdate, query.data, sourceId]);
   useEffect(() => {
     if (terminal || timedOut) return;
     const timer = window.setTimeout(() => setTimedOut(true), JOB_POLL_MAX_MS);
     return () => window.clearTimeout(timer);
   }, [job.job_id, terminal, timedOut]);
   function refresh() { setTimedOut(false); void query.refetch(); }
-  return <JobPanel job={job} pollingError={query.isError} timedOut={timedOut} onRefresh={refresh} />;
+  return <JobPanel job={job} pollingError={query.error} timedOut={timedOut} onRefresh={refresh} />;
 }
 
 function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUpdate }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void }) {

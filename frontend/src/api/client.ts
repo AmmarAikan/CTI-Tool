@@ -510,7 +510,7 @@ export const api = {
   integrationStatus: async () => parseIntegrationStatus(await request<unknown>('/integrations/status')),
   internalHealth: async (integration: InternalIntegration) => parseHealth(await request<unknown>(`/integrations/${integration}/health`)),
   internalEvents: async (integration: InternalIntegration, limit = 25, offset = 0, severity = '') => parseInternalEvents(await request<unknown>(`/internal/sources/${integration}/events?limit=${limit}&offset=${offset}${severity ? `&severity=${encodeURIComponent(severity)}` : ''}`), integration),
-  pullInternal: async (integration: InternalIntegration) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST' }, INTERNAL_PULL_TIMEOUT_MS)),
+  pullInternal: async (integration: InternalIntegration, signal?: AbortSignal) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST', signal }, INTERNAL_PULL_TIMEOUT_MS)),
   intelligenceEvents: async (limit = 25, offset = 0, filters: { severity?: string; source_pipeline?: string; processing_status?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parsePage(await request<unknown>(`/intelligence/events?${params}`), parseCTIEvent); },
   intelligenceEvent: async (id: string) => parseEventDetail(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}`)),
   intelligenceIndicators: async (limit = 25, offset = 0, filters: { type?: string; search?: string; semantic_role?: string; assessment?: string; validation_status?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key === 'type' ? 'indicator_type' : key, value); }); return parsePage(await request<unknown>(`/intelligence/indicators?${params}`), parseIndicator); },
@@ -533,14 +533,18 @@ export const api = {
   adminChangeActive: async (id: string, isActive: boolean) => parseAdminUser(await request<unknown>(`/admin/users/${encodeURIComponent(id)}/active`, { method: 'PATCH', body: JSON.stringify({ is_active: isActive }) })),
   adminResetPassword: async (id: string, password: string) => parseAdminUser(await request<unknown>(`/admin/users/${encodeURIComponent(id)}/password`, { method: 'POST', body: JSON.stringify({ password }) })),
   adminAudit: async (limit = 25, offset = 0, action = '', actor = '') => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); if (action) params.set('action', action); if (actor) params.set('actor', actor); return parsePage(await request<unknown>(`/admin/audit?${params}`), parseAdminAudit); },
-  startExternalSourceJob: async (sourceId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }) })),
+  startExternalSourceJob: async (sourceId: string, signal?: AbortSignal) => parseExternalJob(await request<unknown>(`/integrations/external-control/sources/${encodeURIComponent(sourceId)}/jobs`, { method: 'POST', body: JSON.stringify({ force: false }), signal })),
   startAllExternalSources: async () => parseExternalJob(await request<unknown>('/integrations/external-control/jobs', { method: 'POST', body: JSON.stringify({ source_ids: [], scope: 'all_enabled', force: false }) })),
   startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
   recheckManualSource: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources/recheck', { method: 'POST', body: JSON.stringify({ url, force: true }) })),
   createManualPreview: async (url: string, signal?: AbortSignal) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }), signal }, EXTERNAL_SYNC_TIMEOUT_MS)),
   approveManualPreview: async (preview: ManualPreview) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) })),
   rejectManualPreview: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled') => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })),
-  externalJob: async (jobId: string) => parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`)),
+  externalJob: async (jobId: string, signal?: AbortSignal) => {
+    const job = parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`, { signal }));
+    if (job.job_id !== jobId) throw new ApiError(502, 'invalid_response', 'External job identity mismatch');
+    return job;
+  },
   latestExternalExport: async () => parseExportSummary(await request<unknown>('/integrations/external-control/exports/latest')),
   latestExternalReviews: async () => parseReviews(await request<unknown>('/integrations/external-control/reviews/latest')),
   externalJobs: async () => parseJobHistory(await request<unknown>('/integrations/external-control/jobs?limit=50')),
@@ -549,5 +553,6 @@ export const api = {
   createDarkWebWatch: async(keyword:string)=>parseDarkWebWatch(await request<unknown>('/dark-web/watches',{method:'POST',body:JSON.stringify({keyword})})),
   patchDarkWebWatch: async(watchId:string,enabled:boolean)=>parseDarkWebWatch(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}`,{method:'PATCH',body:JSON.stringify({enabled})})),
   scanDarkWebWatch: async(watchId:string)=>parseExternalJob(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}/scan`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()}})),
+  scanDarkWebWatchAbortable: async(watchId:string,signal:AbortSignal)=>parseExternalJob(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}/scan`,{method:'POST',headers:{'Idempotency-Key':crypto.randomUUID()},signal})),
   darkWebResults: async(watchId:string,limit=25,offset=0)=>parseDarkWebResults(await request<unknown>(`/dark-web/watches/${encodeURIComponent(watchId)}/results?limit=${limit}&offset=${offset}`)),
 };

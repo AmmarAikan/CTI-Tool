@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
 import { api, ApiError, type ExternalJob, type InternalIntegration, type ManualPreview } from '../api/client';
@@ -9,6 +9,7 @@ import { JobMonitor, TERMINAL_STATES } from './Sources';
 
 type InputKind = 'external' | 'manual' | 'internal' | 'dark';
 type PullResult = { run_id: string; status: string };
+type OperationRequest = { generation: number; kind: InputKind; selection: string; url: string; signal: AbortSignal };
 
 function validPublicUrl(value: string) {
   try {
@@ -25,8 +26,11 @@ export function ProcessingCenter() {
   const [url, setUrl] = useState('');
   const [validation, setValidation] = useState('');
   const [job, setJob] = useState<ExternalJob>();
+  const [jobInputKey, setJobInputKey] = useState('');
   const [pullResult, setPullResult] = useState<PullResult>();
   const [preview, setPreview] = useState<ManualPreview>();
+  const operationGeneration = useRef(0);
+  const submissionController = useRef<AbortController | undefined>(undefined);
   const sources = useQuery({ queryKey: ['center-sources'], queryFn: api.externalSources, retry: false });
   const watches = useQuery({ queryKey: ['center-watches'], queryFn: api.darkWebWatches, retry: false });
   const snapshot = useQueries({ queries: [
@@ -37,14 +41,15 @@ export function ProcessingCenter() {
     { queryKey: ['center-outliers'], queryFn: () => api.intelligenceOutliers(1, 0, true), retry: false },
   ] });
   const run = useMutation({
-    mutationFn: async () => {
-      if (kind === 'external') return api.startExternalSourceJob(selection);
-      if (kind === 'dark') return api.scanDarkWebWatch(selection);
-      if (kind === 'internal') return api.pullInternal(selection as InternalIntegration);
-      return api.createManualPreview(url.trim());
+    mutationFn: async (request: OperationRequest) => {
+      if (request.kind === 'external') return api.startExternalSourceJob(request.selection, request.signal);
+      if (request.kind === 'dark') return api.scanDarkWebWatchAbortable(request.selection, request.signal);
+      if (request.kind === 'internal') return api.pullInternal(request.selection as InternalIntegration, request.signal);
+      return api.createManualPreview(request.url, request.signal);
     },
-    onSuccess: (value) => {
-      if ('job_id' in value) setJob(value as ExternalJob);
+    onSuccess: (value, request) => {
+      if (request.generation !== operationGeneration.current) return;
+      if ('job_id' in value) { setJob(value as ExternalJob); setJobInputKey(`${request.kind}:${request.selection || request.url}`); }
       else if ('preview_id' in value) setPreview(value as ManualPreview);
       else setPullResult(value as PullResult);
     },
@@ -60,13 +65,26 @@ export function ProcessingCenter() {
   const confirmed = Boolean(state && TERMINAL_STATES.includes(state as ExternalJob['state']));
   const stages: TranslationKey[] = ['selectInput', 'collectStage', 'privacyStage', 'classifyStage', 'extractStage', 'saveStage', 'correlateStage', 'snapshot'];
   const statusKey = state && ['queued', 'processing', 'completed', 'partial', 'failed', 'cancelled', 'cancellation_requested'].includes(state) ? state as TranslationKey : undefined;
-  const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 408 ? t('timeout') : error instanceof ApiError && error.code === 'invalid_response' ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
+  const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 401 ? t('sessionExpired') : error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 404 ? t('jobNotFound') : error instanceof ApiError && error.status === 408 ? t('timeout') : error instanceof ApiError && error.status === 503 ? t('externalControlUnavailable') : error instanceof ApiError && error.code === 'invalid_response' ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
+
+  useEffect(() => () => {
+    operationGeneration.current += 1;
+    submissionController.current?.abort();
+  }, []);
 
   function submit() {
     if (run.isPending || !can('analyst')) return;
     if (kind === 'manual' && !validPublicUrl(url.trim())) { setValidation(t('invalidUrl')); return; }
+    const inputKey = `${kind}:${kind === 'manual' ? url.trim() : selection}`;
+    if (job && !TERMINAL_STATES.includes(job.state) && jobInputKey === inputKey) return;
     if (!window.confirm(t('confirmRun'))) return;
-    setValidation(''); setJob(undefined); setPullResult(undefined); setPreview(undefined); run.reset(); run.mutate();
+    submissionController.current?.abort();
+    const controller = new AbortController();
+    submissionController.current = controller;
+    const generation = operationGeneration.current + 1;
+    operationGeneration.current = generation;
+    setValidation(''); setJob(undefined); setJobInputKey(''); setPullResult(undefined); setPreview(undefined); run.reset();
+    run.mutate({ generation, kind, selection, url: url.trim(), signal: controller.signal });
   }
   const choices = kind === 'external'
     ? (sources.data || []).filter((item) => item.status === 'enabled').map((item) => [item.source_id, item.name])
@@ -75,7 +93,9 @@ export function ProcessingCenter() {
       : kind === 'internal'
         ? [['dionaea', 'Dionaea'], ['host-auth', t('hostAuth')], ['web-access', t('webAccess')]]
         : [];
-  const disabled = run.isPending || (kind === 'manual' ? !url.trim() : !selection);
+  const currentInputKey = `${kind}:${kind === 'manual' ? url.trim() : selection}`;
+  const duplicateActiveJob = Boolean(job && !TERMINAL_STATES.includes(job.state) && jobInputKey === currentInputKey);
+  const disabled = run.isPending || duplicateActiveJob || (kind === 'manual' ? !url.trim() : !selection);
 
   return <section className="page-section processing-center">
     <div className="section-heading"><div><span className="eyebrow">{t('centerEyebrow')}</span><h2>{t('processingCenter')}</h2><p>{t('centerDescription')}</p></div></div>
@@ -88,7 +108,7 @@ export function ProcessingCenter() {
     </section>
     <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => <li className={index === 0 || confirmed ? 'confirmed' : state ? 'active' : ''} key={key}><span>{index + 1}</span>{t(key)}</li>)}</ol></section>
     <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
-      {job && <><p><strong>{t('jobId')}:</strong> <code dir="ltr">{job.job_id}</code></p><JobMonitor sourceId="processing-center" job={job} onUpdate={(_id, value) => setJob(value)} /></>}
+      {job && <><p><strong>{t('jobId')}:</strong> <code dir="ltr">{job.job_id}</code></p><JobMonitor key={job.job_id} sourceId="processing-center" job={job} onUpdate={(_id, value) => setJob((current) => current?.job_id === value.job_id ? value : current)} /></>}
       {pullResult && <p role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong> · {t('runId')}: <code dir="ltr">{pullResult.run_id}</code></p>}
       {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => window.confirm(t('confirmApprove')) && approve.mutate(preview)}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => window.confirm(t('confirmRun')) && reject.mutate()}>{t('reject')}</button></article>}
       {(approve.isError || reject.isError) && <div className="state-panel error-panel" role="alert">{safeMutationError(approve.error || reject.error)}</div>}
