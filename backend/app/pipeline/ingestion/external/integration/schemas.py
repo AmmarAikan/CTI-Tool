@@ -105,6 +105,10 @@ class DarkWebWatchResponse(StrictModel):
     result_count: int = Field(ge=0)
     new_result_count: int = Field(ge=0)
     checkpoint_hash: str | None = None
+    keywords: list[str] | None = Field(default=None,max_length=10)
+    match_mode: Literal["any","all"] | None = None
+    provider_id: str | None = Field(default=None,max_length=64)
+    scan_interval_seconds: int | None = Field(default=None,ge=300,le=604800)
 
 class DarkWebWatchListResponse(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
@@ -125,6 +129,8 @@ class DarkWebResultResponse(StrictModel):
     privacy_status: Literal["reviewed", "review_required"]
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     review_reasons: list[str] = Field(max_length=10)
+    matched_keywords: list[str] = Field(default_factory=list, max_length=10)
+    collected_at: str | None = None
 
 class DarkWebResultPageResponse(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
@@ -132,6 +138,34 @@ class DarkWebResultPageResponse(StrictModel):
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+
+class DiscoveryWatchCreateBody(StrictModel):
+    keywords: list[str] = Field(min_length=1, max_length=10)
+    match_mode: Literal["any", "all"] = "any"
+    provider_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    scan_interval_seconds: int = Field(default=3600, ge=300, le=604800)
+
+class DiscoveryWatchResponse(DarkWebWatchResponse):
+    keywords: list[str] = Field(min_length=1, max_length=10)
+    match_mode: Literal["any", "all"]
+    provider_id: str
+    scan_interval_seconds: int = Field(ge=300, le=604800)
+
+class DiscoveryProviderStatusResponse(StrictModel):
+    provider_id: str = Field(max_length=64)
+    enabled: bool
+    ready: bool
+    through_tor: bool
+
+class DiscoveredSourceResponse(StrictModel):
+    source_id: str = Field(pattern=r"^dws-[0-9a-f]{24}$")
+    watch_id: str
+    onion_reference: str = Field(pattern=r"^onion-ref:[0-9a-f]{64}$")
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+class DiscoveredSourcePatchBody(StrictModel): enabled: bool
 
 
 class JobStatusResponse(StrictModel):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import json
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -70,6 +71,8 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
     SourceResponse,
     DarkWebWatchCreateBody, DarkWebWatchPatchBody, DarkWebWatchListResponse,
     DarkWebWatchResponse, DarkWebResultPageResponse,
+    DiscoveryWatchCreateBody, DiscoveryWatchResponse, DiscoveryProviderStatusResponse,
+    DiscoveredSourceResponse, DiscoveredSourcePatchBody,
 )
 
 API_PREFIX = "/api/v1/external-sources"
@@ -276,8 +279,39 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         watch=watches().store.get(watch_id); last=watch.get("last_scan_at")
         items=[]
         for row in page["items"]:
-            items.append({k:row[k] for k in ("result_id","watch_id","onion_reference","title","excerpt","provider","first_seen_at","last_seen_at","classification_label","classification_confidence","privacy_status","content_sha256")} | {"status":"new" if row["first_seen_at"]==last else "known","review_reasons":[v for v in row["review_reasons"].split(",") if v]})
+            items.append({k:row[k] for k in ("result_id","watch_id","onion_reference","title","excerpt","provider","first_seen_at","last_seen_at","classification_label","classification_confidence","privacy_status","content_sha256","collected_at")} | {"status":"new" if row["first_seen_at"]==last else "known","review_reasons":[v for v in row["review_reasons"].split(",") if v],"matched_keywords":json.loads(row["matched_keywords"] or "[]")})
         return {"schema_version":"1.0","items":items,"total":page["total"],"limit":limit,"offset":offset}
+
+    @app.get(f"{API_PREFIX}/dark-web/discovery/providers", response_model=list[DiscoveryProviderStatusResponse])
+    def discovery_providers(_current: Principal = Depends(permitted("dark_web_watches:read"))):
+        scanner=watches().discovery_scanner
+        return scanner.readiness() if scanner is not None else []
+
+    @app.post(f"{API_PREFIX}/dark-web/discovery/watches", response_model=DiscoveryWatchResponse, status_code=201)
+    def create_discovery_watch(body: DiscoveryWatchCreateBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
+        try: return watches().store.create_advanced(body.keywords,body.match_mode,body.provider_id,body.scan_interval_seconds)
+        except WatchValidationError: raise APIError(422,"invalid_watch","watch configuration is not permitted") from None
+        except WatchConflict as exc: raise APIError(409,str(exc),"watch could not be created") from None
+
+    @app.post(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/results/{{result_id}}/promote", response_model=DiscoveredSourceResponse)
+    def promote_discovered_source(watch_id: str, result_id: str, current: Principal = Depends(permitted("dark_web_watches:write")), idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
+        if not idempotency_key: raise APIError(422,"idempotency_required","an idempotency key is required")
+        cached=_cached(services,current,f"promote_discovered:{watch_id}:{result_id}",idempotency_key)
+        if cached: return cached
+        try: response=watches().store.promote(watch_id,result_id)
+        except WatchNotFound: raise APIError(404,"result_not_found","confirmed result was not found") from None
+        _remember(services,current,f"promote_discovered:{watch_id}:{result_id}",idempotency_key,response)
+        return response
+
+    @app.get(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/discovered-sources", response_model=list[DiscoveredSourceResponse])
+    def discovered_sources(watch_id: str, _current: Principal = Depends(permitted("dark_web_watches:read"))):
+        try: return watches().store.list_discovered(watch_id)
+        except WatchNotFound: raise APIError(404,"watch_not_found","watch was not found") from None
+
+    @app.patch(f"{API_PREFIX}/dark-web/discovered-sources/{{source_id}}", response_model=DiscoveredSourceResponse)
+    def patch_discovered_source(source_id: str, body: DiscoveredSourcePatchBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
+        try: return watches().store.set_discovered_enabled(source_id,body.enabled)
+        except WatchNotFound: raise APIError(404,"discovered_source_not_found","discovered source was not found") from None
 
     @app.get(f"{API_PREFIX}/sources/{{source_id}}", response_model=SourceResponse)
     def get_source(source_id: str, _current: Principal = Depends(permitted("sources:read"))) -> SourceResponse:

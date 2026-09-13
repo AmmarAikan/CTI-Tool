@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import html
+import json
 import os
 import re
 import sqlite3
@@ -43,7 +44,7 @@ def normalize_keyword(value: str) -> str:
 
 
 class SQLiteDarkWebWatchStore:
-    VERSION = 1
+    VERSION = 2
     def __init__(self, path: Path, *, max_watches: int = 100, max_results_per_watch: int = 1000) -> None:
         self.path, self.max_watches, self.max_results = path, max_watches, max_results_per_watch
         self._prepare(); self._schema()
@@ -79,7 +80,18 @@ class SQLiteDarkWebWatchStore:
                 title TEXT NOT NULL, excerpt TEXT NOT NULL, provider TEXT NOT NULL, first_seen_at TEXT NOT NULL,
                 last_seen_at TEXT NOT NULL, classification_label TEXT, classification_confidence REAL,
                 privacy_status TEXT NOT NULL, review_reasons TEXT NOT NULL, UNIQUE(watch_id,canonical_hash));
-              PRAGMA user_version=1;
+            """)
+            watch_columns={row[1] for row in db.execute("PRAGMA table_info(watches)")}
+            for name,definition in (("keywords_json","TEXT"),("match_mode","TEXT NOT NULL DEFAULT 'any'"),("provider_id","TEXT"),("scan_interval_seconds","INTEGER NOT NULL DEFAULT 3600")):
+                if name not in watch_columns: db.execute(f"ALTER TABLE watches ADD COLUMN {name} {definition}")
+            result_columns={row[1] for row in db.execute("PRAGMA table_info(results)")}
+            for name,definition in (("matched_keywords","TEXT NOT NULL DEFAULT ''"),("collected_at","TEXT"),("protected_url","TEXT")):
+                if name not in result_columns: db.execute(f"ALTER TABLE results ADD COLUMN {name} {definition}")
+            db.executescript("""
+              CREATE TABLE IF NOT EXISTS discovered_sources(source_id TEXT PRIMARY KEY, watch_id TEXT NOT NULL REFERENCES watches(watch_id),
+                onion_reference TEXT NOT NULL, protected_url TEXT NOT NULL, enabled INTEGER NOT NULL CHECK(enabled IN(0,1)),
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL, UNIQUE(watch_id,onion_reference));
+              PRAGMA user_version=2;
             """)
 
     def list_watches(self) -> list[dict[str, Any]]:
@@ -87,12 +99,20 @@ class SQLiteDarkWebWatchStore:
         return [self._watch(r) for r in rows]
 
     def create(self, keyword: str) -> dict[str, Any]:
-        normalized=normalize_keyword(keyword); now=utc_now(); watch_id="dww-"+uuid.uuid4().hex
+        return self.create_advanced([keyword], "any", None, 3600)
+
+    def create_advanced(self, keywords: list[str], match_mode: str, provider_id: str | None, scan_interval_seconds: int) -> dict[str, Any]:
+        from backend.app.pipeline.ingestion.external.application.dark_web_discovery import normalize_keywords
+        normalized_keywords=normalize_keywords(keywords)
+        if match_mode not in {"any","all"} or provider_id is not None and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}",provider_id): raise WatchValidationError("watch_options")
+        if not 300 <= scan_interval_seconds <= 604800: raise WatchValidationError("scan_interval")
+        normalized=normalized_keywords[0]; now=utc_now(); watch_id="dww-"+uuid.uuid4().hex
         try:
             with self._connect() as db:
                 if db.execute("SELECT COUNT(*) FROM watches").fetchone()[0] >= self.max_watches: raise WatchConflict("watch_limit")
-                db.execute("INSERT INTO watches(watch_id,keyword,keyword_folded,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?)",
-                           (watch_id,normalized,normalized.casefold(),1,now,now))
+                folded="\0".join(item.casefold() for item in normalized_keywords)
+                db.execute("INSERT INTO watches(watch_id,keyword,keyword_folded,enabled,created_at,updated_at,keywords_json,match_mode,provider_id,scan_interval_seconds) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                           (watch_id,normalized,folded,1,now,now,json.dumps(normalized_keywords,ensure_ascii=False),match_mode,provider_id,scan_interval_seconds))
         except sqlite3.IntegrityError as exc: raise WatchConflict("duplicate_watch") from exc
         return self.get(watch_id)
 
@@ -114,6 +134,36 @@ class SQLiteDarkWebWatchStore:
             rows=db.execute("SELECT * FROM results WHERE watch_id=? ORDER BY first_seen_at DESC,result_id DESC LIMIT ? OFFSET ?",(watch_id,limit,offset)).fetchall()
         return {"items":[dict(r) for r in rows],"total":total,"limit":limit,"offset":offset}
 
+    def promote(self, watch_id: str, result_id: str) -> dict[str, Any]:
+        now=utc_now()
+        with self._connect() as db:
+            row=db.execute("SELECT onion_reference,protected_url FROM results WHERE watch_id=? AND result_id=?",(watch_id,result_id)).fetchone()
+            if row is None or not row["protected_url"]: raise WatchNotFound()
+            existing=db.execute("SELECT source_id FROM discovered_sources WHERE watch_id=? AND onion_reference=?",(watch_id,row["onion_reference"])).fetchone()
+            source_id=existing[0] if existing else "dws-"+hashlib.sha256((watch_id+row["onion_reference"]).encode()).hexdigest()[:24]
+            db.execute("INSERT INTO discovered_sources VALUES(?,?,?,?,1,?,?) ON CONFLICT(watch_id,onion_reference) DO UPDATE SET enabled=1,updated_at=excluded.updated_at",
+                       (source_id,watch_id,row["onion_reference"],row["protected_url"],now,now))
+        return self.discovered_source(source_id)
+
+    def discovered_source(self, source_id: str) -> dict[str, Any]:
+        with self._connect() as db: row=db.execute("SELECT source_id,watch_id,onion_reference,enabled,created_at,updated_at FROM discovered_sources WHERE source_id=?",(source_id,)).fetchone()
+        if row is None: raise WatchNotFound()
+        return dict(row)|{"enabled":bool(row["enabled"])}
+
+    def list_discovered(self, watch_id: str) -> list[dict[str, Any]]:
+        self.get(watch_id)
+        with self._connect() as db: rows=db.execute("SELECT source_id,watch_id,onion_reference,enabled,created_at,updated_at FROM discovered_sources WHERE watch_id=? ORDER BY created_at DESC LIMIT 100",(watch_id,)).fetchall()
+        return [dict(row)|{"enabled":bool(row["enabled"])} for row in rows]
+
+    def tracked_urls(self, watch_id: str) -> list[str]:
+        with self._connect() as db: rows=db.execute("SELECT protected_url FROM discovered_sources WHERE watch_id=? AND enabled=1 LIMIT 100",(watch_id,)).fetchall()
+        return [row[0] for row in rows]
+
+    def set_discovered_enabled(self, source_id: str, enabled: bool) -> dict[str, Any]:
+        with self._connect() as db: changed=db.execute("UPDATE discovered_sources SET enabled=?,updated_at=? WHERE source_id=?",(int(enabled),utc_now(),source_id)).rowcount
+        if not changed: raise WatchNotFound()
+        return self.discovered_source(source_id)
+
     def commit_scan(self, watch_id: str, candidates: list[dict[str, Any]], *, partial: bool) -> dict[str, int]:
         now=utc_now(); new=0
         with self._connect() as db:
@@ -123,7 +173,7 @@ class SQLiteDarkWebWatchStore:
                 old=db.execute("SELECT result_id FROM results WHERE watch_id=? AND canonical_hash=?",(watch_id,item["canonical_hash"])).fetchone()
                 if old: db.execute("UPDATE results SET last_seen_at=? WHERE result_id=?",(now,old[0]))
                 else:
-                    new+=1; db.execute("INSERT INTO results VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(item["result_id"],watch_id,item["canonical_hash"],item["content_sha256"],item["onion_reference"],item["title"],item["excerpt"],item["provider"],now,now,item.get("classification_label"),item.get("classification_confidence"),item["privacy_status"],",".join(item["review_reasons"])))
+                    new+=1; db.execute("INSERT INTO results(result_id,watch_id,canonical_hash,content_sha256,onion_reference,title,excerpt,provider,first_seen_at,last_seen_at,classification_label,classification_confidence,privacy_status,review_reasons,matched_keywords,collected_at,protected_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(item["result_id"],watch_id,item["canonical_hash"],item["content_sha256"],item["onion_reference"],item["title"],item["excerpt"],item["provider"],now,now,item.get("classification_label"),item.get("classification_confidence"),item["privacy_status"],",".join(item["review_reasons"]),json.dumps(item.get("matched_keywords",[]),ensure_ascii=False),item.get("collected_at",now),item.get("protected_url")))
             db.execute("DELETE FROM results WHERE watch_id=? AND result_id NOT IN (SELECT result_id FROM results WHERE watch_id=? ORDER BY last_seen_at DESC LIMIT ?)",(watch_id,watch_id,self.max_results))
             total=db.execute("SELECT COUNT(*) FROM results WHERE watch_id=?",(watch_id,)).fetchone()[0]
             checkpoint=hashlib.sha256("\n".join(sorted(x["canonical_hash"] for x in candidates)).encode()).hexdigest()
@@ -131,7 +181,10 @@ class SQLiteDarkWebWatchStore:
         return {"result_count":total,"new_result_count":new,"partial":int(partial)}
 
     @staticmethod
-    def _watch(r): return {k:r[k] for k in r.keys() if k != "keyword_folded"} | {"enabled":bool(r["enabled"])}
+    def _watch(r):
+        value={k:r[k] for k in r.keys() if k not in {"keyword_folded","keywords_json"}}|{"enabled":bool(r["enabled"])}
+        value["keywords"]=json.loads(r["keywords_json"]) if r["keywords_json"] else [r["keyword"]]
+        return value
 
 
 class DarkWebWatchScanner:
@@ -165,7 +218,7 @@ class DarkWebWatchScanner:
 
 
 class DarkWebWatchService:
-    def __init__(self, store: SQLiteDarkWebWatchStore, scanner: DarkWebWatchScanner): self.store,self.scanner,self._active,self._lock=store,scanner,set(),threading.Lock()
+    def __init__(self, store: SQLiteDarkWebWatchStore, scanner: DarkWebWatchScanner, discovery_scanner=None): self.store,self.scanner,self.discovery_scanner,self._active,self._lock=store,scanner,discovery_scanner,set(),threading.Lock()
     def scan(self, watch_id: str) -> dict[str, Any]:
         with self._lock:
             if watch_id in self._active: raise WatchConflict("scan_active")
@@ -173,10 +226,16 @@ class DarkWebWatchService:
         try:
             watch=self.store.get(watch_id)
             if not watch["enabled"]: raise WatchConflict("watch_disabled")
-            matches,partial=self.scanner.scan(watch["keyword"])
+            if watch.get("provider_id") and self.discovery_scanner is not None:
+                matches,partial,scan_counts=self.discovery_scanner.scan(watch,self.store.tracked_urls(watch_id))
+            else:
+                matches,partial=self.scanner.scan(watch["keyword"]); scan_counts={}
             counts=self.store.commit_scan(watch_id,matches,partial=partial)
+            if scan_counts:
+                scan_counts["new"]=counts["new_result_count"]
+                scan_counts["unchanged"]=max(0,scan_counts.get("matched",0)-counts["new_result_count"])
             return {"status":"partial" if partial else "completed","accepted_records":counts["result_count"],
-                    "review_records":0,"rejected_records":0,"skipped_records":counts["result_count"]-counts["new_result_count"],"error_count":int(partial)}
+                    "review_records":0,"rejected_records":0,"skipped_records":counts["result_count"]-counts["new_result_count"],"error_count":int(partial),**scan_counts}
         finally:
             with self._lock: self._active.discard(watch_id)
 

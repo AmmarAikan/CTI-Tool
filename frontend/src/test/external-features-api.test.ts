@@ -51,12 +51,23 @@ describe('external feature contracts', () => {
 
   it('accepts only the strict hashed Dark Web result projection for the requested watch', async () => {
     const watchId = 'dww-1234567890abcdef';
-    const safe = { result_id: `dwr-${'a'.repeat(32)}`, watch_id: watchId, onion_reference: 'onion-ref:bbbbbbbbbbbb', title: 'Safe title', excerpt: 'Safe excerpt', provider: 'Approved provider', first_seen_at: '2026-09-13T00:00:00Z', last_seen_at: '2026-09-13T00:00:00Z', status: 'new', classification_label: null, classification_confidence: null, privacy_status: 'reviewed', content_sha256: 'c'.repeat(64), review_reasons: [] };
+    const safe = { result_id: `dwr-${'a'.repeat(32)}`, watch_id: watchId, onion_reference: 'onion-ref:bbbbbbbbbbbb', title: 'Safe title', excerpt: 'Safe excerpt', provider: 'Approved provider', first_seen_at: '2026-09-13T00:00:00Z', last_seen_at: '2026-09-13T00:00:00Z', collected_at: '2026-09-13T00:00:00Z', matched_keywords: ['Acme'], status: 'new', classification_label: null, classification_confidence: null, privacy_status: 'reviewed', content_sha256: 'c'.repeat(64), review_reasons: [] };
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => response({ schema_version: '1.0', items: [safe], total: 1, limit: 25, offset: 0 }));
     expect((await api.darkWebResults(watchId)).items[0].onion_reference).toBe('onion-ref:bbbbbbbbbbbb');
     for (const changed of [{ ...safe, onion_reference: 'hidden-reference' }, { ...safe, title: 'secret=exposed' }, { ...safe, watch_id: 'dww-different-watch' }]) {
       vi.restoreAllMocks(); vi.spyOn(globalThis, 'fetch').mockImplementation(() => response({ schema_version: '1.0', items: [changed], total: 1, limit: 25, offset: 0 }));
       await expect(api.darkWebResults(watchId)).rejects.toMatchObject({ status: 502, code: 'invalid_response' });
     }
+  });
+
+  it('accepts bounded discovery counters and strict redacted discovered sources', async () => {
+    const job = { schema_version: '1.0', job_id: 'job-1234567890', command_id: 'cmd-1234567890', state: 'completed', created_at: '2026-09-13T00:00:00Z', updated_at: '2026-09-13T00:00:01Z', progress: {}, result: { discovered: 3, rejected: 1, unreachable: 1, verified: 2, matched: 1, new: 1, unchanged: 0, privacy_blocked: 0, errors: 0 }, error: null };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => response(job));
+    expect((await api.externalJob(job.job_id)).counts.discovered).toBe(3);
+    const source = { source_id: `dws-${'a'.repeat(24)}`, watch_id: 'dww-1234567890abcdef', onion_reference: `onion-ref:${'b'.repeat(64)}`, enabled: true, created_at: '2026-09-13T00:00:00Z', updated_at: '2026-09-13T00:00:01Z' };
+    vi.restoreAllMocks(); vi.spyOn(globalThis, 'fetch').mockImplementation(() => response([source]));
+    expect((await api.darkWebDiscoveredSources(source.watch_id))[0].onion_reference).toBe(source.onion_reference);
+    vi.restoreAllMocks(); vi.spyOn(globalThis, 'fetch').mockImplementation(() => response([{ ...source, protected_url: `http://${'a'.repeat(56)}.onion/` }]));
+    await expect(api.darkWebDiscoveredSources(source.watch_id)).rejects.toMatchObject({ status: 502, code: 'invalid_response' });
   });
 });

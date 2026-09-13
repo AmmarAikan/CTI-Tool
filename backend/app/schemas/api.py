@@ -118,6 +118,15 @@ class DarkWebWatchCreateRequest(BaseModel):
 class DarkWebWatchPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+class DarkWebDiscoveryWatchCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keywords: list[str] = Field(min_length=1,max_length=10)
+    match_mode: Literal["any","all"] = "any"
+    provider_id: str = Field(min_length=1,max_length=64,pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    scan_interval_seconds: int = Field(default=3600,ge=300,le=604800)
+class DarkWebDiscoveredSourcePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
 
 
 class InternalEventResponse(BaseModel):

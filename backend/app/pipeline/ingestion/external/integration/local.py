@@ -17,6 +17,7 @@ from backend.app.pipeline.ingestion.external.application.manual_source_service i
 )
 from backend.app.pipeline.ingestion.external.application.manual_preview_service import ManualPreviewService, SQLiteManualPreviewStore
 from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import SQLiteDarkWebWatchStore, DarkWebWatchScanner, DarkWebWatchService
+from backend.app.pipeline.ingestion.external.application.dark_web_discovery import AhmiaHTMLDiscovery, CandidateVerifier, DynamicDiscoveryScanner, ProviderHttpClient, load_discovery_providers
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem
@@ -566,9 +567,24 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
         manual_delegate, preview_store,
         lambda bundle, actor: manual.commit_preview(bundle, requested_by=actor),
     )
+    discovery_scanner=None
+    discovery_path=Path(os.environ.get("EXTERNAL_DARK_WEB_DISCOVERY_CONFIG_PATH", "")) if os.environ.get("EXTERNAL_DARK_WEB_DISCOVERY_CONFIG_PATH") else None
+    if discovery_path is not None and resolved_dark_client is not None:
+        providers=load_discovery_providers(discovery_path); provider_http=ProviderHttpClient(resolved_dark_client.proxy.url)
+        discoveries={provider.provider_id:AhmiaHTMLDiscovery(provider,provider_http.fetch) for provider in providers}
+        privacy=PrivacyFilter(PROJECT_ROOT / "config" / "privacy_rules.json")
+        candidate_client=TorHttpClient(
+            resolved_dark_client.proxy, connect_timeout=resolved_dark_client.connect_timeout,
+            read_timeout=min(resolved_dark_client.read_timeout,15), max_response_bytes=1_048_576,
+            retries=resolved_dark_client.retries, backoff_seconds=resolved_dark_client.backoff_seconds,
+            max_redirects=resolved_dark_client.max_redirects,
+            allowed_content_types=("text/html","text/plain"),
+        )
+        verifier=CandidateVerifier(candidate_client,lambda text:(lambda result:(result.content,result.status,["privacy_review"] if result.status=="review_required" else []))(privacy.apply(text)))
+        discovery_scanner=DynamicDiscoveryScanner(discoveries,verifier)
     watch_service = (DarkWebWatchService(SQLiteDarkWebWatchStore(state_directory / "dark_web_watches.sqlite3"),
-                                         DarkWebWatchScanner(dark_sources, resolved_dark_client))
-                     if resolved_dark_client is not None and dark_sources else None)
+                                         DarkWebWatchScanner(dark_sources, resolved_dark_client),discovery_scanner)
+                     if resolved_dark_client is not None and (dark_sources or discovery_scanner is not None) else None)
     return create_app(AdapterServices(StaticTokenAuthenticator(token, roles=roles), RoleAuthorizer(), collection,
         manual, DevelopmentSourceService(registry), DevelopmentJobService(runner, export_reader), runner,
         InMemoryIdempotencyStore(), LocalReviewService(review_directory, export_reader), previews, watch_service),

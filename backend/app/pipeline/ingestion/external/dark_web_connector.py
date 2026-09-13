@@ -95,11 +95,16 @@ class TorHttpClient:
                  connect_timeout: float = 5, read_timeout: float = 15,
                  max_response_bytes: int = 2_000_000, retries: int = 0,
                  backoff_seconds: float = 1, max_redirects: int = 3,
+                 allowed_content_types: tuple[str, ...] = ALLOWED_CONTENT_TYPES,
                  sleeper: Callable[[float], None] = time.sleep) -> None:
         if not proxy.host.strip() or not 1 <= proxy.port <= 65535:
             raise DarkWebConfigurationError("an explicit valid Tor proxy host and port are required")
         self.proxy, self.session, self.connect_timeout, self.read_timeout = proxy, session or requests.Session(), connect_timeout, read_timeout
+        self.session.trust_env = False
         self.max_response_bytes, self.retries, self.backoff_seconds, self.max_redirects, self.sleeper = max_response_bytes, retries, backoff_seconds, max_redirects, sleeper
+        if not allowed_content_types or any(not isinstance(value, str) or "/" not in value for value in allowed_content_types):
+            raise DarkWebConfigurationError("valid response content types are required")
+        self.allowed_content_types = frozenset(value.lower() for value in allowed_content_types)
 
     def tor_available(self) -> bool:
         try:
@@ -127,6 +132,8 @@ class TorHttpClient:
     def _get_following_allowed_redirects(self, source: DarkWebSource, url: str, headers: dict[str, str]) -> TorResponse:
         current = url
         for _ in range(self.max_redirects + 1):
+            cookie_jar=getattr(self.session,"cookies",None)
+            if cookie_jar is not None: cookie_jar.clear()
             response = self.session.get(current, headers=headers, proxies={"http": self.proxy.url, "https": self.proxy.url},
                                         timeout=(self.connect_timeout, self.read_timeout), stream=True, allow_redirects=False)
             if response.status_code in {301, 302, 303, 307, 308}:
@@ -140,7 +147,7 @@ class TorHttpClient:
                 response.close()
                 return TorResponse(304, b"", "")
             content_type = response.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-            if content_type not in ALLOWED_CONTENT_TYPES:
+            if content_type not in self.allowed_content_types:
                 response.close()
                 raise DarkWebRequestError("response content type is not permitted")
             chunks, size = [], 0

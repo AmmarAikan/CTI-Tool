@@ -11,7 +11,7 @@ This directory contains the project-owned deployment for the graduation lab. Sou
 - VPS Central Platform: FastAPI, PostgreSQL, DNRTI BERT primary model, sklearn fallback, correlation, risk, production frontend, and final CTI API.
 - VPS External Sources: canonical collectors, privacy/classification, versioned export, and a scheduled loopback publisher.
 - Wazuh is not deployed in the current 12 GB VPS design. Its connector remains optional code only.
-- Live Onion collection is not enabled: the current VPS has no Tor proxy or approved operational Onion list, so no placeholder dark-web configuration is mounted.
+- Dark Web discovery remains disabled until operators install both protected configuration files and explicitly deploy the reviewed External Sources wiring. Search-provider evidence is discovery-only; candidate content must be fetched and verified through Tor.
 
 MISP, Gateway, and External control are never exposed publicly or bound to a public interface. Tailscale Serve terminates tailnet-only HTTPS and proxies to their VPS loopback listeners. SSH local forwarding remains an emergency fallback.
 
@@ -211,6 +211,24 @@ Through the private production frontend or a root-only VPS diagnostic session, u
 An identical External Feed returns HTTP 304 and creates a completed zero-record run. A changed snapshot skips unchanged PostgreSQL records before BERT and processes only new or changed content. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
 
 The External timer runs every two hours. Manual source addition and per-source collection are issued through the central FastAPI API, not by publishing the VPS adapter or enabling its Swagger UI.
+
+## Dynamic Dark Web discovery configuration
+
+External Sources receives only two explicit read-only configuration mounts:
+`/etc/cti-platform/dark_web_sources.json` as `/run/cti/dark-web/sources.json`, and
+`/etc/cti-platform/dark_web_discovery_providers.json` as
+`/run/cti/dark-web/discovery-providers.json`. The corresponding variable names
+are `EXTERNAL_DARK_WEB_CONFIG_PATH`, `EXTERNAL_DARK_WEB_DISCOVERY_CONFIG_PATH`,
+`TOR_PROXY_HOST`, and `TOR_PROXY_PORT`. The Tor endpoint is the service alias
+`tor` on port `9050`; Tor publishes no host port.
+
+Install and validate the root-controlled provider configuration first, run the
+read-only readiness helper, render Compose, then rebuild/recreate only External
+Sources with `--no-deps` when explicitly authorized; preserve the healthy pinned Tor service. Rebuild Central Backend and the
+frontend afterward for their new facade and interface contracts. Never mount
+`/etc/cti-platform` as a directory. The legacy
+`dark_web_sources.local.json` file is not used by this wiring and should be
+removed or hardened separately after confirming it has no consumers.
 
 ## Storage retention
 

@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "providers": [
+    {
+      "provider_id": "operator-approved-ahmia",
+      "enabled": false,
+      "provider_type": "ahmia_html",
+      "search_endpoint": "https://operator-approved.example/search?q={query}&page={page}",
+      "through_tor": true,
+      "allowed_hostname": "operator-approved.example",
+      "max_query_chars": 300,
+      "max_result_pages": 2,
+      "max_candidates": 20,
+      "timeout_seconds": 15,
+      "rate_limit_seconds": 2
+    }
+  ]
+}

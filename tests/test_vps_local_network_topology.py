@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CENTRAL_COMPOSE = ROOT / "compose.yaml"
 VPS_COMPOSE = ROOT / "infra" / "vps" / "compose.yaml"
+DISCOVERY_EXAMPLE = ROOT / "config" / "dark_web_discovery_providers.example.json"
 MISP_OVERRIDE = ROOT / "infra" / "vps" / "misp" / "compose.override.yaml"
 BOOTSTRAP = ROOT / "infra" / "vps" / "scripts" / "bootstrap_host.sh"
 PROVISIONER = ROOT / "infra" / "vps" / "scripts" / "provision_backend_networks.sh"
@@ -123,6 +124,36 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
             published_ports(self.vps, "external-sources"),
             {("127.0.0.1", "8090", 8000, "tcp")},
         )
+        self.assertEqual(published_ports(self.vps, "tor"), set())
+
+    def test_dark_web_files_and_tor_are_exactly_wired(self) -> None:
+        external = self.vps["services"]["external-sources"]
+        environment = external["environment"]
+        self.assertEqual(environment["EXTERNAL_DARK_WEB_CONFIG_PATH"], "/run/cti/dark-web/sources.json")
+        self.assertEqual(environment["EXTERNAL_DARK_WEB_DISCOVERY_CONFIG_PATH"], "/run/cti/dark-web/discovery-providers.json")
+        self.assertEqual(environment["TOR_PROXY_HOST"], "tor")
+        self.assertEqual(str(environment["TOR_PROXY_PORT"]), "9050")
+        bind_mounts = [item for item in external["volumes"] if item["type"] == "bind"]
+        self.assertEqual(bind_mounts, [
+            {"type":"bind","source":"/etc/cti-platform/dark_web_sources.json","target":"/run/cti/dark-web/sources.json","read_only":True},
+            {"type":"bind","source":"/etc/cti-platform/dark_web_discovery_providers.json","target":"/run/cti/dark-web/discovery-providers.json","read_only":True},
+        ])
+        self.assertEqual(set(service_networks(self.vps,"external-sources")), {"external_egress","cti_backend_external"})
+        self.assertEqual(set(service_networks(self.vps,"tor")), {"external_egress"})
+        self.assertEqual(service_networks(self.vps,"tor")["external_egress"]["aliases"], ["tor"])
+        self.assertFalse(self.vps["networks"]["external_egress"].get("internal",False))
+        self.assertEqual(external["depends_on"]["tor"]["condition"], "service_healthy")
+        self.assertEqual(self.vps["services"]["tor"]["image"], "dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6")
+
+    def test_discovery_example_is_disabled_and_contains_no_onion_or_secret(self) -> None:
+        value = json.loads(DISCOVERY_EXAMPLE.read_text(encoding="utf-8"))
+        self.assertEqual(value["schema_version"], "1.0")
+        self.assertTrue(value["providers"])
+        self.assertTrue(all(provider["enabled"] is False for provider in value["providers"]))
+        serialized = json.dumps(value).lower()
+        self.assertNotIn(".onion", serialized)
+        self.assertFalse(any(word in serialized for word in ("password", "token", "credential", "api_key")))
+        self.assertFalse((ROOT / "config" / "dark_web_discovery_providers.json").exists())
 
     def test_rendered_forbidden_services_are_not_members(self) -> None:
         forbidden = {"db", "adminer", "dionaea", "tor", "redis", "misp", "misp-core", "misp-modules"}

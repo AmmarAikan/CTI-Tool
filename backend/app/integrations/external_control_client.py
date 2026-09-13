@@ -198,6 +198,32 @@ class ExternalControlClient:
         self._validate_source_id(watch_id); return self._job_response(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/scan",idempotency_key=idempotency_key))
     def dark_web_watch_results(self, watch_id: str, limit: int, offset: int) -> dict[str, Any]:
         self._validate_source_id(watch_id); return self._dark_web_payload(self._request("GET",f"/dark-web/watches/{quote(watch_id,safe='')}/results?limit={limit}&offset={offset}"),"results")
+    def dark_web_discovery_providers(self) -> list[dict[str, Any]]:
+        value=self._request("GET","/dark-web/discovery/providers")
+        if not isinstance(value,list) or len(value)>10: raise ExternalControlTransportError("Dark web provider contract is invalid")
+        for item in value:
+            if not isinstance(item,dict) or set(item)!={"provider_id","enabled","ready","through_tor"} or not isinstance(item.get("provider_id"),str) or any(type(item.get(key)) is not bool for key in ("enabled","ready","through_tor")): raise ExternalControlTransportError("Dark web provider contract is invalid")
+        return value
+    def create_dark_web_discovery_watch(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._dark_web_payload(self._request("POST","/dark-web/discovery/watches",payload=payload),"watch")
+    def promote_dark_web_result(self, watch_id: str, result_id: str, idempotency_key: str) -> dict[str, Any]:
+        self._validate_source_id(watch_id); self._validate_source_id(result_id)
+        return self._dark_web_payload(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/results/{quote(result_id,safe='')}/promote",idempotency_key=idempotency_key),"source")
+    def dark_web_discovered_sources(self, watch_id: str) -> list[dict[str, Any]]:
+        self._validate_source_id(watch_id); value=self._request("GET",f"/dark-web/watches/{quote(watch_id,safe='')}/discovered-sources")
+        if not isinstance(value,list) or len(value)>100: raise ExternalControlTransportError("Dark web source contract is invalid")
+        return [self._discovered_source(item) for item in value]
+    def patch_dark_web_discovered_source(self, source_id: str, enabled: bool) -> dict[str, Any]:
+        self._validate_source_id(source_id); return self._discovered_source(self._request("PATCH",f"/dark-web/discovered-sources/{quote(source_id,safe='')}",payload={"enabled":enabled}))
+
+    @classmethod
+    def _discovered_source(cls, value: Any) -> dict[str, Any]:
+        keys={"source_id","watch_id","onion_reference","enabled","created_at","updated_at"}
+        if (not isinstance(value,dict) or set(value)!=keys or not re.fullmatch(r"dws-[0-9a-f]{24}",str(value.get("source_id")))
+                or not cls._safe_id(value.get("watch_id"),minimum=10) or not re.fullmatch(r"onion-ref:[0-9a-f]{64}",str(value.get("onion_reference")))
+                or type(value.get("enabled")) is not bool or not cls._timestamp(value.get("created_at")) or not cls._timestamp(value.get("updated_at"))):
+            raise ExternalControlTransportError("Dark web source contract is invalid")
+        return value
 
     @classmethod
     def _dark_web_payload(cls, value: Any, kind: str) -> dict[str, Any]:
@@ -338,7 +364,8 @@ class ExternalControlClient:
         if not isinstance(value, dict): raise ExternalControlTransportError("External job result contract is invalid")
         scalar_keys = {"status", "scope", "run_id", "source_id"}
         integer_keys = cls.COUNT_KEYS | {"source_count", "registered_source_count", "manual_source_count",
-                                        "records_created", "records_updated"}
+                                        "records_created", "records_updated", "discovered", "rejected", "unreachable",
+                                        "verified", "matched", "new", "unchanged", "privacy_blocked", "errors"}
         boolean_keys = {"force"}
         nested_keys = {"sources", "manual_sources"}
         private_keys = {"message", "canonical_url", "job_id"}

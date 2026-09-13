@@ -12,7 +12,7 @@ export const JOB_POLL_MAX_MS = 120_000;
 export const JOB_POLL_TRANSIENT_RETRIES = 4;
 export const jobPollingRetryDelay = (attempt: number) => Math.min(2_000 * (2 ** attempt), 10_000);
 export const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
-const COUNT_LABELS = { accepted_records: 'accepted', review_records: 'forReview', rejected_records: 'rejected', skipped_records: 'skipped', error_count: 'errors' } as const;
+const COUNT_LABELS = { accepted_records: 'accepted', review_records: 'forReview', rejected_records: 'rejected', skipped_records: 'skipped', error_count: 'errors', discovered:'discoveredCount', rejected:'rejected', unreachable:'unreachableCount', verified:'verified', matched:'matchedCount', new:'newResult', unchanged:'knownResult', privacy_blocked:'privacyBlockedCount', errors:'errors' } as const;
 
 export function safePollingError(error: unknown, t: ReturnType<typeof useI18n>['t']) {
   if (error instanceof ApiError && error.status === 401) return t('sessionExpired');
