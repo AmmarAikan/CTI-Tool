@@ -24,6 +24,10 @@ COPY config/sources.json \
      config/dark_web_sources.example.json \
      ./config/
 
+RUN chown -R --no-dereference 0:0 /app/backend /app/contracts /app/config \
+    && find /app/backend /app/contracts /app/config -xdev -type d -exec chmod 0755 {} + \
+    && find /app/backend /app/contracts /app/config -xdev -type f -exec chmod 0644 {} +
+
 RUN mkdir -p \
       /app/data/external/raw \
       /app/data/external/state \
@@ -34,6 +38,18 @@ RUN mkdir -p \
     && chown -R 10001:10001 /app/data/external /app/logs
 
 USER 10001:10001
+
+RUN test "$(id -u)" = 10001 \
+    && test "$(id -g)" = 10001 \
+    && test -r /app/backend/app \
+    && test -x /app/backend/app \
+    && test -r /app/backend/app/pipeline/ingestion/external \
+    && test -x /app/backend/app/pipeline/ingestion/external \
+    && test ! -w /app/backend/app \
+    && test ! -w /app/backend/app/pipeline/ingestion/external \
+    && test -r /app/backend/app/pipeline/ingestion/external/application/dark_web_discovery.py \
+    && test ! -w /app/backend/app/pipeline/ingestion/external/application/dark_web_discovery.py \
+    && python -c 'from backend.app.pipeline.ingestion.external.application.dark_web_discovery import load_discovery_providers; from backend.app.pipeline.ingestion.external.dark_web_connector import load_dark_web_config'
 
 EXPOSE 8000
 
