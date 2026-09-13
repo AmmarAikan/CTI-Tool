@@ -232,6 +232,7 @@ class ExternalControlClientTests(unittest.TestCase):
                     "decided_at": "2026-09-06T00:01:00Z"}
         client = self.client([FakeResponse(preview), FakeResponse(queued), FakeResponse(rejected)])
         self.assertEqual(client.create_manual_preview("https://example.test/report")["state"], "pending")
+        self.assertEqual(client.session.calls[0][2]["timeout"], 165)
         client.approve_manual_preview(preview["preview_id"], preview["content_sha256"], idempotency_key="approve-once")
         client.reject_manual_preview(preview["preview_id"], "duplicate", idempotency_key="reject-once")
         self.assertEqual(client.session.calls[1][2]["headers"]["Idempotency-Key"], "approve-once")

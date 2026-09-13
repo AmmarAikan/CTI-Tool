@@ -10,6 +10,9 @@ import { JobMonitor, TERMINAL_STATES } from './Sources';
 type InputKind = 'external' | 'manual' | 'internal' | 'dark';
 type PullResult = { run_id: string; status: string };
 type OperationRequest = { generation: number; kind: InputKind; selection: string; url: string; signal: AbortSignal };
+type PreviewDecisionRequest = { generation: number; preview: ManualPreview; signal: AbortSignal };
+
+export const PROCESSING_CENTER_JOB_POLL_MAX_MS = 15 * 60_000;
 
 function validPublicUrl(value: string) {
   try {
@@ -29,6 +32,7 @@ export function ProcessingCenter() {
   const [jobInputKey, setJobInputKey] = useState('');
   const [pullResult, setPullResult] = useState<PullResult>();
   const [preview, setPreview] = useState<ManualPreview>();
+  const [decisionError, setDecisionError] = useState<unknown>();
   const operationGeneration = useRef(0);
   const submissionController = useRef<AbortController | undefined>(undefined);
   const sources = useQuery({ queryKey: ['center-sources'], queryFn: api.externalSources, retry: false });
@@ -54,18 +58,29 @@ export function ProcessingCenter() {
       else setPullResult(value as PullResult);
     },
   });
-  const approve = useMutation({ mutationFn: api.approveManualPreview, onSuccess: (value) => { setPreview(undefined); setJob(value); } });
-  const reject = useMutation({ mutationFn: () => preview ? api.rejectManualPreview(preview.preview_id, 'user_cancelled') : Promise.reject(), onSuccess: () => setPreview(undefined) });
+  const approve = useMutation({
+    mutationFn: (request: PreviewDecisionRequest) => api.approveManualPreviewAbortable(request.preview, request.signal),
+    onSuccess: (value, request) => {
+      if (request.generation !== operationGeneration.current) return;
+      setPreview(undefined); setDecisionError(undefined); setJob(value); setJobInputKey(`manual:${url.trim()}`);
+    },
+    onError: (error, request) => { if (request.generation === operationGeneration.current) setDecisionError(error); },
+  });
+  const reject = useMutation({
+    mutationFn: (request: PreviewDecisionRequest) => api.rejectManualPreviewAbortable(request.preview.preview_id, 'user_cancelled', request.signal),
+    onSuccess: (_value, request) => { if (request.generation === operationGeneration.current) { setPreview(undefined); setDecisionError(undefined); } },
+    onError: (error, request) => { if (request.generation === operationGeneration.current) setDecisionError(error); },
+  });
   const summary = snapshot[0].data;
   const events = snapshot[1].data;
   const indicators = snapshot[2].data;
   const correlations = snapshot[3].data;
   const outliers = snapshot[4].data;
   const state = job?.state || pullResult?.status;
-  const confirmed = Boolean(state && TERMINAL_STATES.includes(state as ExternalJob['state']));
+  const completed = state === 'completed';
   const stages: TranslationKey[] = ['selectInput', 'collectStage', 'privacyStage', 'classifyStage', 'extractStage', 'saveStage', 'correlateStage', 'snapshot'];
   const statusKey = state && ['queued', 'processing', 'completed', 'partial', 'failed', 'cancelled', 'cancellation_requested'].includes(state) ? state as TranslationKey : undefined;
-  const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 401 ? t('sessionExpired') : error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 404 ? t('jobNotFound') : error instanceof ApiError && error.status === 408 ? t('timeout') : error instanceof ApiError && error.status === 503 ? t('externalControlUnavailable') : error instanceof ApiError && error.code === 'invalid_response' ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
+  const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 401 ? t('sessionExpired') : error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 404 ? t('jobNotFound') : error instanceof ApiError && error.status === 408 ? t('timeout') : error instanceof ApiError && error.status === 409 ? t('previewConflict') : error instanceof ApiError && error.status === 410 ? t('previewExpired') : error instanceof ApiError && error.status === 503 ? t('externalControlUnavailable') : error instanceof ApiError && error.code === 'invalid_response' ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
 
   useEffect(() => () => {
     operationGeneration.current += 1;
@@ -83,8 +98,21 @@ export function ProcessingCenter() {
     submissionController.current = controller;
     const generation = operationGeneration.current + 1;
     operationGeneration.current = generation;
-    setValidation(''); setJob(undefined); setJobInputKey(''); setPullResult(undefined); setPreview(undefined); run.reset();
+    setValidation(''); setDecisionError(undefined); setJob(undefined); setJobInputKey(''); setPullResult(undefined); setPreview(undefined); run.reset(); approve.reset(); reject.reset();
     run.mutate({ generation, kind, selection, url: url.trim(), signal: controller.signal });
+  }
+  function decidePreview(action: 'approve' | 'reject') {
+    if (!preview || approve.isPending || reject.isPending || !can('analyst')) return;
+    const confirmation = action === 'approve' ? t('confirmApprove') : t('confirmRun');
+    if (!window.confirm(confirmation)) return;
+    submissionController.current?.abort();
+    const controller = new AbortController();
+    submissionController.current = controller;
+    const generation = operationGeneration.current + 1;
+    operationGeneration.current = generation;
+    setDecisionError(undefined); approve.reset(); reject.reset();
+    const request = { generation, preview, signal: controller.signal };
+    if (action === 'approve') approve.mutate(request); else reject.mutate(request);
   }
   const choices = kind === 'external'
     ? (sources.data || []).filter((item) => item.status === 'enabled').map((item) => [item.source_id, item.name])
@@ -106,12 +134,12 @@ export function ProcessingCenter() {
       {kind === 'dark' && watches.data && choices.length === 0 && <p role="status">{t('noConfiguredWatches')}</p>}
       {run.isError && <div className="state-panel error-panel" role="alert"><strong>{safeMutationError(run.error)}</strong><button className="button button-secondary" onClick={submit}>{t('retry')}</button></div>}
     </section>
-    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => <li className={index === 0 || confirmed ? 'confirmed' : state ? 'active' : ''} key={key}><span>{index + 1}</span>{t(key)}</li>)}</ol></section>
+    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => <li className={index === 0 || completed ? 'confirmed' : ''} key={key}><span>{index + 1}</span>{t(key)}</li>)}</ol></section>
     <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
-      {job && <><p><strong>{t('jobId')}:</strong> <code dir="ltr">{job.job_id}</code></p><JobMonitor key={job.job_id} sourceId="processing-center" job={job} onUpdate={(_id, value) => setJob((current) => current?.job_id === value.job_id ? value : current)} /></>}
+      {job && <><p><strong>{t('jobId')}:</strong> <code dir="ltr">{job.job_id}</code></p><JobMonitor key={job.job_id} sourceId="processing-center" job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => setJob((current) => current?.job_id === value.job_id ? value : current)} /></>}
       {pullResult && <p role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong> · {t('runId')}: <code dir="ltr">{pullResult.run_id}</code></p>}
-      {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => window.confirm(t('confirmApprove')) && approve.mutate(preview)}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => window.confirm(t('confirmRun')) && reject.mutate()}>{t('reject')}</button></article>}
-      {(approve.isError || reject.isError) && <div className="state-panel error-panel" role="alert">{safeMutationError(approve.error || reject.error)}</div>}
+      {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('approve')}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('reject')}>{t('reject')}</button></article>}
+      {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}</div>}
     </section>
     <section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
       <div className="metric-grid">{[[t('totalEvents'), summary?.events], [t('totalIndicators'), indicators?.total], [t('totalCorrelations'), correlations?.total], [t('totalOutliers'), outliers?.total]].map(([label, value]) => <article className="metric-card" key={String(label)}><span>{label}</span><strong>{typeof value === 'number' ? number(value) : '—'}</strong></article>)}</div>

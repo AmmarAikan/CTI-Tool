@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type ExternalJob, type JobState, type Source } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
@@ -9,6 +9,8 @@ import './Sources.css';
 
 export const JOB_POLL_INTERVAL_MS = 2_000;
 export const JOB_POLL_MAX_MS = 120_000;
+export const JOB_POLL_TRANSIENT_RETRIES = 4;
+export const jobPollingRetryDelay = (attempt: number) => Math.min(2_000 * (2 ** attempt), 10_000);
 export const TERMINAL_STATES: JobState[] = ['completed', 'partial', 'failed', 'cancelled'];
 const COUNT_LABELS = { accepted_records: 'accepted', review_records: 'forReview', rejected_records: 'rejected', skipped_records: 'skipped', error_count: 'errors' } as const;
 
@@ -23,12 +25,16 @@ function safePollingError(error: unknown, t: ReturnType<typeof useI18n>['t']) {
   return t('jobPollingFailed');
 }
 
-function JobPanel({ job, pollingError, timedOut, onRefresh }: { job?: ExternalJob; pollingError?: unknown; timedOut: boolean; onRefresh: () => void }) {
+export function isRetryableJobPollingError(error: unknown) {
+  return error instanceof TypeError || (error instanceof ApiError && [408, 502, 503, 504].includes(error.status));
+}
+
+function JobPanel({ job, pollingError, reconnecting, retryCount, timedOut, onRefresh }: { job?: ExternalJob; pollingError?: unknown; reconnecting: boolean; retryCount: number; timedOut: boolean; onRefresh: () => void }) {
   const {t,number}=useI18n();
   if (timedOut) return <div className="job-panel error-panel" role="alert"><strong>{t('jobPollingTimeout')}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button></div>;
   if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>{safePollingError(pollingError, t)}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('retry')}</button></div>;
   if (!job) return null;
-  return <div className="job-panel" role="status" aria-live="polite"><div><strong>{t('status')}</strong><StatusBadge status={job.state} /></div>{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{t('jobReportedFailure')}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
+  return <div className="job-panel" role="status" aria-live="polite"><div><strong>{t('status')}</strong><StatusBadge status={job.state} /></div>{reconnecting && <span>{t('jobStatusReconnecting',{count:number(retryCount)})}</span>}{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{t('jobReportedFailure')}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
 }
 
 function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onRun: (source: Source) => void }) {
@@ -37,18 +43,21 @@ function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onR
   return <button className="button button-secondary" disabled={disabled} aria-label={t('runSource',{name:source.name})} title={source.status !== 'enabled' ? t('sourceDisabled') : undefined} onClick={() => onRun(source)}>{busy ? t('submitting') : t('run')}</button>;
 }
 
-export function JobMonitor({ sourceId, job, onUpdate }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
+export function JobMonitor({ sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MAX_MS }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void; maxPollingMs?: number }) {
   const [timedOut, setTimedOut] = useState(false);
+  const queryClient = useQueryClient();
   const terminal = TERMINAL_STATES.includes(job.state);
-  const query = useQuery({ queryKey: ['external-job', job.job_id], queryFn: ({ signal }) => api.externalJob(job.job_id, signal), enabled: !terminal && !timedOut, retry: false, refetchInterval: JOB_POLL_INTERVAL_MS });
+  const queryKey = ['external-job', job.job_id] as const;
+  const query = useQuery({ queryKey, queryFn: ({ signal }) => api.externalJob(job.job_id, signal), enabled: !terminal && !timedOut, retry: (failureCount, error) => isRetryableJobPollingError(error) && failureCount < JOB_POLL_TRANSIENT_RETRIES, retryDelay: jobPollingRetryDelay, refetchInterval: JOB_POLL_INTERVAL_MS });
   useEffect(() => { if (query.data?.job_id === job.job_id) onUpdate(sourceId, query.data); }, [job.job_id, onUpdate, query.data, sourceId]);
   useEffect(() => {
     if (terminal || timedOut) return;
-    const timer = window.setTimeout(() => setTimedOut(true), JOB_POLL_MAX_MS);
+    const timer = window.setTimeout(() => setTimedOut(true), maxPollingMs);
     return () => window.clearTimeout(timer);
-  }, [job.job_id, terminal, timedOut]);
+  }, [job.job_id, maxPollingMs, terminal, timedOut]);
+  useEffect(() => { if (timedOut) void queryClient.cancelQueries({ queryKey, exact: true }); }, [queryClient, timedOut, job.job_id]);
   function refresh() { setTimedOut(false); void query.refetch(); }
-  return <JobPanel job={job} pollingError={query.error} timedOut={timedOut} onRefresh={refresh} />;
+  return <JobPanel job={job} pollingError={query.error} reconnecting={query.failureCount > 0 && !query.error} retryCount={query.failureCount} timedOut={timedOut} onRefresh={refresh} />;
 }
 
 function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUpdate }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void }) {

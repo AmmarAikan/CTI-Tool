@@ -58,6 +58,9 @@ class Settings:
     external_control_verify_tls: bool = _as_bool(os.getenv("EXTERNAL_CONTROL_VERIFY_TLS"), True)
     external_control_allow_http: bool = _as_bool(os.getenv("EXTERNAL_CONTROL_ALLOW_HTTP"), False)
     external_control_timeout_seconds: int = int(os.getenv("EXTERNAL_CONTROL_TIMEOUT_SECONDS", "30"))
+    external_control_preview_timeout_seconds: int = int(
+        os.getenv("EXTERNAL_CONTROL_PREVIEW_TIMEOUT_SECONDS", "165")
+    )
     external_control_max_bytes: int = int(
         os.getenv("EXTERNAL_CONTROL_MAX_BYTES", str(2 * 1024 * 1024))
     )

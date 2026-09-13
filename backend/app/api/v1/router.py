@@ -137,6 +137,7 @@ def external_control_client() -> ExternalControlClient:
             verify_tls=settings.external_control_verify_tls,
             allow_http=settings.external_control_allow_http,
             timeout_seconds=settings.external_control_timeout_seconds,
+            preview_timeout_seconds=settings.external_control_preview_timeout_seconds,
             max_response_bytes=settings.external_control_max_bytes,
         )
     except ValueError as exc:

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { api, clearToken } from '../api/client';
+import { api, clearToken, MANUAL_PREVIEW_TIMEOUT_MS } from '../api/client';
 
 const response = (body: unknown) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) } as Response);
 
@@ -34,12 +34,12 @@ describe('external feature contracts', () => {
     await expect(api.externalSources()).rejects.toMatchObject({ status: 502, code: 'invalid_response' });
   });
 
-  it('gives manual preview a 40-second timeout without changing ordinary requests', async () => {
+  it('gives manual preview its dedicated bounded timeout without changing ordinary requests', async () => {
     vi.useFakeTimers();
     const hanging = vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => new Promise((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))));
     const ordinary = api.externalHealth(); const ordinaryCheck = expect(ordinary).rejects.toMatchObject({ status: 408 }); await vi.advanceTimersByTimeAsync(15_000); await ordinaryCheck;
     let settled = false; const preview = api.createManualPreview('https://example.test/report'); const previewResult = preview.then((value) => ({ value }), (error) => ({ error })).finally(() => { settled = true; }); await vi.advanceTimersByTimeAsync(15_000);
     expect(hanging).toHaveBeenCalledTimes(2); expect(settled).toBe(false);
-    await vi.advanceTimersByTimeAsync(25_000); expect((await previewResult as { error: { status: number } }).error).toMatchObject({ status: 408 });
+    await vi.advanceTimersByTimeAsync(MANUAL_PREVIEW_TIMEOUT_MS - 15_000); expect((await previewResult as { error: { status: number } }).error).toMatchObject({ status: 408 });
   });
 });

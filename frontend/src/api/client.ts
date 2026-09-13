@@ -155,7 +155,7 @@ export function clearToken(): void {
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15_000;
-const EXTERNAL_SYNC_TIMEOUT_MS = 40_000;
+export const MANUAL_PREVIEW_TIMEOUT_MS = 180_000;
 const INTERNAL_PULL_TIMEOUT_MS = 120_000;
 
 async function request<T>(path: string, options: RequestInit = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<T> {
@@ -537,9 +537,11 @@ export const api = {
   startAllExternalSources: async () => parseExternalJob(await request<unknown>('/integrations/external-control/jobs', { method: 'POST', body: JSON.stringify({ source_ids: [], scope: 'all_enabled', force: false }) })),
   startManualUrlJob: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources', { method: 'POST', body: JSON.stringify({ url, force: false }) })),
   recheckManualSource: async (url: string) => parseExternalJob(await request<unknown>('/integrations/external-control/manual-sources/recheck', { method: 'POST', body: JSON.stringify({ url, force: true }) })),
-  createManualPreview: async (url: string, signal?: AbortSignal) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }), signal }, EXTERNAL_SYNC_TIMEOUT_MS)),
+  createManualPreview: async (url: string, signal?: AbortSignal) => parseManualPreview(await request<unknown>('/integrations/external-control/manual-sources/previews', { method: 'POST', body: JSON.stringify({ url }), signal }, MANUAL_PREVIEW_TIMEOUT_MS)),
   approveManualPreview: async (preview: ManualPreview) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }) })),
+  approveManualPreviewAbortable: async (preview: ManualPreview, signal: AbortSignal) => parseExternalJob(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(preview.preview_id)}/approve`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ expected_content_sha256: preview.content_sha256 }), signal })),
   rejectManualPreview: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled') => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }) })),
+  rejectManualPreviewAbortable: async (previewId: string, reason: 'not_relevant' | 'duplicate' | 'user_cancelled', signal: AbortSignal) => parseManualPreviewRejection(await request<unknown>(`/integrations/external-control/manual-sources/previews/${encodeURIComponent(previewId)}/reject`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ reason }), signal })),
   externalJob: async (jobId: string, signal?: AbortSignal) => {
     const job = parseExternalJob(await request<unknown>(`/integrations/external-control/jobs/${encodeURIComponent(jobId)}`, { signal }));
     if (job.job_id !== jobId) throw new ApiError(502, 'invalid_response', 'External job identity mismatch');

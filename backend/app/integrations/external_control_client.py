@@ -47,6 +47,7 @@ class ExternalControlClient:
         verify_tls: bool = True,
         allow_http: bool = False,
         timeout_seconds: int = 30,
+        preview_timeout_seconds: int = 165,
         max_response_bytes: int = 2 * 1024 * 1024,
         session: requests.Session | None = None,
     ) -> None:
@@ -54,6 +55,7 @@ class ExternalControlClient:
         self.token = token
         self.verify_tls = verify_tls
         self.timeout_seconds = max(1, timeout_seconds)
+        self.preview_timeout_seconds = max(self.timeout_seconds, preview_timeout_seconds)
         self.max_response_bytes = max(4096, max_response_bytes)
         self.session = session or self._session()
         self._validate_url(allow_http)
@@ -143,7 +145,10 @@ class ExternalControlClient:
 
     def create_manual_preview(self, url: str) -> dict[str, Any]:
         self._validate_manual_url(url)
-        return self._preview_response(self._request("POST", "/manual-sources/previews", payload={"url": url}))
+        return self._preview_response(self._request(
+            "POST", "/manual-sources/previews", payload={"url": url},
+            timeout_seconds=self.preview_timeout_seconds,
+        ))
 
     def approve_manual_preview(self, preview_id: str, content_sha256: str, *, idempotency_key: str) -> dict[str, Any]:
         self._validate_preview_id(preview_id); self._validate_sha256(content_sha256)
@@ -238,6 +243,7 @@ class ExternalControlClient:
         payload: dict[str, Any] | None = None,
         authenticated: bool = True,
         idempotency_key: str | None = None,
+        timeout_seconds: int | None = None,
     ) -> Any:
         headers = {"Accept": "application/json", "User-Agent": "graduation-cti-backend/2.0"}
         if authenticated:
@@ -252,7 +258,7 @@ class ExternalControlClient:
                 f"{self.base_url}{path}",
                 headers=headers,
                 json=payload,
-                timeout=self.timeout_seconds,
+                timeout=timeout_seconds or self.timeout_seconds,
                 verify=self.verify_tls,
             )
         except requests.RequestException as exc:
