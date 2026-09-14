@@ -4,7 +4,7 @@ readability-lxml==0.8.4.1
 beautifulsoup4==4.15.0
 lxml==6.1.1
 lxml_html_clean>=0.1.1
-playwright>=1.44.0
+playwright==1.62.0
 PySocks>=1.7.1
 jsonschema>=4.22.0
 scikit-learn==1.9.0
@@ -14,4 +14,3 @@ scipy==1.18.0
 fastapi>=0.116.0,<1.0.0
 uvicorn>=0.35.0,<1.0.0
 httpx>=0.28.0,<1.0.0
-

@@ -398,11 +398,15 @@ class ExternalControlClient:
         for source_id, summary in value.items():
             if not cls._safe_id(source_id, minimum=1) or not isinstance(summary, dict):
                 raise ExternalControlTransportError("External source result contract is invalid")
-            allowed = cls.COUNT_KEYS | {"status"}
+            allowed = cls.COUNT_KEYS | {"status", "collection_method"}
             if not set(summary) <= allowed or not cls._safe_text(summary.get("status"), 40):
                 raise ExternalControlTransportError("External source result contract is invalid")
             projected[source_id] = {"status": summary["status"], **cls._counts(
                 {key: summary[key] for key in cls.COUNT_KEYS if key in summary}, "External source result contract is invalid")}
+            if "collection_method" in summary:
+                if summary["collection_method"] not in {"reddit_public_rss", "reddit_browser_fallback", "reddit_oauth"}:
+                    raise ExternalControlTransportError("External source result contract is invalid")
+                projected[source_id]["collection_method"] = summary["collection_method"]
         return projected
 
     @classmethod

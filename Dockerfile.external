@@ -3,7 +3,11 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    HOME=/home/external
+    HOME=/home/external \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
+    TMPDIR=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    XDG_CONFIG_HOME=/tmp/.config
 
 WORKDIR /app
 
@@ -13,7 +17,11 @@ RUN groupadd --system --gid 10001 external \
 
 COPY requirements.external.txt ./requirements.txt
 RUN python -m pip install --upgrade pip \
-    && python -m pip install --requirement requirements.txt
+    && python -m pip install --requirement requirements.txt \
+    && python -m playwright install --with-deps chromium \
+    && chown -R 0:0 /ms-playwright \
+    && find /ms-playwright -xdev -type d -exec chmod 0755 {} + \
+    && find /ms-playwright -xdev -type f -exec chmod a-w {} +
 
 COPY backend ./backend
 COPY contracts ./contracts
@@ -49,7 +57,8 @@ RUN test "$(id -u)" = 10001 \
     && test ! -w /app/backend/app/pipeline/ingestion/external \
     && test -r /app/backend/app/pipeline/ingestion/external/application/dark_web_discovery.py \
     && test ! -w /app/backend/app/pipeline/ingestion/external/application/dark_web_discovery.py \
-    && python -c 'from backend.app.pipeline.ingestion.external.application.dark_web_discovery import load_discovery_providers; from backend.app.pipeline.ingestion.external.dark_web_connector import load_dark_web_config'
+    && python -c 'from backend.app.pipeline.ingestion.external.application.dark_web_discovery import load_discovery_providers; from backend.app.pipeline.ingestion.external.dark_web_connector import load_dark_web_config' \
+    && python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); b.close(); p.stop()'
 
 EXPOSE 8000
 

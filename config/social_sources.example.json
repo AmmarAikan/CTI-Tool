@@ -4,7 +4,7 @@
       "source_id": "reddit-netsec-example",
       "name": "Reddit - r/netsec",
       "source_type": "reddit",
-      "transport": "reddit_public_rss",
+      "transport": "rss_with_browser_fallback",
       "enabled": false,
       "subreddit": "netsec",
       "max_items": 30,
@@ -12,7 +12,14 @@
       "rate_limit_delay_seconds": 1,
       "fetch_linked_articles": true,
       "max_response_bytes": 2097152,
-      "max_redirects": 3
+      "max_redirects": 3,
+      "fallback_enabled": true,
+      "minimum_usable_posts": 5,
+      "target_count": 30,
+      "max_scrolls": 6,
+      "max_stale_scrolls": 2,
+      "navigation_timeout_seconds": 20,
+      "overall_fallback_timeout_seconds": 45
     }
   ],
   "telegram_sources": [

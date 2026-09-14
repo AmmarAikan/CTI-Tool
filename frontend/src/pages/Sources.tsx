@@ -68,11 +68,13 @@ function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUp
   const {t}=useI18n();
   const {can}=useAuth();
   const active = Boolean(job && !TERMINAL_STATES.includes(job.state));
-  const transport = source.metadata.transport === 'reddit_public_rss' ? t('publicRss') : source.metadata.transport === 'telegram_public_preview' ? t('publicChannelPreview') : undefined;
+  const transport = source.metadata.transport === 'rss_with_browser_fallback' ? t('publicRssFallback') : source.metadata.transport === 'reddit_public_rss' ? t('publicRss') : source.metadata.transport === 'telegram_public_preview' ? t('publicChannelPreview') : undefined;
   const limitation = source.metadata.limitation === 'public_feed_availability' ? t('redditPublicLimitation') : source.metadata.limitation === 'configured_public_channels_only' ? t('telegramPublicLimitation') : undefined;
+  const method = job?.sources[source.source_id]?.collection_method;
+  const redditState = source.source_type === 'reddit' && method === 'reddit_public_rss' ? t('rssSucceeded') : source.source_type === 'reddit' && method === 'reddit_browser_fallback' ? t('browserFallbackUsed') : source.source_type === 'reddit' && job?.state === 'failed' ? `${t('redditTemporarilyUnavailable')}. ${t('retryAvailable')}` : undefined;
   return <>
     <tr><td><strong>{source.name}</strong>{can('analyst')&&<code dir="ltr">{source.source_id}</code>}</td><td><span className="type-label">{transport || source.source_type}</span>{limitation&&<small>{limitation}</small>}</td><td><StatusBadge status={source.status} /></td><td>{Object.keys(source.metadata || {}).length > 0 ? <span className="safe-label">{t('available')}</span> : <span className="muted-text">{t('none')}</span>}</td>{canRun && <td><RunButton source={source} busy={pending || active} onRun={onRun} /></td>}</tr>
-    {(job || submissionError) && <tr className="job-detail-row"><td colSpan={canRun ? 5 : 4}>{submissionError ? <div className="job-panel error-panel" role="alert"><strong>{t('startSourceFailed')}</strong><span>{submissionError}</span></div> : job && <JobMonitor sourceId={source.source_id} label={source.name} job={job} onUpdate={onUpdate} />}</td></tr>}
+    {(job || submissionError) && <tr className="job-detail-row"><td colSpan={canRun ? 5 : 4}>{redditState&&<p>{redditState}</p>}{submissionError ? <div className="job-panel error-panel" role="alert"><strong>{t('startSourceFailed')}</strong><span>{submissionError}</span></div> : job && <JobMonitor sourceId={source.source_id} label={source.name} job={job} onUpdate={onUpdate} />}</td></tr>}
   </>;
 }
 

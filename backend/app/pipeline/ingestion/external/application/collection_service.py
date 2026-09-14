@@ -74,6 +74,7 @@ class SourceExecutionResult:
     rejected: tuple[ExternalCTIItem, ...] = ()
     failure_category: str | None = None
     retryable: bool = False
+    collection_method: str | None = None
 
 
 class SourceExecutor(Protocol):
@@ -223,7 +224,8 @@ class CanonicalCollectionService(CollectionService):
             "error_count": total("error_count"),
             "sources": {value.source_id: {"status": value.status, "accepted_records": value.accepted_records,
                 "review_records": value.review_records, "rejected_records": value.rejected_records,
-                "skipped_records": value.skipped_records, "error_count": value.error_count} for value in registered},
+                "skipped_records": value.skipped_records, "error_count": value.error_count,
+                **({"collection_method": value.collection_method} if value.collection_method else {})} for value in registered},
             "manual_sources": manual,
         }
 
@@ -266,7 +268,8 @@ class CanonicalCollectionService(CollectionService):
             "skipped_records": sum(result.skipped_records for result in results),
             "error_count": sum(result.error_count for result in results),
             "sources": {result.source_id: {"status": result.status, "accepted_records": result.accepted_records,
-                                            "review_records": result.review_records, "error_count": result.error_count}
+                                            "review_records": result.review_records, "error_count": result.error_count,
+                                            **({"collection_method": result.collection_method} if result.collection_method else {})}
                         for result in results},
             "force": force,
             "run_id": run_id,

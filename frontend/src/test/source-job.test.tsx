@@ -35,16 +35,16 @@ describe('single external source job', () => {
   it('shows credential-free readiness, method labels, and limitations without technical identifiers', async () => {
     sessionStorage.setItem('cti_language', 'en');
     const publicSources = [
-      { source_id: 'reddit-hidden-id', name: 'Reddit netsec', source_type: 'reddit', status: 'ready', metadata: { transport: 'reddit_public_rss', limitation: 'public_feed_availability' } },
+      { source_id: 'reddit-hidden-id', name: 'Reddit netsec', source_type: 'reddit', status: 'ready', metadata: { transport: 'rss_with_browser_fallback', limitation: 'public_feed_availability' } },
       { source_id: 'telegram-hidden-id', name: 'Telegram public', source_type: 'telegram', status: 'ready', metadata: { transport: 'telegram_public_preview', limitation: 'configured_public_channels_only' } },
     ];
     sessionStorage.setItem('cti_access_token', 'token');
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me')
       ? response(users.viewer) : response(publicSources));
     renderWithProviders(<Sources />);
-    expect(await screen.findByText('Public RSS')).toBeInTheDocument();
+    expect(await screen.findByText('RSS first with bounded browser fallback')).toBeInTheDocument();
     expect(screen.getByText('Public Channel Preview')).toBeInTheDocument();
-    expect(screen.getByText(/public feed/i)).toBeInTheDocument();
+    expect(screen.getByText(/browser fallback runs only when insufficient/i)).toBeInTheDocument();
     expect(screen.getByText(/configured public channels/i)).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('reddit-hidden-id');
     expect(document.body).not.toHaveTextContent('telegram-hidden-id');

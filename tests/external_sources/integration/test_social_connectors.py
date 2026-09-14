@@ -13,7 +13,8 @@ from backend.app.pipeline.ingestion.external.classification.classifier import Cl
 from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse, ResponseTooLargeError
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.hackernews_connector import HackerNewsConnector, HackerNewsSource
-from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditPublicRSSClient, RedditSource
+from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditPost, RedditPublicRSSClient, RedditSource
+from backend.app.pipeline.ingestion.external.reddit_playwright import RedditPlaywrightCollector
 from backend.app.pipeline.ingestion.external.social_common import ConfiguredSocialCollector, SocialCollectionResult, SocialItemProcessor
 from backend.app.pipeline.ingestion.external.telegram_connector import TelegramConnector, TelegramSource
 
@@ -84,6 +85,19 @@ class StubRedditFeed:
         return HttpResponse(self.url,200,{"Content-Type":self.content_type},(FIXTURES/self.fixture).read_bytes())
 
 
+class StubRedditBrowser:
+    def __init__(self, posts=(), error=None): self.posts,self.error,self.calls=list(posts),error,0
+    def collect(self):
+        self.calls += 1
+        if self.error: raise self.error
+        return self.posts
+
+
+def fallback_source(**overrides):
+    value={"source_id":"reddit-netsec","name":"Reddit netsec","source_type":"reddit","transport":"rss_with_browser_fallback","enabled":True,"subreddit":"netsec","max_items":10,"request_timeout_seconds":10,"rate_limit_delay_seconds":0,"fetch_linked_articles":True,"max_response_bytes":100000,"max_redirects":2,"fallback_enabled":True,"minimum_usable_posts":3,"target_count":5,"max_scrolls":3,"max_stale_scrolls":2,"navigation_timeout_seconds":5,"overall_fallback_timeout_seconds":10}
+    value.update(overrides);return RedditSource.from_mapping(value)
+
+
 def processor(*, state=None, classification="accepted"):
     return SocialItemProcessor(crawler=StubCrawler(), classification_service=ClassificationService(StubClassifier(classification)), state=state, clock=lambda: NOW)
 
@@ -98,7 +112,7 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual(first.accepted_items[1].metadata["content_status"],"full_text")
         self.assertEqual(second.all_items,[])
         empty=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed("reddit_public_empty.xml")),processor=processor()).collect_result()
-        self.assertEqual((empty.status,empty.all_items),("completed",[]))
+        self.assertEqual((empty.status,empty.all_items,empty.errors[0].category),("failed",[],"rss_insufficient_results"))
         disabled=RedditConnector(RedditSource("reddit-off","Off","netsec",False,transport="reddit_public_rss"),rss_client=object(),processor=processor()).collect_result()
         self.assertEqual(disabled.status,"disabled")
 
@@ -107,20 +121,64 @@ class SocialConnectorTests(unittest.TestCase):
         def http_error(status):
             response=requests.Response();response.status_code=status
             return requests.HTTPError(response=response)
-        cases=[(StubRedditFeed(url="https://example.org/feed"),"source_access_unavailable",False),
-               (StubRedditFeed(content_type="text/html"),"malformed_response",False),
-               (StubRedditFeed(error=ResponseTooLargeError()),"malformed_response",False),
-               (StubRedditFeed(error=requests.Timeout()),"network_timeout",True),
-               (StubRedditFeed(error=http_error(403)),"source_access_unavailable",False),
+        cases=[(StubRedditFeed(url="https://example.org/feed"),"rss_http_failure",False),
+               (StubRedditFeed(content_type="text/html"),"rss_parsing_failure",False),
+               (StubRedditFeed(error=ResponseTooLargeError()),"rss_parsing_failure",False),
+               (StubRedditFeed(error=requests.Timeout()),"rss_timeout",True),
+               (StubRedditFeed(error=http_error(403)),"rss_http_failure",False),
                (StubRedditFeed(error=http_error(429)),"rate_limited",True),
-               (StubRedditFeed(error=http_error(503)),"upstream_temporarily_unavailable",True)]
+               (StubRedditFeed(error=http_error(503)),"rss_http_failure",True)]
         for client,category,retryable in cases:
             result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=client),processor=processor()).collect_result()
             self.assertEqual((result.status,result.errors[0].category,result.errors[0].retryable),("failed",category,retryable))
         malformed=StubRedditFeed();malformed.fixture="reddit_public_empty.xml"
         malformed.get=lambda url,**kwargs:HttpResponse(url,200,{"Content-Type":"application/xml"},b"<broken")
         result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=malformed),processor=processor()).collect_result()
-        self.assertEqual(result.errors[0].category,"parsing_contract")
+        self.assertEqual(result.errors[0].category,"rss_parsing_failure")
+
+    def test_reddit_fallback_quality_merge_dedup_and_safe_failure(self) -> None:
+        browser_posts=[RedditPost("t3_public1","Browser duplicate","/r/netsec/comments/public1/browser/",body="Browser body with sufficient security context."),RedditPost("t3_browser2","Browser link","/r/netsec/comments/browser2/link/",external_url="https://example.test/report")]
+        browser=StubRedditBrowser(browser_posts);source=fallback_source()
+        result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed()),browser=browser,processor=processor()).collect_result()
+        self.assertEqual((browser.calls,result.status,len(result.all_items)),(1,"completed",3))
+        self.assertTrue(all(item.metadata["collection_method"]=="reddit_browser_fallback" for item in result.all_items))
+        self.assertEqual(len({item.source_item_id for item in result.all_items}),3)
+        failed=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed("reddit_public_empty.xml")),browser=StubRedditBrowser(error=RedditAccessError("browser_launch_failure",retryable=True)),processor=processor()).collect_result()
+        self.assertEqual((failed.status,failed.errors[0].category,failed.errors[0].retryable),("failed","browser_launch_failure",True))
+
+    def test_reddit_rss_success_never_launches_browser_and_config_bounds_are_strict(self) -> None:
+        browser=StubRedditBrowser();source=fallback_source(minimum_usable_posts=2)
+        result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed()),browser=browser,processor=processor()).collect_result()
+        self.assertEqual((result.status,browser.calls),("completed",0))
+        for invalid in ({"minimum_usable_posts":11},{"target_count":2},{"max_scrolls":21},{"max_stale_scrolls":0},{"navigation_timeout_seconds":4},{"overall_fallback_timeout_seconds":121},{"fallback_enabled":True,"transport":"reddit_public_rss"}):
+            with self.assertRaises(ValueError):fallback_source(**invalid)
+
+    def test_playwright_collector_bounds_scrolls_and_always_closes(self) -> None:
+        class Locator:
+            def __init__(self,page,selector):self.page,self.selector=page,selector
+            def evaluate_all(self,_script):return self.page.pages[min(self.page.index,len(self.page.pages)-1)]
+            def count(self):return 0
+            def inner_text(self,timeout=0):return ""
+        class Page:
+            def __init__(self):self.pages=[[{"post_id":"t3_browser1","title":"Browser self","permalink":"/r/netsec/comments/browser1/self/","body":"Useful defensive security report."}]];self.index=0;self.closed=False;self.scrolls=0;self.url="https://www.reddit.com/r/netsec/new/"
+            def set_default_timeout(self,_value):pass
+            def route(self,*_args):pass
+            def goto(self,*_args,**_kwargs):pass
+            def wait_for_selector(self,*_args,**_kwargs):pass
+            def locator(self,selector):return Locator(self,selector)
+            def evaluate(self,_script):self.scrolls+=1;self.index+=1
+            def wait_for_timeout(self,_value):pass
+            def close(self):self.closed=True
+        class Resource:
+            def __init__(self):self.closed=False
+            def close(self):self.closed=True
+        page=Page();context=Resource();context.new_page=lambda:page;browser=Resource();browser.new_context=lambda **_kwargs:context
+        class Manager:
+            def __init__(self):self.chromium=type("Chromium",(),{"launch":lambda _self,**_kwargs:browser})();self.stopped=False
+            def start(self):return self
+            def stop(self):self.stopped=True
+        manager=Manager();posts=RedditPlaywrightCollector(fallback_source(max_scrolls=3,max_stale_scrolls=2),playwright_factory=lambda:manager).collect()
+        self.assertEqual((len(posts),page.scrolls),(1,2));self.assertTrue(page.closed and context.closed and browser.closed and manager.stopped)
 
     def test_reddit_uses_bounded_official_api_shape_and_enriches_link_posts(self) -> None:
         source = RedditSource("reddit-netsec", "Reddit - r/netsec", "netsec", True, 30)
@@ -219,7 +277,7 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual([(r.source_id, r.status) for r in results], [("bad", "failed"), ("good", "completed")])
 
         config = json.loads((ROOT / "config" / "sources.json").read_text(encoding="utf-8"))
-        self.assertTrue(all(value["transport"] == "reddit_public_rss" and value["enabled"] for value in config["social_media_sources"]))
+        self.assertTrue(all(value["transport"] == "rss_with_browser_fallback" and value["enabled"] for value in config["social_media_sources"]))
         self.assertTrue(all(value["transport"] == "telegram_public_preview" for value in config["telegram_sources"]))
 
     def test_social_item_validates_contract_and_is_not_trusted(self) -> None:

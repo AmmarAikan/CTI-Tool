@@ -6,7 +6,7 @@ have been retired.
 
 | Source | Delivery method | Access policy |
 | --- | --- | --- |
-| Reddit | Public subreddit RSS at `https://www.reddit.com/r/{subreddit}/.rss` | Credential-free for explicitly configured subreddits; availability depends on Reddit's public feed |
+| Reddit | Public subreddit RSS, then bounded Playwright fallback | Credential-free for explicitly configured subreddits; no login, challenge bypass, proxy rotation, or private endpoints |
 | Hacker News | Algolia HN Search `search_by_date` JSON API | Public, bounded search with `created_at_i` incremental filter and page bounds |
 | Telegram | Server-rendered `https://t.me/s/{channel}` public preview | Configured public channels only; no login, joining, messaging, private invite access, or MTProto session |
 
@@ -37,3 +37,14 @@ transport and requires all three Reddit environment variables. The public RSS
 transport never uses them. Public platforms can return access-unavailable or
 temporary-unavailable results; CTI-Tool does not attempt browser automation,
 login, private-channel access, or access-control bypasses.
+
+For `rss_with_browser_fallback`, RSS is sufficient only when at least
+`minimum_usable_posts` entries pass all deterministic completeness checks: a
+valid stable post ID, non-empty title, an HTTPS `www.reddit.com` permalink under
+the configured subreddit, and either meaningful self-text or an external-link
+target. Zero usable entries, a count below the configured minimum, timeout,
+network/HTTP failure, or XML parsing failure triggers the browser fallback.
+The fallback is bounded by `target_count`, `max_scrolls`,
+`max_stale_scrolls`, `navigation_timeout_seconds`, and
+`overall_fallback_timeout_seconds`. It stops at the target, the scroll limit,
+the stale-scroll limit, or the overall deadline, whichever occurs first.

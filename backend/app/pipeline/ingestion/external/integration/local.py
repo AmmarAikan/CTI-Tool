@@ -135,7 +135,8 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
             review_records=len(review), rejected_records=len(rejected),
             skipped_records=int(getattr(result, "skipped_items", 0)), error_count=len(errors),
             accepted=tuple(accepted), review=tuple(review), errors=tuple(str(value) for value in errors),
-            rejected=tuple(rejected), failure_category=category, retryable=retryable)
+            rejected=tuple(rejected), failure_category=category, retryable=retryable,
+            collection_method=str(state.get("sources", {}).get(source.source_id, {}).get("collection_method") or "") or None)
 
     @staticmethod
     def _safe_failure(errors: list[Any]) -> tuple[str | None, bool]:
@@ -148,6 +149,10 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
             category = "source_configuration"
         elif raw == "source_access_unavailable":
             category = "source_access_unavailable"
+        elif raw in {"rss_timeout", "rss_network_failure", "rss_http_failure", "playwright_unavailable", "browser_launch_failure", "navigation_timeout", "blocked_challenge_page", "rss_insufficient_results", "browser_insufficient_results"}:
+            category = "upstream_temporarily_unavailable"
+        elif raw in {"rss_parsing_failure", "dom_contract_change", "browser_redirect_rejected"}:
+            category = "parsing_contract"
         elif raw in {"invalid_feed", "invalid_response", "malformed_response", "parse_failed", "contract_failed", "parsing_contract"}:
             category = "parsing_contract"
         elif raw in {"network_failure", "network_timeout", "upstream_unavailable", "upstream_temporarily_unavailable", "feed_request_failed", "request_failed", "timeout"}:
