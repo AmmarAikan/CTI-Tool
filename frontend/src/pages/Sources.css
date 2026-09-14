@@ -9,4 +9,8 @@
 .job-counts dt { color: var(--muted); font-size: 12px; }
 .job-counts dd { margin: 4px 0 0; font-weight: 700; }
 .job-error { color: var(--red); font-size: 13px; }
+.success-panel { border-inline-start: 4px solid var(--green); background: color-mix(in srgb, var(--paper) 92%, var(--green)); }
+.job-panel details { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.job-panel summary { cursor: pointer; color: var(--muted); }
+.job-panel details code { display: block; margin-top: 8px; overflow-wrap: anywhere; }
 @media (max-width: 800px) { .job-panel > div:first-child { align-items: flex-start; flex-direction: column; } }

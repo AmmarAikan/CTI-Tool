@@ -167,7 +167,7 @@ class CERTConnectorTests(unittest.TestCase):
         self.assertEqual(
             {source.source_id: source.method for source in sources},
             {
-                "cisa-advisories": "official_listing",
+                "cisa-advisories": "rss",
                 "cert-eu-advisories": "rss",
                 "cert-at-warnings": "rss",
             },

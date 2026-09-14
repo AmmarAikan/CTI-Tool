@@ -51,13 +51,12 @@
     {
       "source_id": "cisa-advisories",
       "name": "CISA",
-      "url": "https://www.cisa.gov/news-events/cybersecurity-advisories",
+      "url": "https://www.cisa.gov/news-events/cybersecurity-advisories?feed=rss",
       "category": "advisory",
-      "method": "official_listing",
+      "method": "rss",
       "enabled": true,
       "max_items": 50,
-      "lookback_days": 30,
-      "detail_path_pattern": "^/news-events/cybersecurity-advisories/[a-z0-9][a-z0-9-]+$"
+      "lookback_days": 30
     },
     {
       "source_id": "cert-eu-advisories",
@@ -134,7 +133,7 @@
       "url": "https://www.reddit.com/r/netsec/",
       "subreddit": "netsec",
       "method": "oauth_api",
-      "enabled": false,
+      "enabled": true,
       "category": "social",
       "limit": 30
     },
@@ -145,7 +144,7 @@
       "url": "https://www.reddit.com/r/cybersecurity/",
       "subreddit": "cybersecurity",
       "method": "oauth_api",
-      "enabled": false,
+      "enabled": true,
       "category": "social",
       "limit": 30
     },
@@ -156,7 +155,7 @@
       "url": "https://www.reddit.com/r/blueteamsec/",
       "subreddit": "blueteamsec",
       "method": "oauth_api",
-      "enabled": false,
+      "enabled": true,
       "category": "social",
       "limit": 30
     },
@@ -167,7 +166,7 @@
       "url": "https://www.reddit.com/r/AskNetsec/",
       "subreddit": "AskNetsec",
       "method": "oauth_api",
-      "enabled": false,
+      "enabled": true,
       "category": "social",
       "limit": 30
     }

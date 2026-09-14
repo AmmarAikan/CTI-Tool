@@ -76,7 +76,11 @@ def load_collection_registry(path: Path = PROJECT_ROOT / "config" / "sources.jso
                 continue
             source_id = str(raw.get("source_id") or "").strip()
             if source_id:
-                registry[source_id] = RegisteredSource(source_id, source_type, bool(raw.get("enabled", True)), dict(raw))
+                configured = source_type != "reddit" or all(os.environ.get(key) for key in ("REDDIT_CLIENT_ID","REDDIT_CLIENT_SECRET","REDDIT_USER_AGENT"))
+                configuration = dict(raw)
+                if source_type == "reddit" and bool(raw.get("enabled", True)) and not configured:
+                    configuration["requires_configuration"] = True
+                registry[source_id] = RegisteredSource(source_id, source_type, bool(raw.get("enabled", True)) and configured, configuration)
     for source in dark_web_sources:
         if source.source_id in registry:
             raise DarkWebConfigurationError(f"duplicate external source id: {source.source_id}")
@@ -118,11 +122,29 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
         status = str(getattr(result, "status", "failed"))
         if source.source_type == "dark_web" and status == "unavailable": status = "failed"
         errors = list(getattr(result, "errors", []))
+        category, retryable = self._safe_failure(errors)
         return SourceExecutionResult(source_id=source.source_id, status=status, accepted_records=len(accepted),
             review_records=len(review), rejected_records=len(rejected),
             skipped_records=int(getattr(result, "skipped_items", 0)), error_count=len(errors),
             accepted=tuple(accepted), review=tuple(review), errors=tuple(str(value) for value in errors),
-            rejected=tuple(rejected))
+            rejected=tuple(rejected), failure_category=category, retryable=retryable)
+
+    @staticmethod
+    def _safe_failure(errors: list[Any]) -> tuple[str | None, bool]:
+        if not errors:
+            return None, False
+        raw = str(getattr(errors[0], "category", "internal_failure"))
+        if raw == "rate_limited":
+            category = "rate_limited"
+        elif raw in {"configuration_required", "credentials_missing", "authorization_failed", "request_rejected"}:
+            category = "source_configuration"
+        elif raw in {"invalid_feed", "invalid_response", "parse_failed", "contract_failed"}:
+            category = "parsing_contract"
+        elif raw in {"network_failure", "upstream_unavailable", "feed_request_failed", "request_failed", "timeout"}:
+            category = "transient_upstream"
+        else:
+            category = "internal_failure"
+        return category, bool(getattr(errors[0], "retryable", False))
 
     def _connector(self, source: RegisteredSource, state: dict[str, Any]):
         raw = source.configuration
@@ -320,7 +342,7 @@ def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None, cra
 class DevelopmentSourceService(SourceManagementService):
     def __init__(self, registry: dict[str, RegisteredSource]) -> None:
         self._sources = {source_id: SourceView(source_id, str(source.configuration.get("name") or source_id),
-            source.source_type, "enabled" if source.enabled else "disabled", {})
+            source.source_type, "requires_configuration" if source.configuration.get("requires_configuration") else "enabled" if source.enabled else "disabled", {})
             for source_id, source in registry.items()}
     def list_sources(self) -> list[SourceView]: return sorted(self._sources.values(), key=lambda value: value.source_id)
     def get_source_status(self, source_id: str) -> SourceView | None: return self._sources.get(source_id)

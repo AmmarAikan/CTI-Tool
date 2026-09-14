@@ -135,7 +135,7 @@ describe('manual preview workflow', () => {
     await actor.type(await screen.findByRole('textbox', { name: 'رابط المصدر لإعادة الفحص' }), 'https://example.org/existing');
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await actor.click(screen.getByRole('button', { name: 'إعادة الفحص' }));
-    expect(await screen.findByText('خدمة التحكم بالمصادر الخارجية غير متاحة حاليًا')).toBeInTheDocument();
+    expect(await screen.findByText('انقطع الاتصال مؤقتًا')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('hidden.onion');
     expect(document.body).not.toHaveTextContent('10.0.0.1');
     expect(document.body).not.toHaveTextContent('token=secret');

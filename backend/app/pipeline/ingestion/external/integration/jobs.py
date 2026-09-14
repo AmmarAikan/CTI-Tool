@@ -100,13 +100,17 @@ class InProcessJobRunner:
         try:
             value = operation()
             result = asdict(value) if is_dataclass(value) else value if isinstance(value, dict) else {"status": str(value)}
+            failure_category = result.pop("_failure_category", "internal_failure")
+            failure_retryable = result.pop("_failure_retryable", False)
+            if failure_category not in {"transient_upstream", "rate_limited", "source_configuration", "parsing_contract", "internal_failure"}:
+                failure_category, failure_retryable = "internal_failure", False
             with self._lock:
                 job = self._jobs[job_id]
                 if job.cancellation_requested: job.state, job.result = "cancelled", result
                 elif result.get("status") == "partial": job.state, job.result = "partial", result
                 elif result.get("status") == "failed":
                     job.state, job.result = "failed", result
-                    job.error = {"code": "job_failed", "message": "job execution failed safely", "retryable": False, "details": {}}
+                    job.error = {"code": failure_category, "message": "job execution failed safely", "retryable": bool(failure_retryable), "details": {}}
                 else: job.state, job.result = "completed", result
                 job.updated_at = utc_now()
         except Exception as exc:

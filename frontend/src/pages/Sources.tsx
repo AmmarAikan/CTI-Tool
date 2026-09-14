@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { api, ApiError, type ExternalJob, type JobState, type Source } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
@@ -29,12 +30,14 @@ export function isRetryableJobPollingError(error: unknown) {
   return error instanceof TypeError || (error instanceof ApiError && [408, 502, 503, 504].includes(error.status));
 }
 
-function JobPanel({ job, pollingError, reconnecting, retryCount, timedOut, onRefresh }: { job?: ExternalJob; pollingError?: unknown; reconnecting: boolean; retryCount: number; timedOut: boolean; onRefresh: () => void }) {
+function JobPanel({ job, label, pollingError, reconnecting, timedOut, onRefresh }: { job?: ExternalJob; label: string; pollingError?: unknown; reconnecting: boolean; timedOut: boolean; onRefresh: () => void }) {
   const {t,number}=useI18n();
-  if (timedOut) return <div className="job-panel error-panel" role="alert"><strong>{t('jobPollingTimeout')}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button></div>;
-  if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>{safePollingError(pollingError, t)}</strong><span>{t('manualRefreshHint')}</span><button className="button button-secondary" onClick={onRefresh}>{t('retry')}</button></div>;
+  const {can}=useAuth();
+  if (timedOut) return <div className="job-panel error-panel" role="alert"><strong>{t('jobPollingTimeout')}</strong><span>{t('manualRefreshHint')}</span>{can('analyst')&&job&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{job.job_id}</code></details>}<button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button></div>;
+  if (pollingError) return <div className="job-panel error-panel" role="alert"><strong>{safePollingError(pollingError, t)}</strong><span>{t('manualRefreshHint')}</span>{can('analyst')&&job&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{job.job_id}</code></details>}<button className="button button-secondary" onClick={onRefresh}>{t('retry')}</button></div>;
   if (!job) return null;
-  return <div className="job-panel" role="status" aria-live="polite"><div><strong>{t('status')}</strong><StatusBadge status={job.state} /></div>{reconnecting && <span>{t('jobStatusReconnecting',{count:number(retryCount)})}</span>}{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{t('jobReportedFailure')}</span>}{TERMINAL_STATES.includes(job.state) && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
+  const terminal=TERMINAL_STATES.includes(job.state),success=job.state==='completed'||job.state==='partial';
+  return <div className={`job-panel ${terminal?success?'success-panel':'error-panel':''}`} role="status" aria-live="polite"><div><strong>{label}</strong><StatusBadge status={job.state} /></div>{reconnecting && <span>{t('jobStatusReconnecting')}</span>}{Object.entries(job.counts).length > 0 && <dl className="job-counts">{Object.entries(job.counts).map(([key, value]) => <div key={key}><dt>{t(COUNT_LABELS[key as keyof typeof COUNT_LABELS])}</dt><dd>{value}</dd></div>)}</dl>}{Object.keys(job.sources).length > 0 && <div className="source-result-list">{Object.entries(job.sources).map(([id, value]) => <div key={id}><code>{id}</code><span>{value.status}</span><small>{t('recordCount',{count:number(Object.values(value.counts).reduce((sum,count)=>sum+(count||0),0))})}</small></div>)}</div>}{job.error && <span className="job-error">{t('jobReportedFailure')}</span>}{terminal&&<small>{t('completedAt',{value:job.updated_at})}</small>}{success&&(job.counts.review_records||0)>0&&<Link to="/reviews">{t('reviews')}</Link>}{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{job.job_id}</code></details>}{terminal && <button className="button button-secondary" onClick={onRefresh}>{t('refreshStatus')}</button>}</div>;
 }
 
 function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onRun: (source: Source) => void }) {
@@ -43,7 +46,7 @@ function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onR
   return <button className="button button-secondary" disabled={disabled} aria-label={t('runSource',{name:source.name})} title={source.status !== 'enabled' ? t('sourceDisabled') : undefined} onClick={() => onRun(source)}>{busy ? t('submitting') : t('run')}</button>;
 }
 
-export function JobMonitor({ sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MAX_MS }: { sourceId: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void; maxPollingMs?: number }) {
+export function JobMonitor({ sourceId, label=sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MAX_MS }: { sourceId: string; label?: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void; maxPollingMs?: number }) {
   const [timedOut, setTimedOut] = useState(false);
   const queryClient = useQueryClient();
   const terminal = TERMINAL_STATES.includes(job.state);
@@ -58,7 +61,7 @@ export function JobMonitor({ sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MA
   }, [job.job_id, maxPollingMs, terminal, timedOut]);
   useEffect(() => { if (timedOut) void queryClient.cancelQueries({ queryKey, exact: true }); }, [queryClient, timedOut, job.job_id]);
   function refresh() { setTimedOut(false); void query.refetch(); }
-  return <JobPanel job={job} pollingError={query.error} reconnecting={query.failureCount > 0 && !query.error} retryCount={query.failureCount} timedOut={timedOut} onRefresh={refresh} />;
+  return <JobPanel job={job} label={label} pollingError={query.error} reconnecting={query.failureCount > 0 && !query.error} timedOut={timedOut} onRefresh={refresh} />;
 }
 
 function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUpdate }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
@@ -66,7 +69,7 @@ function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUp
   const active = Boolean(job && !TERMINAL_STATES.includes(job.state));
   return <>
     <tr><td><strong>{source.name}</strong><code dir="ltr">{source.source_id}</code></td><td><span className="type-label">{source.source_type}</span></td><td><StatusBadge status={source.status} /></td><td>{Object.keys(source.metadata || {}).length > 0 ? <span className="safe-label">{t('available')}</span> : <span className="muted-text">{t('none')}</span>}</td>{canRun && <td><RunButton source={source} busy={pending || active} onRun={onRun} /></td>}</tr>
-    {(job || submissionError) && <tr className="job-detail-row"><td colSpan={canRun ? 5 : 4}>{submissionError ? <div className="job-panel error-panel" role="alert"><strong>{t('startSourceFailed')}</strong><span>{submissionError}</span></div> : job && <JobMonitor sourceId={source.source_id} job={job} onUpdate={onUpdate} />}</td></tr>}
+    {(job || submissionError) && <tr className="job-detail-row"><td colSpan={canRun ? 5 : 4}>{submissionError ? <div className="job-panel error-panel" role="alert"><strong>{t('startSourceFailed')}</strong><span>{submissionError}</span></div> : job && <JobMonitor sourceId={source.source_id} label={source.name} job={job} onUpdate={onUpdate} />}</td></tr>}
   </>;
 }
 
@@ -97,7 +100,7 @@ export function Sources() {
 
   return <section className="page-section"><div className="section-heading"><div><span className="eyebrow">{t('sourcesEyebrow')}</span><h2>{t('external')}</h2><p>{t('sourcesDescription')}</p></div><span className="count-label">{t('sourcesCount',{count:number(filtered.length)})}</span></div>
     {can('analyst') && <section className="run-all-panel" aria-label={t('runAll')}><button className="button" type="button" disabled={startAll.isPending || allActive} onClick={runAll}>{startAll.isPending ? t('submitting') : t('runAllEnabled')}</button><p className="muted-text">{t('runAllHint')}</p>{allError && <div className="job-panel error-panel" role="alert">{allError}</div>}{allJob && <JobMonitor sourceId="all-enabled" job={allJob} onUpdate={(_id, job) => setAllJob(job)} />}</section>}
-    <div className="filters"><label className="search-wrap"><span className="sr-only">{t('search')}</span><input placeholder={t('searchSource')} value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label={t('filterStatus')} value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t('allStates')}</option><option value="enabled">{t('enabled')}</option><option value="disabled">{t('disabled')}</option><option value="pending_review">{t('pendingReview')}</option></select><select aria-label={t('filterType')} value={type} onChange={(event) => setType(event.target.value)}><option value="all">{t('allTypes')}</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
+    <div className="filters"><label className="search-wrap"><span className="sr-only">{t('search')}</span><input placeholder={t('searchSource')} value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label={t('filterStatus')} value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t('allStates')}</option><option value="enabled">{t('enabled')}</option><option value="requires_configuration">{t('requiresConfiguration')}</option><option value="disabled">{t('disabled')}</option><option value="pending_review">{t('pendingReview')}</option></select><select aria-label={t('filterType')} value={type} onChange={(event) => setType(event.target.value)}><option value="all">{t('allTypes')}</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
     {query.isLoading && <LoadingState label={t('loadingSources')} />}{query.isError && <ErrorState onRetry={() => void query.refetch()} />}{!query.isLoading && !query.isError && sources.length === 0 && <EmptyState label={t('noSources')} />}{!query.isLoading && !query.isError && sources.length > 0 && filtered.length === 0 && <EmptyState label={t('noFilteredSources')} />}
     {filtered.length > 0 && <div className="table-shell"><table><thead><tr><th>{t('source')}</th><th>{t('type')}</th><th>{t('status')}</th><th>{t('safeData')}</th>{can('analyst') && <th>{t('action')}</th>}</tr></thead><tbody>{filtered.map((source) => <SourceRows key={source.source_id} source={source} canRun={can('analyst')} pending={Boolean(pending[source.source_id])} job={jobs[source.source_id]} submissionError={submissionErrors[source.source_id]} onRun={run} onUpdate={updateJob} />)}</tbody></table></div>}
   </section>;

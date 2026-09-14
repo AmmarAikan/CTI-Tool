@@ -12,7 +12,7 @@ from backend.app.pipeline.ingestion.external.classification.classifier import Cl
 from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.hackernews_connector import HackerNewsConnector, HackerNewsSource
-from backend.app.pipeline.ingestion.external.reddit_connector import RedditConnector, RedditSource
+from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditSource
 from backend.app.pipeline.ingestion.external.social_common import ConfiguredSocialCollector, SocialCollectionResult, SocialItemProcessor
 from backend.app.pipeline.ingestion.external.telegram_connector import TelegramConnector, TelegramSource
 
@@ -72,6 +72,15 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual(result.accepted_items[1].metadata["content_status"], "full_text")
         self.assertNotIn("utm_source", result.accepted_items[1].metadata["external_url"])
 
+    def test_reddit_empty_and_safe_failure_categories(self) -> None:
+        class Empty(StubRedditApi):
+            def listing(self,*args,**kwargs): return {"data":{"children":[],"after":None}}
+        empty=RedditConnector(RedditSource("reddit-netsec","Reddit","netsec",True),api_client=Empty(),processor=processor()).collect_result()
+        self.assertEqual((empty.status,empty.all_items,empty.errors),("completed",[],[]))
+        for category,retryable in (("configuration_required",False),("authorization_failed",False),("rate_limited",True),("network_failure",True),("invalid_response",False)):
+            result=RedditConnector(RedditSource("reddit-netsec","Reddit","netsec",True),api_client=StubRedditApi(RedditAccessError(category,retryable=retryable)),processor=processor()).collect_result()
+            self.assertEqual((result.status,result.errors[0].category,result.errors[0].retryable),("failed",category,retryable))
+
     def test_hackernews_uses_algolia_window_and_skips_unchanged_hashes(self) -> None:
         state = {"sources": {"hackernews-cve": {"checkpoint_created_at_i": 1787300000}}, "items": {}}
         client = StubHttpClient("hackernews_search.json")
@@ -112,7 +121,7 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual([(r.source_id, r.status) for r in results], [("bad", "failed"), ("good", "completed")])
 
         config = json.loads((ROOT / "config" / "sources.json").read_text(encoding="utf-8"))
-        self.assertTrue(all(value["method"] == "oauth_api" and not value["enabled"] for value in config["social_media_sources"]))
+        self.assertTrue(all(value["method"] == "oauth_api" and value["enabled"] for value in config["social_media_sources"]))
         self.assertTrue(all(value["method"] == "public_preview" for value in config["telegram_sources"]))
 
     def test_social_item_validates_contract_and_is_not_trusted(self) -> None:

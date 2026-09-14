@@ -28,6 +28,11 @@ class RedditSource:
         return cls(source_id, name, subreddit, bool(value.get("enabled", False)), limit)
 
 
+class RedditAccessError(RuntimeError):
+    def __init__(self, category: str, *, retryable: bool) -> None:
+        super().__init__(category); self.category,self.retryable=category,retryable
+
+
 class RedditOAuthClient:
     """Minimal application-only Reddit Data API client; never uses user login."""
 
@@ -41,18 +46,28 @@ class RedditOAuthClient:
     def configured(self) -> bool: return bool(self.client_id and self.client_secret and self.user_agent)
 
     def listing(self, subreddit: str, *, limit: int, after: str | None = None) -> dict[str, Any]:
-        if not self.configured: raise RuntimeError("reddit_credentials_missing")
-        if self._token is None:
-            response = self.session.post("https://www.reddit.com/api/v1/access_token", auth=(self.client_id, self.client_secret), data={"grant_type": "client_credentials"}, headers={"User-Agent": self.user_agent}, timeout=self.timeout)
-            response.raise_for_status(); data = response.json(); self._token = data.get("access_token")
-            if not self._token: raise RuntimeError("reddit_token_missing")
-        params = {"limit": limit, "raw_json": 1}
-        if after: params["after"] = after
-        response = self.session.get(f"https://oauth.reddit.com/r/{subreddit}/new", params=params,
-            headers={"Authorization": f"Bearer {self._token}", "User-Agent": self.user_agent}, timeout=self.timeout)
-        response.raise_for_status(); value = response.json()
-        if not isinstance(value, dict): raise ValueError("invalid Reddit response")
+        if not self.configured: raise RedditAccessError("configuration_required",retryable=False)
+        try:
+            if self._token is None:
+                response = self.session.post("https://www.reddit.com/api/v1/access_token", auth=(self.client_id, self.client_secret), data={"grant_type": "client_credentials"}, headers={"User-Agent": self.user_agent}, timeout=self.timeout)
+                self._raise_status(response.status_code); data = response.json(); self._token = data.get("access_token")
+                if not self._token: raise RedditAccessError("authorization_failed",retryable=False)
+            params = {"limit": limit, "raw_json": 1}
+            if after: params["after"] = after
+            response = self.session.get(f"https://oauth.reddit.com/r/{subreddit}/new", params=params,
+                headers={"Authorization": f"Bearer {self._token}", "User-Agent": self.user_agent}, timeout=self.timeout)
+            self._raise_status(response.status_code); value = response.json()
+        except (requests.ConnectionError,requests.Timeout) as exc: raise RedditAccessError("network_failure",retryable=True) from exc
+        except (ValueError,requests.JSONDecodeError) as exc: raise RedditAccessError("invalid_response",retryable=False) from exc
+        if not isinstance(value, dict): raise RedditAccessError("invalid_response",retryable=False)
         return value
+
+    @staticmethod
+    def _raise_status(status: int) -> None:
+        if status in {401,403}: raise RedditAccessError("authorization_failed",retryable=False)
+        if status==429: raise RedditAccessError("rate_limited",retryable=True)
+        if 500<=status<=599: raise RedditAccessError("upstream_unavailable",retryable=True)
+        if not 200<=status<=299: raise RedditAccessError("request_rejected",retryable=False)
 
 
 class RedditConnector(SocialConnector):
@@ -78,9 +93,10 @@ class RedditConnector(SocialConnector):
                     except Exception: result.errors.append(SocialError(self.source.source_id, "item_processing_failed"))
             if not result.errors: source_state["after"] = listing.get("after")
             source_state.update({"source_config_hash": sha256_json(asdict(self.source)), "last_checked": self.processor._now_iso()})
-        except Exception as error:
-            category = "credentials_missing" if str(error) == "reddit_credentials_missing" else "source_failed"
-            result.status = "failed"; result.errors.append(SocialError(self.source.source_id, category, category != "credentials_missing"))
+        except RedditAccessError as error:
+            result.status = "failed"; result.errors.append(SocialError(self.source.source_id,error.category,error.retryable))
+        except Exception:
+            result.status = "failed"; result.errors.append(SocialError(self.source.source_id,"internal_failure",False))
         if result.errors and result.all_items: result.status = "partial"
         source_state["last_status"] = result.status
         return result

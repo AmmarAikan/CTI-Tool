@@ -35,6 +35,7 @@ export function ProcessingCenter() {
   const [decisionError, setDecisionError] = useState<unknown>();
   const operationGeneration = useRef(0);
   const submissionController = useRef<AbortController | undefined>(undefined);
+  const refreshedTerminalJob = useRef('');
   const sources = useQuery({ queryKey: ['center-sources'], queryFn: api.externalSources, retry: false });
   const watches = useQuery({ queryKey: ['center-watches'], queryFn: api.darkWebWatches, retry: false });
   const providers = useQuery({ queryKey: ['center-dark-web-providers'], queryFn: api.darkWebDiscoveryProviders, retry: false });
@@ -126,6 +127,7 @@ export function ProcessingCenter() {
   const currentInputKey = `${kind}:${kind === 'manual' ? url.trim() : selection}`;
   const duplicateActiveJob = Boolean(job && !TERMINAL_STATES.includes(job.state) && jobInputKey === currentInputKey);
   const disabled = run.isPending || duplicateActiveJob || (kind === 'manual' ? !url.trim() : !selection);
+  const selectedLabel = choices.find(([id]) => id === selection)?.[1] || t('processingCenter');
 
   return <section className="page-section processing-center">
     <div className="section-heading"><div><span className="eyebrow">{t('centerEyebrow')}</span><h2>{t('processingCenter')}</h2><p>{t('centerDescription')}</p></div></div>
@@ -138,7 +140,7 @@ export function ProcessingCenter() {
     </section>
     <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => <li className={index === 0 || completed ? 'confirmed' : ''} key={key}><span>{index + 1}</span>{t(key)}</li>)}</ol></section>
     <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
-      {job && <><p><strong>{t('jobId')}:</strong> <code dir="ltr">{job.job_id}</code></p><JobMonitor key={job.job_id} sourceId="processing-center" job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => setJob((current) => current?.job_id === value.job_id ? value : current)} /></>}
+      {job && <JobMonitor key={job.job_id} sourceId="processing-center" label={selectedLabel} job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => { setJob((current) => current?.job_id === value.job_id ? value : current); if (TERMINAL_STATES.includes(value.state) && refreshedTerminalJob.current !== value.job_id) { refreshedTerminalJob.current = value.job_id; snapshot.forEach((query) => void query.refetch()); } }} />}
       {pullResult && <p role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong> · {t('runId')}: <code dir="ltr">{pullResult.run_id}</code></p>}
       {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('approve')}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('reject')}>{t('reject')}</button></article>}
       {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}</div>}

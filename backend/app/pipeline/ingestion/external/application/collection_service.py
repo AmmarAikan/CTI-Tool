@@ -72,6 +72,8 @@ class SourceExecutionResult:
     review: tuple[ExternalCTIItem, ...] = ()
     errors: tuple[str, ...] = ()
     rejected: tuple[ExternalCTIItem, ...] = ()
+    failure_category: str | None = None
+    retryable: bool = False
 
 
 class SourceExecutor(Protocol):
@@ -269,6 +271,10 @@ class CanonicalCollectionService(CollectionService):
             "force": force,
             "run_id": run_id,
         }
+        if overall == "failed":
+            categories = {result.failure_category or "internal_failure" for result in results}
+            aggregate["_failure_category"] = categories.pop() if len(categories) == 1 else "internal_failure"
+            aggregate["_failure_retryable"] = bool(results) and all(result.retryable for result in results)
         if len(results) == 1:
             aggregate["source_id"] = results[0].source_id
         if self.exporter is not None and overall != "failed":

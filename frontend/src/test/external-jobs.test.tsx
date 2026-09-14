@@ -24,7 +24,7 @@ describe('external job history monitoring', () => {
     });
     renderWithProviders(<Jobs />); const actor = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     await actor.click(await screen.findByRole('button', { name: 'متابعة' }));
-    expect(await screen.findByText(/جار إعادة الاتصال/)).toBeInTheDocument();
+    expect(await screen.findByText(/تجري إعادة الاتصال تلقائيًا/)).toBeInTheDocument();
     await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
     await screen.findByText(/الحالة: مكتملة/);
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith(`/jobs/${summary.job_id}`))).toHaveLength(2);

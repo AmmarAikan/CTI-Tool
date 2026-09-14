@@ -346,7 +346,7 @@ class ExternalControlClient:
         if (not cls._safe_id(payload.get("source_id"), minimum=1)
                 or not cls._safe_text(payload.get("name"), 200)
                 or not cls._safe_text(payload.get("source_type"), 80)
-                or payload.get("status") not in {"enabled", "disabled", "pending_review"}
+                or payload.get("status") not in {"enabled", "disabled", "pending_review", "requires_configuration"}
                 or not isinstance(payload.get("metadata"), dict)
                 or not set(payload["metadata"]) <= cls.SOURCE_METADATA_KEYS):
             raise ExternalControlTransportError("External source contract is invalid")

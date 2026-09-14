@@ -5,6 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import { useI18n } from '../i18n/I18nContext';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { JobMonitor, TERMINAL_STATES } from './Sources';
+import './DarkWebWatches.css';
 
 const PAGE_SIZE=25;
 function safeActionError(error:unknown,t:ReturnType<typeof useI18n>['t']){if(error instanceof ApiError&&error.status===401)return t('sessionExpired');if(error instanceof ApiError&&error.status===403)return t('forbidden');if(error instanceof ApiError&&error.status===409)return t('duplicateWatch');if(error instanceof ApiError&&error.status===422)return t('invalidWatchKeyword');if(error instanceof ApiError&&error.status===429)return t('providerUnavailable');if(error instanceof ApiError&&[502,503,504].includes(error.status))return t('darkWebUnavailable');if(error instanceof ApiError&&error.code==='invalid_response')return t('malformed');if(error instanceof TypeError)return t('disconnected');return t('watchSaveFailed')}
