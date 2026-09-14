@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
+
+import requests
 
 from backend.app.pipeline.ingestion.external.application.dark_web_discovery import (
-    AhmiaHTMLDiscovery, CandidateVerifier, DiscoveryProvider, DynamicDiscoveryScanner,
+    AhmiaHTMLDiscovery, CandidateVerifier, DiscoveryProvider, DiscoveryUnavailable, DynamicDiscoveryScanner, ProviderHttpClient,
+    ProviderDisabled, ProviderMissing,
     canonical_onion_url, normalize_keywords,
 )
+from backend.app.pipeline.ingestion.external.integration.jobs import InProcessJobRunner
 from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import SQLiteDarkWebWatchStore
+from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import DarkWebWatchService
 from backend.app.pipeline.ingestion.external.dark_web_connector import TorResponse
 
 ONION="a"*56+".onion"
@@ -65,6 +72,57 @@ class DarkWebDiscoveryTests(unittest.TestCase):
             scanner=DynamicDiscoveryScanner({"ahmia":broken},CandidateVerifier(FakeTor(b"Acme")))
             with self.assertRaises(Exception): scanner.scan(watch,[])
             self.assertIsNone(store.get(watch["watch_id"])["checkpoint_hash"])
+
+    def test_provider_identity_is_revalidated_for_every_scan(self):
+        enabled=self.provider(lambda *_:b"")
+        disabled_config=DiscoveryProvider("disabled",False,"ahmia_html","https://search.example/?q={query}",False,"search.example")
+        scanner=DynamicDiscoveryScanner({"ahmia":enabled,"disabled":AhmiaHTMLDiscovery(disabled_config,lambda *_:b"")},CandidateVerifier(FakeTor(b"")))
+        with self.assertRaises(ProviderMissing): scanner.scan({"provider_id":"missing","keywords":["Acme"]},[])
+        with self.assertRaises(ProviderDisabled): scanner.scan({"provider_id":"disabled","keywords":["Acme"]},[])
+        self.assertEqual(scanner.scan({"provider_id":"ahmia","keywords":["Acme"]},[])[2]["discovered"],0)
+
+    def test_watch_creation_validates_provider_before_database_mutation(self):
+        enabled=self.provider(lambda *_:b"")
+        disabled_config=DiscoveryProvider("disabled",False,"ahmia_html","https://search.example/?q={query}",False,"search.example")
+        scanner=DynamicDiscoveryScanner({"ahmia":enabled,"disabled":AhmiaHTMLDiscovery(disabled_config,lambda *_:b"")},CandidateVerifier(FakeTor(b"")))
+        store=Mock();store.create_advanced.return_value={"provider_id":"ahmia"}
+        service=DarkWebWatchService(store,Mock(),scanner)
+        with self.assertRaises(ProviderMissing): service.create_discovery_watch(["Acme"],"any","missing",3600)
+        with self.assertRaises(ProviderDisabled): service.create_discovery_watch(["Acme"],"any","disabled",3600)
+        store.create_advanced.assert_not_called()
+        self.assertEqual(service.create_discovery_watch(["Acme"],"any","ahmia",3600)["provider_id"],"ahmia")
+        store.create_advanced.assert_called_once_with(["Acme"],"any","ahmia",3600)
+
+    def test_existing_discovery_watch_never_falls_back_when_provider_registry_is_missing(self):
+        store=Mock();store.get.return_value={"watch_id":"dww-existing","enabled":True,"provider_id":"missing","keyword":"Acme"}
+        service=DarkWebWatchService(store,Mock(),None)
+        with self.assertRaises(ProviderMissing): service.scan("dww-existing")
+        service.scanner.scan.assert_not_called();store.commit_scan.assert_not_called()
+
+    def test_transient_discovery_failure_is_safe_and_retryable(self):
+        discovery=self.provider(lambda *_: (_ for _ in ()).throw(requests.Timeout("secret endpoint")))
+        with self.assertRaises(DiscoveryUnavailable) as raised: discovery.discover(("Acme",))
+        self.assertTrue(raised.exception.retryable);self.assertEqual(raised.exception.code,"provider_temporarily_unavailable")
+        self.assertNotIn("secret",raised.exception.public_message)
+        runner=InProcessJobRunner(max_workers=1)
+        try:
+            job=runner.submit("cmd-safe",lambda: discovery.discover(("Acme",)))
+            for _ in range(100):
+                terminal=runner.get(job.job_id)
+                if terminal and terminal.state=="failed": break
+                time.sleep(.01)
+            self.assertEqual(terminal.error,{"code":"provider_temporarily_unavailable","message":"discovery provider is temporarily unavailable","retryable":True,"details":{}})
+            self.assertNotIn("secret",str(terminal.safe_dict()))
+        finally: runner.shutdown()
+
+    def test_rate_limit_and_server_failures_are_retryable_but_client_failure_is_not(self):
+        for status,retryable in ((429,True),(503,True),(404,False)):
+            response=Mock(status_code=status,headers={});response.close=Mock()
+            session=Mock();session.cookies=Mock();session.get.return_value=response
+            client=ProviderHttpClient("socks5h://proxy.invalid:9050",session)
+            with self.assertRaises(DiscoveryUnavailable) as raised: client.fetch("https://search.example/",True,10)
+            self.assertIs(raised.exception.retryable,retryable)
+            self.assertNotIn("search.example",raised.exception.public_message)
 
     def test_keyword_bounds_and_normalization(self):
         self.assertEqual(normalize_keywords(["  Acme  Corp ","Ransomware"]),("Acme Corp","Ransomware"))

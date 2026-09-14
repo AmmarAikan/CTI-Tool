@@ -1,8 +1,10 @@
 import { cleanup, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearToken } from '../api/client';
 import { Exports } from '../pages/Exports';
 import { Reviews } from '../pages/Reviews';
+import { DarkWebWatches } from '../pages/DarkWebWatches';
 import { renderWithProviders } from './fixtures';
 
 const response = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
@@ -59,5 +61,17 @@ describe('external exports states', () => {
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('انتهت جلسة الدخول')); expect(sessionStorage.getItem('cti_access_token')).toBeNull(); cleanup();
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => response({ detail: 'unavailable' }, 503)); renderWithProviders(<Exports />);
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('خدمة التصدير غير متاحة')); expect(screen.getByRole('button', { name: 'إعادة المحاولة' })).toBeInTheDocument();
+  });
+});
+
+describe('dark web provider identity', () => {
+  it('offers and submits only the exact enabled and ready provider', async () => {
+    sessionStorage.setItem('cti_access_token','token');
+    const watch={watch_id:'dww-1234567890abcdef',keyword:'Acme',keywords:['Acme'],match_mode:'any',provider_id:'ready-provider',scan_interval_seconds:3600,enabled:true,created_at:'2026-09-14T00:00:00Z',updated_at:'2026-09-14T00:00:00Z',last_scan_at:null,last_success_at:null,result_count:0,new_result_count:0,checkpoint_hash:null};
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockImplementation((input,init)=>{const path=String(input);if(path.endsWith('/auth/me'))return response({id:'u',username:'analyst',role:'analyst',is_active:true});if(path.endsWith('/dark-web/watches'))return response({schema_version:'1.0',items:[]});if(path.endsWith('/dark-web/discovery/providers'))return response([{provider_id:'not-ready',enabled:true,ready:false,through_tor:true},{provider_id:'ready-provider',enabled:true,ready:true,through_tor:true}]);if(init?.method==='POST'&&path.endsWith('/dark-web/discovery/watches'))return response(watch,201);return response([])});
+    vi.spyOn(window,'confirm').mockReturnValue(true);renderWithProviders(<DarkWebWatches/>);const actor=userEvent.setup();
+    const providerSelect=await screen.findByLabelText('مزود الاكتشاف');expect(providerSelect).not.toHaveTextContent('not-ready');await actor.selectOptions(providerSelect,'ready-provider');
+    await actor.type(screen.getByLabelText('كلمة المراقبة'),'Acme');await actor.click(screen.getByRole('button',{name:'إضافة كلمة'}));await actor.click(screen.getByRole('button',{name:'إضافة'}));
+    await waitFor(()=>expect(fetchMock.mock.calls.some(([input,init])=>String(input).endsWith('/dark-web/discovery/watches')&&init?.method==='POST'&&JSON.parse(String(init.body)).provider_id==='ready-provider')).toBe(true));
   });
 });

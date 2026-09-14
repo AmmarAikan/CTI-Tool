@@ -37,6 +37,7 @@ export function ProcessingCenter() {
   const submissionController = useRef<AbortController | undefined>(undefined);
   const sources = useQuery({ queryKey: ['center-sources'], queryFn: api.externalSources, retry: false });
   const watches = useQuery({ queryKey: ['center-watches'], queryFn: api.darkWebWatches, retry: false });
+  const providers = useQuery({ queryKey: ['center-dark-web-providers'], queryFn: api.darkWebDiscoveryProviders, retry: false });
   const snapshot = useQueries({ queries: [
     { queryKey: ['center-summary'], queryFn: api.dashboardSummary, retry: false },
     { queryKey: ['center-events'], queryFn: () => api.intelligenceEvents(5), retry: false },
@@ -114,10 +115,11 @@ export function ProcessingCenter() {
     const request = { generation, preview, signal: controller.signal };
     if (action === 'approve') approve.mutate(request); else reject.mutate(request);
   }
+  const readyProviderIds = new Set((providers.data || []).filter((item) => item.enabled && item.ready).map((item) => item.provider_id));
   const choices = kind === 'external'
     ? (sources.data || []).filter((item) => item.status === 'enabled').map((item) => [item.source_id, item.name])
     : kind === 'dark'
-      ? (watches.data?.items || []).filter((item) => item.enabled).map((item) => [item.watch_id, item.keyword])
+      ? (watches.data?.items || []).filter((item) => item.enabled && Boolean(item.provider_id) && readyProviderIds.has(item.provider_id!)).map((item) => [item.watch_id, item.keyword])
       : kind === 'internal'
         ? [['dionaea', 'Dionaea'], ['host-auth', t('hostAuth')], ['web-access', t('webAccess')]]
         : [];

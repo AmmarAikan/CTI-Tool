@@ -219,6 +219,11 @@ class DarkWebWatchScanner:
 
 class DarkWebWatchService:
     def __init__(self, store: SQLiteDarkWebWatchStore, scanner: DarkWebWatchScanner, discovery_scanner=None): self.store,self.scanner,self.discovery_scanner,self._active,self._lock=store,scanner,discovery_scanner,set(),threading.Lock()
+    def create_discovery_watch(self, keywords: list[str], match_mode: str, provider_id: str, scan_interval_seconds: int) -> dict[str, Any]:
+        from backend.app.pipeline.ingestion.external.application.dark_web_discovery import ProviderMissing
+        if self.discovery_scanner is None: raise ProviderMissing()
+        self.discovery_scanner.require_provider(provider_id)
+        return self.store.create_advanced(keywords,match_mode,provider_id,scan_interval_seconds)
     def scan(self, watch_id: str) -> dict[str, Any]:
         with self._lock:
             if watch_id in self._active: raise WatchConflict("scan_active")
@@ -226,7 +231,9 @@ class DarkWebWatchService:
         try:
             watch=self.store.get(watch_id)
             if not watch["enabled"]: raise WatchConflict("watch_disabled")
-            if watch.get("provider_id") and self.discovery_scanner is not None:
+            if watch.get("provider_id"):
+                from backend.app.pipeline.ingestion.external.application.dark_web_discovery import ProviderMissing
+                if self.discovery_scanner is None: raise ProviderMissing()
                 matches,partial,scan_counts=self.discovery_scanner.scan(watch,self.store.tracked_urls(watch_id))
             else:
                 matches,partial=self.scanner.scan(watch["keyword"]); scan_counts={}

@@ -30,6 +30,7 @@ from backend.app.pipeline.ingestion.external.application.manual_preview_service 
 from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import (
     DarkWebWatchService, WatchConflict, WatchNotFound, WatchValidationError,
 )
+from backend.app.pipeline.ingestion.external.application.dark_web_discovery import ProviderDisabled, ProviderMissing
 from backend.app.pipeline.ingestion.external.application.review_service import (
     ReviewService,
 )
@@ -289,7 +290,10 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
 
     @app.post(f"{API_PREFIX}/dark-web/discovery/watches", response_model=DiscoveryWatchResponse, status_code=201)
     def create_discovery_watch(body: DiscoveryWatchCreateBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
-        try: return watches().store.create_advanced(body.keywords,body.match_mode,body.provider_id,body.scan_interval_seconds)
+        try:
+            return watches().create_discovery_watch(body.keywords,body.match_mode,body.provider_id,body.scan_interval_seconds)
+        except ProviderMissing: raise APIError(422,"provider_missing","selected discovery provider is unavailable") from None
+        except ProviderDisabled: raise APIError(422,"provider_disabled","selected discovery provider is disabled") from None
         except WatchValidationError: raise APIError(422,"invalid_watch","watch configuration is not permitted") from None
         except WatchConflict as exc: raise APIError(409,str(exc),"watch could not be created") from None
 

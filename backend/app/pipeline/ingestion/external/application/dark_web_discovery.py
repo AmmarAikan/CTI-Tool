@@ -13,6 +13,8 @@ from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 from bs4 import BeautifulSoup
 import requests
 
+from backend.app.pipeline.ingestion.external.application.job_errors import SafeJobFailure
+
 from backend.app.pipeline.ingestion.external.dark_web_connector import (
     DarkWebRequestError, DarkWebSource, TorHttpClient, TorUnavailableError, V3_ONION_LABEL,
 )
@@ -22,7 +24,19 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 class DiscoveryConfigurationError(ValueError): pass
-class DiscoveryUnavailable(RuntimeError): pass
+class DiscoveryFailure(SafeJobFailure): pass
+
+class ProviderMissing(DiscoveryFailure):
+    def __init__(self) -> None: super().__init__("provider_missing", "configured discovery provider is unavailable", retryable=False)
+
+class ProviderDisabled(DiscoveryFailure):
+    def __init__(self) -> None: super().__init__("provider_disabled", "configured discovery provider is disabled", retryable=False)
+
+class DiscoveryUnavailable(DiscoveryFailure):
+    def __init__(self, reason: str = "provider_failure", *, retryable: bool = False) -> None:
+        code = "provider_temporarily_unavailable" if retryable else "provider_failure"
+        message = "discovery provider is temporarily unavailable" if retryable else "discovery provider request was rejected safely"
+        super().__init__(code, message, retryable=retryable); self.reason = reason
 
 
 def normalize_keywords(values: Iterable[str]) -> tuple[str, ...]:
@@ -99,15 +113,17 @@ class ProviderHttpClient:
         for _ in range(4):
             cookie_jar=getattr(self.session,"cookies",None)
             if cookie_jar is not None: cookie_jar.clear()
-            response=self.session.get(current,headers={"Accept":"text/html"},proxies=proxies,timeout=(5,min(timeout,15)),stream=True,allow_redirects=False)
+            try: response=self.session.get(current,headers={"Accept":"text/html"},proxies=proxies,timeout=(5,min(timeout,15)),stream=True,allow_redirects=False)
+            except (requests.ConnectionError,requests.Timeout) as exc: raise DiscoveryUnavailable("provider_network_failure",retryable=True) from exc
             if response.status_code in {301,302,303,307,308}:
                 from urllib.parse import urljoin
                 destination=urljoin(current,response.headers.get("Location","")); response.close()
                 target=urlsplit(destination)
                 if target.scheme not in {"http","https"} or target.hostname!=parsed.hostname or target.username or target.password: raise DiscoveryUnavailable("provider_redirect_blocked")
                 current=destination; continue
-            if response.status_code==429: response.close(); raise DiscoveryUnavailable("provider_rate_limited")
-            if response.status_code!=200 or response.headers.get("Content-Type","").split(";",1)[0].lower()!="text/html": response.close(); raise DiscoveryUnavailable("provider_unavailable")
+            if response.status_code==429: response.close(); raise DiscoveryUnavailable("provider_rate_limited",retryable=True)
+            if 500<=response.status_code<=599: response.close(); raise DiscoveryUnavailable("provider_server_failure",retryable=True)
+            if response.status_code!=200 or response.headers.get("Content-Type","").split(";",1)[0].lower()!="text/html": response.close(); raise DiscoveryUnavailable("provider_response_invalid")
             chunks=[]; size=0
             for chunk in response.iter_content(65536):
                 size+=len(chunk)
@@ -129,7 +145,9 @@ class AhmiaHTMLDiscovery:
         for page in range(1, self.provider.max_result_pages + 1):
             endpoint = self.provider.search_endpoint.replace("{query}", quote_plus(query)).replace("{page}", str(page))
             try: payload = self.fetch(endpoint, self.provider.through_tor, self.provider.timeout_seconds)
-            except Exception as exc: raise DiscoveryUnavailable("provider_unavailable") from exc
+            except DiscoveryFailure: raise
+            except (requests.ConnectionError,requests.Timeout,OSError) as exc: raise DiscoveryUnavailable("provider_network_failure",retryable=True) from exc
+            except Exception as exc: raise DiscoveryUnavailable("provider_failure") from exc
             if len(payload) > 1_048_576: raise DiscoveryUnavailable("provider_response_too_large")
             soup = BeautifulSoup(payload, "html.parser")
             for anchor in soup.find_all("a", href=True):
@@ -179,9 +197,14 @@ class DynamicDiscoveryScanner:
         return [{"provider_id": key, "enabled": value.provider.enabled, "ready": value.provider.enabled,
                  "through_tor": value.provider.through_tor} for key, value in sorted(self.discoveries.items())]
 
+    def require_provider(self, provider_id: str) -> AhmiaHTMLDiscovery:
+        discovery=self.discoveries.get(provider_id)
+        if discovery is None: raise ProviderMissing()
+        if not discovery.provider.enabled: raise ProviderDisabled()
+        return discovery
+
     def scan(self, watch: dict, tracked_urls: list[str]) -> tuple[list[dict], bool, dict[str, int]]:
-        provider_id=watch["provider_id"]; discovery=self.discoveries.get(provider_id)
-        if discovery is None or not discovery.provider.enabled: raise DiscoveryUnavailable("provider_unconfigured")
+        provider_id=watch["provider_id"]; discovery=self.require_provider(provider_id)
         keywords=tuple(watch.get("keywords") or [watch["keyword"]]); mode=watch.get("match_mode","any")
         candidates=discovery.discover(keywords)
         unique=list(dict.fromkeys([*candidates,*tracked_urls]))[:20]

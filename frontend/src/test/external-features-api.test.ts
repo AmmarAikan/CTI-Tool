@@ -70,4 +70,14 @@ describe('external feature contracts', () => {
     vi.restoreAllMocks(); vi.spyOn(globalThis, 'fetch').mockImplementation(() => response([{ ...source, protected_url: `http://${'a'.repeat(56)}.onion/` }]));
     await expect(api.darkWebDiscoveredSources(source.watch_id)).rejects.toMatchObject({ status: 502, code: 'invalid_response' });
   });
+
+  it('submits the exact provider identity returned by readiness', async () => {
+    const provider={provider_id:'configured-provider',enabled:true,ready:true,through_tor:true};
+    const watch={watch_id:'dww-1234567890abcdef',keyword:'Acme',keywords:['Acme'],match_mode:'any',provider_id:provider.provider_id,scan_interval_seconds:3600,enabled:true,created_at:'2026-09-14T00:00:00Z',updated_at:'2026-09-14T00:00:00Z',last_scan_at:null,last_success_at:null,result_count:0,new_result_count:0,checkpoint_hash:null};
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockImplementation((input)=>String(input).endsWith('/dark-web/discovery/providers')?response([provider]):response(watch));
+    const selected=(await api.darkWebDiscoveryProviders()).find(value=>value.enabled&&value.ready)!;
+    await api.createDarkWebDiscoveryWatch(['Acme'],'any',selected.provider_id);
+    const body=JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(body.provider_id).toBe(provider.provider_id);
+  });
 });

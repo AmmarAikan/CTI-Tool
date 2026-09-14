@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
 
 from backend.app.pipeline.ingestion.external.common.logging import get_logger
+from backend.app.pipeline.ingestion.external.application.job_errors import SafeJobFailure
 
 
 LOGGER = get_logger(__name__)
@@ -117,5 +118,7 @@ class InProcessJobRunner:
             with self._lock:
                 job = self._jobs[job_id]
                 job.state = "cancelled" if job.cancellation_requested else "failed"
-                job.error = None if job.cancellation_requested else {"code": "job_failed", "message": "job execution failed safely", "retryable": False, "details": {}}
+                if job.cancellation_requested: job.error = None
+                elif isinstance(exc,SafeJobFailure): job.error={"code":exc.code,"message":exc.public_message,"retryable":exc.retryable,"details":{}}
+                else: job.error={"code":"job_failed","message":"job execution failed safely","retryable":False,"details":{}}
                 job.updated_at = utc_now()
