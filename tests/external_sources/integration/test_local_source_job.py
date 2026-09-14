@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
 import tempfile
@@ -88,15 +89,21 @@ class LocalSourceJobTests(unittest.TestCase):
     def test_reddit_registry_requires_all_documented_oauth_settings(self) -> None:
         names = ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT")
         base = {"EXTERNAL_API_TOKEN": "registry-test-token", "EXTERNAL_API_ROLES": "operator"}
-        with patch.dict(os.environ, {**base, **{name: "" for name in names}}, clear=False):
-            local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
-            source = local.load_collection_registry()["reddit-netsec"]
-            self.assertFalse(source.enabled)
-            self.assertTrue(source.configuration["requires_configuration"])
-        with patch.dict(os.environ, {name: "configured-for-test" for name in names}, clear=False):
-            source = local.load_collection_registry()["reddit-netsec"]
-            self.assertTrue(source.enabled)
-            self.assertNotIn("requires_configuration", source.configuration)
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "sources.json"
+            path.write_text(json.dumps({"social_media_sources":[{"source_id":"reddit-oauth-test","name":"OAuth test","source_type":"reddit","transport":"reddit_oauth","enabled":True,"subreddit":"netsec","max_items":10,"request_timeout_seconds":20,"rate_limit_delay_seconds":1,"fetch_linked_articles":False,"max_response_bytes":100000,"max_redirects":2}]}),encoding="utf-8")
+            with patch.dict(os.environ, {**base, **{name: "" for name in names}}, clear=False):
+                local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
+                public = local.load_collection_registry()["reddit-netsec"]
+                self.assertTrue(public.enabled)
+                self.assertNotIn("requires_configuration", public.configuration)
+                source = local.load_collection_registry(path)["reddit-oauth-test"]
+                self.assertFalse(source.enabled)
+                self.assertTrue(source.configuration["requires_configuration"])
+            with patch.dict(os.environ, {**base, **{name: "configured-for-test" for name in names}}, clear=False):
+                source = local.load_collection_registry(path)["reddit-oauth-test"]
+                self.assertTrue(source.enabled)
+                self.assertNotIn("requires_configuration", source.configuration)
 
     def test_health_and_exact_job_get_remain_responsive_during_slow_collection(self) -> None:
         started, release = threading.Event(), threading.Event()

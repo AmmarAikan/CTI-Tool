@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
+from urllib.parse import urlsplit
 
 from backend.app.pipeline.common.cti_schema import RawRecord
 from backend.app.pipeline.ingestion.base_connector import ExternalConnector
@@ -15,9 +16,26 @@ from backend.app.pipeline.ingestion.external.crawler.web_crawler import WebCrawl
 from backend.app.pipeline.ingestion.external.preprocessing.content_processor import ExternalContentProcessor
 from backend.app.pipeline.ingestion.external.preprocessing.text_preprocessor import TextPreprocessor
 from backend.app.pipeline.ingestion.external.privacy.privacy_filter import PrivacyFilter
+from backend.app.pipeline.ingestion.external.manual_source.safe_http_client import SSRFProtectedHttpClient
+from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy, URLPolicyError, ValidatedURL
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
+
+
+class PlatformURLPolicy:
+    """Apply public-network validation plus an exact HTTPS host/path constraint."""
+
+    def __init__(self, host: str, path_validator: Callable[[str], bool], *, base: ManualURLPolicy | None = None) -> None:
+        self.host, self.path_validator, self.base = host, path_validator, base or ManualURLPolicy()
+
+    def validate(self, url: str, *, allow_onion: bool = False) -> ValidatedURL:
+        del allow_onion
+        validated = self.base.validate(url, allow_onion=False)
+        parts = urlsplit(validated.canonical_url)
+        if parts.scheme != "https" or parts.hostname != self.host or parts.port is not None or not self.path_validator(parts.path):
+            raise URLPolicyError("source URL is outside the approved public transport")
+        return validated
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +79,7 @@ class SocialItemProcessor:
     """Shared social item enrichment, processing, state, and classification."""
 
     def __init__(self, *, crawler: WebCrawler | None = None, content_processor: ExternalContentProcessor | None = None, classification_service: ClassificationService | None = None, state: dict[str, Any] | None = None, clock=None) -> None:
-        self.crawler = crawler or WebCrawler()
+        self.crawler = crawler or WebCrawler(http_client=SSRFProtectedHttpClient(ManualURLPolicy()))
         self.content_processor = content_processor or ExternalContentProcessor(TextPreprocessor(PROJECT_ROOT / "config" / "preprocessing_rules.json"), PrivacyFilter(PROJECT_ROOT / "config" / "privacy_rules.json"))
         self.classification_service = classification_service or ClassificationService()
         self.state = state if state is not None else {}
@@ -71,24 +89,25 @@ class SocialItemProcessor:
     def process(self, candidate: SocialCandidate) -> tuple[ExternalCTIItem | None, Literal["accepted", "review", "rejected", "unchanged"]]:
         record_id = f"social-{sha256_text(f'{candidate.platform}:{candidate.item_id}').split(':', 1)[1][:32]}"
         item_state = self.state["items"].setdefault(record_id, {})
-        full_text, crawl_metadata = "", None
+        full_text, crawl_metadata, warning, exported_external_url = "", None, None, None
         if candidate.external_url:
             crawl = self.crawler.crawl(candidate.external_url, etag=item_state.get("etag"), last_modified=item_state.get("last_modified"))
             if crawl.status == "unchanged" and item_state.get("record_hash"):
                 return None, "unchanged"
-            if crawl.status == "success": full_text = crawl.extracted_text
-            crawl_metadata = crawl.to_dict()
+            if crawl.status == "success": full_text, exported_external_url = crawl.extracted_text, candidate.external_url
+            else: warning = "external_article_unavailable"
+            crawl_metadata = {"status": crawl.status, "error_categories": sorted({error.category for error in crawl.errors})}
         processing = self.content_processor.process(full_text or candidate.body)
         item = ExternalCTIItem(
             record_id=record_id, source_item_id=candidate.item_id, source=candidate.source_name,
             source_type=candidate.platform, category="social", title=candidate.title,
             link=candidate.canonical_url, content=processing.export_content,
-            summary=self.content_processor.process(candidate.body).export_content[:300], published=candidate.published,
+            summary=processing.export_content[:300], published=candidate.published,
             updated_at=None, author=candidate.author, collected_at=self._now_iso(),
             content_hash=sha256_text(processing.export_content), metadata={"platform": candidate.platform,
-            "observed_in": [candidate.source_id], "external_url": candidate.external_url,
+            "observed_in": [candidate.source_id], "external_url": exported_external_url,
             "content_status": "full_text" if full_text else "source_text", **candidate.metadata,
-            **processing.metadata, "crawler": crawl_metadata},
+            **processing.metadata, "crawler": crawl_metadata, "warning_category": warning},
         )
         classified = self.classification_service.classify_item(item)
         item = classified.item

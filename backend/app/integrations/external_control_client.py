@@ -37,7 +37,7 @@ class ExternalControlClient:
     SOURCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
     JOB_STATES = frozenset({"queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"})
     COUNT_KEYS = frozenset({"accepted_records", "review_records", "rejected_records", "skipped_records", "error_count"})
-    SOURCE_METADATA_KEYS = frozenset({"category", "method"})
+    SOURCE_METADATA_KEYS = frozenset({"category", "method", "transport", "limitation"})
 
     def __init__(
         self,
@@ -346,7 +346,7 @@ class ExternalControlClient:
         if (not cls._safe_id(payload.get("source_id"), minimum=1)
                 or not cls._safe_text(payload.get("name"), 200)
                 or not cls._safe_text(payload.get("source_type"), 80)
-                or payload.get("status") not in {"enabled", "disabled", "pending_review", "requires_configuration"}
+                or payload.get("status") not in {"enabled", "ready", "disabled", "pending_review", "requires_configuration", "temporarily_unavailable", "unsupported_configuration"}
                 or not isinstance(payload.get("metadata"), dict)
                 or not set(payload["metadata"]) <= cls.SOURCE_METADATA_KEYS):
             raise ExternalControlTransportError("External source contract is invalid")

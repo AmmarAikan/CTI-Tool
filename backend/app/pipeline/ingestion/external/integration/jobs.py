@@ -102,7 +102,7 @@ class InProcessJobRunner:
             result = asdict(value) if is_dataclass(value) else value if isinstance(value, dict) else {"status": str(value)}
             failure_category = result.pop("_failure_category", "internal_failure")
             failure_retryable = result.pop("_failure_retryable", False)
-            if failure_category not in {"transient_upstream", "rate_limited", "source_configuration", "parsing_contract", "internal_failure"}:
+            if failure_category not in {"transient_upstream", "upstream_temporarily_unavailable", "source_access_unavailable", "rate_limited", "source_configuration", "parsing_contract", "internal_failure"}:
                 failure_category, failure_retryable = "internal_failure", False
             with self._lock:
                 job = self._jobs[job_id]

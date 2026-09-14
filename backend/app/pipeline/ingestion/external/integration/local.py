@@ -76,11 +76,19 @@ def load_collection_registry(path: Path = PROJECT_ROOT / "config" / "sources.jso
                 continue
             source_id = str(raw.get("source_id") or "").strip()
             if source_id:
-                configured = source_type != "reddit" or all(os.environ.get(key) for key in ("REDDIT_CLIENT_ID","REDDIT_CLIENT_SECRET","REDDIT_USER_AGENT"))
                 configuration = dict(raw)
-                if source_type == "reddit" and bool(raw.get("enabled", True)) and not configured:
+                if source_id in registry: raise ValueError("duplicate external source id")
+                supported = True
+                try:
+                    if source_type == "reddit": RedditSource.from_mapping(configuration)
+                    elif source_type == "telegram": TelegramSource.from_mapping(configuration)
+                except ValueError: supported = False
+                oauth = source_type == "reddit" and configuration.get("transport") == "reddit_oauth"
+                configured = not oauth or all(os.environ.get(key) for key in ("REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET", "REDDIT_USER_AGENT"))
+                if oauth and bool(raw.get("enabled", True)) and not configured:
                     configuration["requires_configuration"] = True
-                registry[source_id] = RegisteredSource(source_id, source_type, bool(raw.get("enabled", True)) and configured, configuration)
+                if not supported: configuration = {"source_id": source_id, "name": str(raw.get("name") or source_id), "unsupported_configuration": True}
+                registry[source_id] = RegisteredSource(source_id, source_type, bool(raw.get("enabled", True)) and configured and supported, configuration)
     for source in dark_web_sources:
         if source.source_id in registry:
             raise DarkWebConfigurationError(f"duplicate external source id: {source.source_id}")
@@ -136,12 +144,14 @@ class LocalCanonicalSourceExecutor(SourceExecutor):
         raw = str(getattr(errors[0], "category", "internal_failure"))
         if raw == "rate_limited":
             category = "rate_limited"
-        elif raw in {"configuration_required", "credentials_missing", "authorization_failed", "request_rejected"}:
+        elif raw in {"configuration_required", "source_configuration", "credentials_missing", "authorization_failed", "request_rejected"}:
             category = "source_configuration"
-        elif raw in {"invalid_feed", "invalid_response", "parse_failed", "contract_failed"}:
+        elif raw == "source_access_unavailable":
+            category = "source_access_unavailable"
+        elif raw in {"invalid_feed", "invalid_response", "malformed_response", "parse_failed", "contract_failed", "parsing_contract"}:
             category = "parsing_contract"
-        elif raw in {"network_failure", "upstream_unavailable", "feed_request_failed", "request_failed", "timeout"}:
-            category = "transient_upstream"
+        elif raw in {"network_failure", "network_timeout", "upstream_unavailable", "upstream_temporarily_unavailable", "feed_request_failed", "request_failed", "timeout"}:
+            category = "upstream_temporarily_unavailable"
         else:
             category = "internal_failure"
         return category, bool(getattr(errors[0], "retryable", False))
@@ -342,7 +352,9 @@ def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None, cra
 class DevelopmentSourceService(SourceManagementService):
     def __init__(self, registry: dict[str, RegisteredSource]) -> None:
         self._sources = {source_id: SourceView(source_id, str(source.configuration.get("name") or source_id),
-            source.source_type, "requires_configuration" if source.configuration.get("requires_configuration") else "enabled" if source.enabled else "disabled", {})
+            source.source_type, "unsupported_configuration" if source.configuration.get("unsupported_configuration") else "requires_configuration" if source.configuration.get("requires_configuration") else "ready" if source.enabled and source.source_type in {"reddit", "telegram"} else "enabled" if source.enabled else "disabled",
+            {"transport": str(source.configuration["transport"]), "limitation": "public_feed_availability" if source.source_type == "reddit" else "configured_public_channels_only"}
+            if source.source_type in {"reddit", "telegram"} and source.configuration.get("transport") else {})
             for source_id, source in registry.items()}
     def list_sources(self) -> list[SourceView]: return sorted(self._sources.values(), key=lambda value: value.source_id)
     def get_source_status(self, source_id: str) -> SourceView | None: return self._sources.get(source_id)

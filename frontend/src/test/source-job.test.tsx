@@ -32,6 +32,25 @@ describe('single external source job', () => {
     mockRole('admin'); renderWithProviders(<Sources />); expect(await screen.findByRole('button', { name: `تشغيل ${enabled.name}` })).toBeEnabled();
   });
 
+  it('shows credential-free readiness, method labels, and limitations without technical identifiers', async () => {
+    sessionStorage.setItem('cti_language', 'en');
+    const publicSources = [
+      { source_id: 'reddit-hidden-id', name: 'Reddit netsec', source_type: 'reddit', status: 'ready', metadata: { transport: 'reddit_public_rss', limitation: 'public_feed_availability' } },
+      { source_id: 'telegram-hidden-id', name: 'Telegram public', source_type: 'telegram', status: 'ready', metadata: { transport: 'telegram_public_preview', limitation: 'configured_public_channels_only' } },
+    ];
+    sessionStorage.setItem('cti_access_token', 'token');
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me')
+      ? response(users.viewer) : response(publicSources));
+    renderWithProviders(<Sources />);
+    expect(await screen.findByText('Public RSS')).toBeInTheDocument();
+    expect(screen.getByText('Public Channel Preview')).toBeInTheDocument();
+    expect(screen.getByText(/public feed/i)).toBeInTheDocument();
+    expect(screen.getByText(/configured public channels/i)).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('reddit-hidden-id');
+    expect(document.body).not.toHaveTextContent('telegram-hidden-id');
+    expect(screen.queryByRole('button', { name: /تشغيل/ })).not.toBeInTheDocument();
+  });
+
   it('disables a disabled source and requires confirmation', async () => {
     const fetchMock = mockRole('analyst'); renderWithProviders(<Sources />);
     expect(await screen.findByRole('button', { name: `تشغيل ${disabled.name}` })).toBeDisabled();

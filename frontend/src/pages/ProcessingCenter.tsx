@@ -118,7 +118,7 @@ export function ProcessingCenter() {
   }
   const readyProviderIds = new Set((providers.data || []).filter((item) => item.enabled && item.ready).map((item) => item.provider_id));
   const choices = kind === 'external'
-    ? (sources.data || []).filter((item) => item.status === 'enabled').map((item) => [item.source_id, item.name])
+    ? (sources.data || []).filter((item) => ['enabled','ready'].includes(item.status)).map((item) => [item.source_id, item.name])
     : kind === 'dark'
       ? (watches.data?.items || []).filter((item) => item.enabled && Boolean(item.provider_id) && readyProviderIds.has(item.provider_id!)).map((item) => [item.watch_id, item.keyword])
       : kind === 'internal'

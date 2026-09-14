@@ -42,8 +42,8 @@ function JobPanel({ job, label, pollingError, reconnecting, timedOut, onRefresh 
 
 function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onRun: (source: Source) => void }) {
   const {t}=useI18n();
-  const disabled = source.status !== 'enabled' || busy;
-  return <button className="button button-secondary" disabled={disabled} aria-label={t('runSource',{name:source.name})} title={source.status !== 'enabled' ? t('sourceDisabled') : undefined} onClick={() => onRun(source)}>{busy ? t('submitting') : t('run')}</button>;
+  const available = ['enabled', 'ready'].includes(source.status);
+  return <button className="button button-secondary" disabled={!available || busy} aria-label={t('runSource',{name:source.name})} title={!available ? t('sourceDisabled') : undefined} onClick={() => onRun(source)}>{busy ? t('submitting') : t('run')}</button>;
 }
 
 export function JobMonitor({ sourceId, label=sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MAX_MS }: { sourceId: string; label?: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void; maxPollingMs?: number }) {
@@ -66,9 +66,12 @@ export function JobMonitor({ sourceId, label=sourceId, job, onUpdate, maxPolling
 
 function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUpdate }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void }) {
   const {t}=useI18n();
+  const {can}=useAuth();
   const active = Boolean(job && !TERMINAL_STATES.includes(job.state));
+  const transport = source.metadata.transport === 'reddit_public_rss' ? t('publicRss') : source.metadata.transport === 'telegram_public_preview' ? t('publicChannelPreview') : undefined;
+  const limitation = source.metadata.limitation === 'public_feed_availability' ? t('redditPublicLimitation') : source.metadata.limitation === 'configured_public_channels_only' ? t('telegramPublicLimitation') : undefined;
   return <>
-    <tr><td><strong>{source.name}</strong><code dir="ltr">{source.source_id}</code></td><td><span className="type-label">{source.source_type}</span></td><td><StatusBadge status={source.status} /></td><td>{Object.keys(source.metadata || {}).length > 0 ? <span className="safe-label">{t('available')}</span> : <span className="muted-text">{t('none')}</span>}</td>{canRun && <td><RunButton source={source} busy={pending || active} onRun={onRun} /></td>}</tr>
+    <tr><td><strong>{source.name}</strong>{can('analyst')&&<code dir="ltr">{source.source_id}</code>}</td><td><span className="type-label">{transport || source.source_type}</span>{limitation&&<small>{limitation}</small>}</td><td><StatusBadge status={source.status} /></td><td>{Object.keys(source.metadata || {}).length > 0 ? <span className="safe-label">{t('available')}</span> : <span className="muted-text">{t('none')}</span>}</td>{canRun && <td><RunButton source={source} busy={pending || active} onRun={onRun} /></td>}</tr>
     {(job || submissionError) && <tr className="job-detail-row"><td colSpan={canRun ? 5 : 4}>{submissionError ? <div className="job-panel error-panel" role="alert"><strong>{t('startSourceFailed')}</strong><span>{submissionError}</span></div> : job && <JobMonitor sourceId={source.source_id} label={source.name} job={job} onUpdate={onUpdate} />}</td></tr>}
   </>;
 }
@@ -91,7 +94,7 @@ export function Sources() {
   const types = [...new Set(sources.map((source) => source.source_type))];
   const filtered = useMemo(() => sources.filter((source) => `${source.name} ${source.source_id}`.toLowerCase().includes(search.toLowerCase()) && (status === 'all' || source.status === status) && (type === 'all' || source.source_type === type)), [sources, search, status, type]);
   function run(source: Source) {
-    if (source.status !== 'enabled' || pending[source.source_id] || (jobs[source.source_id] && !TERMINAL_STATES.includes(jobs[source.source_id].state))) return;
+    if (!['enabled','ready'].includes(source.status) || pending[source.source_id] || (jobs[source.source_id] && !TERMINAL_STATES.includes(jobs[source.source_id].state))) return;
     if (window.confirm(t('confirmRunSource',{name:source.name}))) start.mutate(source.source_id);
   }
   function updateJob(sourceId: string, job: ExternalJob) { setJobs((value) => value[sourceId]?.job_id !== job.job_id || value[sourceId] === job ? value : { ...value, [sourceId]: job }); }
@@ -100,7 +103,7 @@ export function Sources() {
 
   return <section className="page-section"><div className="section-heading"><div><span className="eyebrow">{t('sourcesEyebrow')}</span><h2>{t('external')}</h2><p>{t('sourcesDescription')}</p></div><span className="count-label">{t('sourcesCount',{count:number(filtered.length)})}</span></div>
     {can('analyst') && <section className="run-all-panel" aria-label={t('runAll')}><button className="button" type="button" disabled={startAll.isPending || allActive} onClick={runAll}>{startAll.isPending ? t('submitting') : t('runAllEnabled')}</button><p className="muted-text">{t('runAllHint')}</p>{allError && <div className="job-panel error-panel" role="alert">{allError}</div>}{allJob && <JobMonitor sourceId="all-enabled" job={allJob} onUpdate={(_id, job) => setAllJob(job)} />}</section>}
-    <div className="filters"><label className="search-wrap"><span className="sr-only">{t('search')}</span><input placeholder={t('searchSource')} value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label={t('filterStatus')} value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t('allStates')}</option><option value="enabled">{t('enabled')}</option><option value="requires_configuration">{t('requiresConfiguration')}</option><option value="disabled">{t('disabled')}</option><option value="pending_review">{t('pendingReview')}</option></select><select aria-label={t('filterType')} value={type} onChange={(event) => setType(event.target.value)}><option value="all">{t('allTypes')}</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
+    <div className="filters"><label className="search-wrap"><span className="sr-only">{t('search')}</span><input placeholder={t('searchSource')} value={search} onChange={(event) => setSearch(event.target.value)} /></label><select aria-label={t('filterStatus')} value={status} onChange={(event) => setStatus(event.target.value)}><option value="all">{t('allStates')}</option><option value="ready">{t('ready')}</option><option value="enabled">{t('enabled')}</option><option value="requires_configuration">{t('requiresConfiguration')}</option><option value="temporarily_unavailable">{t('temporarilyUnavailable')}</option><option value="unsupported_configuration">{t('unsupportedConfiguration')}</option><option value="disabled">{t('disabled')}</option><option value="pending_review">{t('pendingReview')}</option></select><select aria-label={t('filterType')} value={type} onChange={(event) => setType(event.target.value)}><option value="all">{t('allTypes')}</option>{types.map((item) => <option key={item} value={item}>{item}</option>)}</select></div>
     {query.isLoading && <LoadingState label={t('loadingSources')} />}{query.isError && <ErrorState onRetry={() => void query.refetch()} />}{!query.isLoading && !query.isError && sources.length === 0 && <EmptyState label={t('noSources')} />}{!query.isLoading && !query.isError && sources.length > 0 && filtered.length === 0 && <EmptyState label={t('noFilteredSources')} />}
     {filtered.length > 0 && <div className="table-shell"><table><thead><tr><th>{t('source')}</th><th>{t('type')}</th><th>{t('status')}</th><th>{t('safeData')}</th>{can('analyst') && <th>{t('action')}</th>}</tr></thead><tbody>{filtered.map((source) => <SourceRows key={source.source_id} source={source} canRun={can('analyst')} pending={Boolean(pending[source.source_id])} job={jobs[source.source_id]} submissionError={submissionErrors[source.source_id]} onRun={run} onUpdate={updateJob} />)}</tbody></table></div>}
   </section>;

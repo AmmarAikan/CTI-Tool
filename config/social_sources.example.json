@@ -1,0 +1,35 @@
+{
+  "social_media_sources": [
+    {
+      "source_id": "reddit-netsec-example",
+      "name": "Reddit - r/netsec",
+      "source_type": "reddit",
+      "transport": "reddit_public_rss",
+      "enabled": false,
+      "subreddit": "netsec",
+      "max_items": 30,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
+    }
+  ],
+  "telegram_sources": [
+    {
+      "source_id": "telegram-example-channel",
+      "name": "Telegram public channel example",
+      "source_type": "telegram",
+      "transport": "telegram_public_preview",
+      "enabled": false,
+      "channel": "example_channel",
+      "max_messages": 50,
+      "max_pages": 3,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
+    }
+  ]
+}

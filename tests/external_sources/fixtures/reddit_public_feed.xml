@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>netsec</title>
+  <entry>
+    <id>t3_public1</id><title>Public security discussion</title>
+    <updated>2026-09-14T08:00:00Z</updated>
+    <link rel="alternate" href="https://www.reddit.com/r/netsec/comments/public1/example/" />
+    <content type="html">&lt;div&gt;&lt;p&gt;Detailed public discussion of malware detection and remediation guidance.&lt;/p&gt;&lt;/div&gt;</content>
+  </entry>
+  <entry>
+    <id>t3_public2</id><title>Linked security advisory</title>
+    <published>2026-09-14T09:00:00Z</published>
+    <link rel="alternate" href="https://www.reddit.com/r/netsec/comments/public2/example/" />
+    <content type="html">&lt;div&gt;&lt;p&gt;Public caption describing a vulnerability and mitigation.&lt;/p&gt;&lt;a href="https://example.org/advisory?utm_source=reddit"&gt;article&lt;/a&gt;&lt;/div&gt;</content>
+  </entry>
+</feed>

@@ -129,46 +129,58 @@
     {
       "source_id": "reddit-netsec",
       "name": "Reddit - r/netsec",
-      "platform": "reddit",
-      "url": "https://www.reddit.com/r/netsec/",
+      "source_type": "reddit",
       "subreddit": "netsec",
-      "method": "oauth_api",
+      "transport": "reddit_public_rss",
       "enabled": true,
-      "category": "social",
-      "limit": 30
+      "max_items": 30,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     },
     {
       "source_id": "reddit-cybersecurity",
       "name": "Reddit - r/cybersecurity",
-      "platform": "reddit",
-      "url": "https://www.reddit.com/r/cybersecurity/",
+      "source_type": "reddit",
       "subreddit": "cybersecurity",
-      "method": "oauth_api",
+      "transport": "reddit_public_rss",
       "enabled": true,
-      "category": "social",
-      "limit": 30
+      "max_items": 30,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     },
     {
       "source_id": "reddit-blueteamsec",
       "name": "Reddit - r/blueteamsec",
-      "platform": "reddit",
-      "url": "https://www.reddit.com/r/blueteamsec/",
+      "source_type": "reddit",
       "subreddit": "blueteamsec",
-      "method": "oauth_api",
+      "transport": "reddit_public_rss",
       "enabled": true,
-      "category": "social",
-      "limit": 30
+      "max_items": 30,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     },
     {
       "source_id": "reddit-asknetsec",
       "name": "Reddit - r/AskNetsec",
-      "platform": "reddit",
-      "url": "https://www.reddit.com/r/AskNetsec/",
+      "source_type": "reddit",
       "subreddit": "AskNetsec",
-      "method": "oauth_api",
+      "transport": "reddit_public_rss",
       "enabled": true,
-      "category": "social",
-      "limit": 30
+      "max_items": 30,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     }
   ],
   "hackernews_sources": [
@@ -187,20 +199,32 @@
     {
       "source_id": "telegram-thehackernews",
       "name": "Telegram - The Hacker News",
+      "source_type": "telegram",
       "channel": "thehackernews",
-      "method": "public_preview",
+      "transport": "telegram_public_preview",
       "enabled": true,
-      "category": "social",
-      "max_pages": 3
+      "max_pages": 3,
+      "max_messages": 50,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     },
     {
       "source_id": "telegram-cvefeed",
       "name": "Telegram - CVEFeed",
+      "source_type": "telegram",
       "channel": "cvefeed",
-      "method": "public_preview",
+      "transport": "telegram_public_preview",
       "enabled": true,
-      "category": "vulnerability",
-      "max_pages": 3
+      "max_pages": 3,
+      "max_messages": 50,
+      "request_timeout_seconds": 20,
+      "rate_limit_delay_seconds": 1,
+      "fetch_linked_articles": true,
+      "max_response_bytes": 2097152,
+      "max_redirects": 3
     }
   ]
 }

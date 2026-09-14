@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -9,10 +10,10 @@ from jsonschema import Draft202012Validator
 
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.classification.classifier import ClassificationResult, MODEL_SHA256, MODEL_VERSION
-from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse
+from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse, ResponseTooLargeError
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.hackernews_connector import HackerNewsConnector, HackerNewsSource
-from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditSource
+from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditPublicRSSClient, RedditSource
 from backend.app.pipeline.ingestion.external.social_common import ConfiguredSocialCollector, SocialCollectionResult, SocialItemProcessor
 from backend.app.pipeline.ingestion.external.telegram_connector import TelegramConnector, TelegramSource
 
@@ -47,6 +48,24 @@ class StubHttpClient:
         return HttpResponse(url, 200, {"Content-Type": content_type}, (FIXTURES / self.fixture).read_bytes())
 
 
+def telegram_page(*message_ids: int, channel: str = "thehackernews") -> bytes:
+    messages = "".join(
+        f'<div class="tgme_widget_message" data-post="{channel}/{message_id}">'
+        f'<div class="tgme_widget_message_text">Security bulletin {message_id} contains detailed defensive guidance and indicators.</div>'
+        f'<time datetime="2026-08-22T12:00:00Z"></time><span class="tgme_widget_message_views">12K</span></div>'
+        for message_id in message_ids
+    )
+    return f"<!doctype html><html><body>{messages}</body></html>".encode()
+
+
+class TelegramPages:
+    def __init__(self, pages): self.pages, self.calls = list(pages), []
+    def get(self, before=None):
+        self.calls.append(before)
+        body = self.pages[min(len(self.calls) - 1, len(self.pages) - 1)]
+        return HttpResponse("https://t.me/s/thehackernews", 200, {"Content-Type": "text/html"}, body)
+
+
 class StubRedditApi:
     configured = True
     def __init__(self, error=None): self.error, self.calls = error, []
@@ -56,11 +75,53 @@ class StubRedditApi:
         return json.loads((FIXTURES / "reddit_listing.json").read_text(encoding="utf-8"))
 
 
+class StubRedditFeed:
+    def __init__(self, fixture="reddit_public_feed.xml", *, error=None, url="https://www.reddit.com/r/netsec/.rss", content_type="application/atom+xml"):
+        self.fixture,self.error,self.url,self.content_type,self.calls=fixture,error,url,content_type,[]
+    def get(self,url,**kwargs):
+        self.calls.append((url,kwargs))
+        if self.error: raise self.error
+        return HttpResponse(self.url,200,{"Content-Type":self.content_type},(FIXTURES/self.fixture).read_bytes())
+
+
 def processor(*, state=None, classification="accepted"):
     return SocialItemProcessor(crawler=StubCrawler(), classification_service=ClassificationService(StubClassifier(classification)), state=state, clock=lambda: NOW)
 
 
 class SocialConnectorTests(unittest.TestCase):
+    def test_reddit_public_rss_self_text_link_empty_dedup_and_disabled(self) -> None:
+        source=RedditSource.from_mapping({"source_id":"reddit-netsec","name":"Reddit netsec","source_type":"reddit","transport":"reddit_public_rss","enabled":True,"subreddit":"netsec","max_items":10,"request_timeout_seconds":10,"rate_limit_delay_seconds":0,"fetch_linked_articles":True,"max_response_bytes":100000,"max_redirects":2})
+        client=StubRedditFeed();state={"sources":{},"items":{}}
+        connector=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=client),processor=processor(state=state))
+        first,second=connector.collect_result(),connector.collect_result()
+        self.assertEqual((first.status,len(first.accepted_items),first.accepted_items[0].source_item_id),("completed",2,"t3_public1"))
+        self.assertEqual(first.accepted_items[1].metadata["content_status"],"full_text")
+        self.assertEqual(second.all_items,[])
+        empty=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed("reddit_public_empty.xml")),processor=processor()).collect_result()
+        self.assertEqual((empty.status,empty.all_items),("completed",[]))
+        disabled=RedditConnector(RedditSource("reddit-off","Off","netsec",False,transport="reddit_public_rss"),rss_client=object(),processor=processor()).collect_result()
+        self.assertEqual(disabled.status,"disabled")
+
+    def test_reddit_public_rss_rejects_contract_and_classifies_transport(self) -> None:
+        source=RedditSource("reddit-netsec","Reddit","netsec",True,transport="reddit_public_rss")
+        def http_error(status):
+            response=requests.Response();response.status_code=status
+            return requests.HTTPError(response=response)
+        cases=[(StubRedditFeed(url="https://example.org/feed"),"source_access_unavailable",False),
+               (StubRedditFeed(content_type="text/html"),"malformed_response",False),
+               (StubRedditFeed(error=ResponseTooLargeError()),"malformed_response",False),
+               (StubRedditFeed(error=requests.Timeout()),"network_timeout",True),
+               (StubRedditFeed(error=http_error(403)),"source_access_unavailable",False),
+               (StubRedditFeed(error=http_error(429)),"rate_limited",True),
+               (StubRedditFeed(error=http_error(503)),"upstream_temporarily_unavailable",True)]
+        for client,category,retryable in cases:
+            result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=client),processor=processor()).collect_result()
+            self.assertEqual((result.status,result.errors[0].category,result.errors[0].retryable),("failed",category,retryable))
+        malformed=StubRedditFeed();malformed.fixture="reddit_public_empty.xml"
+        malformed.get=lambda url,**kwargs:HttpResponse(url,200,{"Content-Type":"application/xml"},b"<broken")
+        result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=malformed),processor=processor()).collect_result()
+        self.assertEqual(result.errors[0].category,"parsing_contract")
+
     def test_reddit_uses_bounded_official_api_shape_and_enriches_link_posts(self) -> None:
         source = RedditSource("reddit-netsec", "Reddit - r/netsec", "netsec", True, 30)
         api, state = StubRedditApi(), {"sources": {}, "items": {}}
@@ -104,6 +165,43 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual(state["sources"]["telegram-thn"]["checkpoint_message_id"], 12002)
         self.assertTrue(client.calls[0][0].startswith("https://t.me/s/"))
 
+    def test_telegram_pagination_is_bounded_and_stops_on_no_new_messages(self) -> None:
+        source = TelegramSource("telegram-thn", "Telegram THN", "thehackernews", max_pages=5,
+                                max_messages=10, rate_limit_delay_seconds=0)
+        client = TelegramPages([telegram_page(12003, 12002), telegram_page(12002, 12001), telegram_page(12002, 12001)])
+        result = TelegramConnector(source, public_client=client, processor=processor(), sleeper=lambda _: None).collect_result()
+        self.assertEqual([item.source_item_id for item in result.all_items], ["12003", "12002", "12001"])
+        self.assertEqual(client.calls, [None, 12002, 12001])
+
+        bounded = TelegramPages([telegram_page(12003, 12002), telegram_page(12001)])
+        TelegramConnector(TelegramSource("telegram-thn", "Telegram THN", "thehackernews", max_pages=1),
+                          public_client=bounded, processor=processor()).collect_result()
+        self.assertEqual(bounded.calls, [None])
+
+    def test_telegram_safe_transport_failures_and_disabled_source(self) -> None:
+        source = TelegramSource("telegram-thn", "Telegram THN", "thehackernews", max_pages=1)
+        def http_error(status):
+            response=requests.Response();response.status_code=status
+            return requests.HTTPError(response=response)
+        for error, category, retryable in ((ResponseTooLargeError(), "malformed_response", False),
+                                           (requests.Timeout(), "network_timeout", True),
+                                           (requests.ConnectionError(), "upstream_temporarily_unavailable", True),
+                                           (http_error(429), "rate_limited", True),
+                                           (http_error(503), "upstream_temporarily_unavailable", True)):
+            class Failing:
+                def get(self, *_args, **_kwargs): raise error
+            result = TelegramConnector(source, http_client=Failing(), processor=processor()).collect_result()
+            self.assertEqual((result.errors[0].category, result.errors[0].retryable), (category, retryable))
+        class Forbidden:
+            def get(self, *_args, **_kwargs):
+                response = requests.Response(); response.status_code = 403
+                raise requests.HTTPError(response=response)
+        result = TelegramConnector(source, http_client=Forbidden(), processor=processor()).collect_result()
+        self.assertEqual((result.errors[0].category, result.errors[0].retryable), ("source_access_unavailable", False))
+        disabled = TelegramConnector(TelegramSource("telegram-off", "Off", "example_channel", enabled=False),
+                                     public_client=object(), processor=processor()).collect_result()
+        self.assertEqual(disabled.status, "disabled")
+
     def test_classification_failure_routes_social_item_to_review(self) -> None:
         result = HackerNewsConnector(HackerNewsSource("hn", "HN", "CVE", limit=1, max_pages=1), http_client=StubHttpClient("hackernews_search.json"), processor=processor(classification="error")).collect_result()
         self.assertEqual(len(result.review_items), 2)
@@ -121,8 +219,8 @@ class SocialConnectorTests(unittest.TestCase):
         self.assertEqual([(r.source_id, r.status) for r in results], [("bad", "failed"), ("good", "completed")])
 
         config = json.loads((ROOT / "config" / "sources.json").read_text(encoding="utf-8"))
-        self.assertTrue(all(value["method"] == "oauth_api" and value["enabled"] for value in config["social_media_sources"]))
-        self.assertTrue(all(value["method"] == "public_preview" for value in config["telegram_sources"]))
+        self.assertTrue(all(value["transport"] == "reddit_public_rss" and value["enabled"] for value in config["social_media_sources"]))
+        self.assertTrue(all(value["transport"] == "telegram_public_preview" for value in config["telegram_sources"]))
 
     def test_social_item_validates_contract_and_is_not_trusted(self) -> None:
         result = RedditConnector(RedditSource("reddit-netsec", "Reddit", "netsec", True), api_client=StubRedditApi(), processor=processor()).collect_result()

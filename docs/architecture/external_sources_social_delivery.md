@@ -6,7 +6,7 @@ have been retired.
 
 | Source | Delivery method | Access policy |
 | --- | --- | --- |
-| Reddit | Registered Reddit Data API using application-only OAuth | Disabled until approved `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, and identifiable `REDDIT_USER_AGENT` are configured; no anonymous scraping fallback |
+| Reddit | Public subreddit RSS at `https://www.reddit.com/r/{subreddit}/.rss` | Credential-free for explicitly configured subreddits; availability depends on Reddit's public feed |
 | Hacker News | Algolia HN Search `search_by_date` JSON API | Public, bounded search with `created_at_i` incremental filter and page bounds |
 | Telegram | Server-rendered `https://t.me/s/{channel}` public preview | Configured public channels only; no login, joining, messaging, private invite access, or MTProto session |
 
@@ -23,3 +23,17 @@ link posts use the shared `WebCrawler`. Cleaning, privacy handling, item/stage
 hashing, and Phase 6 classification are applied before disposition. Missing or
 failed classification routes the item to review. Collector failures remain
 independent.
+
+Social sources are configured in `config/sources.json`; safe disabled examples
+are provided in `config/social_sources.example.json`. To add a subreddit, copy
+the Reddit example, choose a unique `source_id`, set `subreddit`, review the
+request/item bounds, and enable it. To monitor a Telegram channel, do the same
+with an explicitly reviewed public username. Disable either source by setting
+`enabled` to `false`. `max_items`/`max_messages` bound collected items and
+`max_pages` bounds Telegram history requests.
+
+Reddit application-only OAuth remains an optional, separate `reddit_oauth`
+transport and requires all three Reddit environment variables. The public RSS
+transport never uses them. Public platforms can return access-unavailable or
+temporary-unavailable results; CTI-Tool does not attempt browser automation,
+login, private-channel access, or access-control bypasses.
