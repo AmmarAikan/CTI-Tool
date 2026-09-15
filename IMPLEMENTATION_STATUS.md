@@ -10,13 +10,15 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 ## Current checkpoint
 
-- Phase: P0 baseline and gap analysis complete; implementation has not started.
+- Phase: P0 Phase 1 complete in development: incremental UI/information-architecture foundation plus secure public Register/Login/RBAC hardening.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
-- Clean implementation worktree: `C:\My Projects\.codex-worktrees\actit-final-production`.
+- Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
+- UI/Auth implementation checkpoint: `ef2a2b262d6b5465913a75e2b2ecf7dcee92f2ce`.
 - Production source checkout: `/home/alaaldeen/cti-vps-production-integration`.
 - Active immutable release: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` through `/opt/cti-platform/current`.
-- Production state was inspected read-only. No container, network, firewall, volume, database, credential, or release mutation was made during the baseline.
+- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phase 1.
+- Candidate-only Docker images `actit-backend:ui-auth-candidate` and `actit-frontend:ui-auth-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
 
 ## Verified production baseline
 
@@ -70,7 +72,7 @@ PostgreSQL is the authoritative ACTIT datastore. Approximate live row counts at 
 | Users | 5 |
 | Enrichments | 0 |
 
-MISP contains exactly one unpublished event, two attributes, and no objects. This is not caused by missing ACTIT events. The code has no automatic pipeline-to-MISP synchronization: MISP writes occur only through authenticated send endpoints. Event and attribute UUIDs are deterministic, so resending the same ACTIT event updates/reuses the existing MISP event instead of creating duplicates. Dry runs do not create MISP records.
+Observed fact: MISP contained exactly one unpublished event, two attributes, and no objects while ACTIT had many events. Deterministic UUID reuse, dry-run behavior, and the absence of automatic pipeline synchronization are implementation hypotheses that may explain this state, but they are not yet the verified final root cause. The dedicated MISP phase must compare the live ACTIT event, audit, outbound request, MISP API, and MISP database evidence before applying a fix.
 
 ### Verified ML and analytics state
 
@@ -89,11 +91,11 @@ MISP contains exactly one unpublished event, two attributes, and no objects. Thi
 | Frontend Vitest | 15 files, 106 tests passed; one non-failing React `act(...)` warning |
 | Frontend production build | Passed; 95 modules built |
 | External Sources compile check | Passed |
-| Python unittest discovery | 344 tests executed; 1 failure and 3 errors |
-| Python failure classification | Host test-environment dependency gaps: `joblib` and `stix2` unavailable; one model assertion consequently failed |
+| Python unittest discovery in VPS disposable venv | 351 tests passed after installing the committed CPU-compatible requirements; the venv is test-only and not a production dependency |
+| Backend production-image parity checkpoint | 100 backend tests passed in the isolated Docker backend environment before Phase 1 |
 | Source Compose validation | Not completed because the ignored production `.env` is intentionally absent from the Git checkout; this is not a failure of the already-running immutable release |
 
-The Python suite must be rerun in an isolated environment with the committed requirements before any remaining failures are classified as product defects.
+Phase 1 validation: backend targeted tests passed 5/5 both in the VPS test environment and in the newly built backend candidate image with Compose-equivalent read-only ML report mount; frontend targeted tests passed 16/16; the frontend candidate image passed TypeScript validation, all 108 Vitest tests, production build, and isolated `/` plus `/register` HTTP smoke checks. Existing non-failing React `act(...)` warnings and the Vite 500 kB chunk warning remain documented technical debt.
 
 ## Verified end-to-end lifecycle
 
@@ -113,10 +115,10 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | VPS-only immutable deployment | Ready | Active release `20260914T172623Z-f9d0c31`; clean source checkout | Preserve release/rollback model during deployment |
 | Tailscale analyst access | Ready | Frontend and service routes verified | Preserve as private administrative/analyst transport |
 | Public-IP ACTIT access | Missing | Public 80/443 probes did not expose the application | Add hardened reverse proxy on the existing VPS/public IP without exposing backend/databases |
-| Login and session authentication | Partial | Scrypt password hashes, signed expiring tokens, active-user check | Add rate limiting, security audit outcomes, and production browser/session hardening |
-| Public registration | Missing | User creation is admin-only and allows role selection | Add abuse-resistant registration that always creates an active `viewer`; never accept a client-selected role |
+| Login and session authentication | Ready in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, and success/rejection audit evidence added | Retain later reverse-proxy/session-storage hardening and validate after immutable deployment |
+| Public registration | Ready in development, not deployed | Public API and bilingual form always create active `viewer`; extra/client role is rejected; duplicate and rate-limit states are safe | Deploy through immutable release only after the next meaningful checkpoint |
 | RBAC and user administration | Partial | Viewer/analyst/admin guards, last-admin protection, audit view | Verify every mutating endpoint and add deny-path tests |
-| Information architecture | Partial | Functional sidebar grouped by operations, sources, intelligence, administration | Add public landing/register flow, global search, clearer evidence/story paths, responsive accessibility pass |
+| Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, and presented MISP as a sharing group | Add global investigation entry, evidence/story paths, and page-by-page incremental accessibility improvements |
 | Executive dashboard | Partial | Counts, severities, pipelines, runs, sources, and processing center exist | Add health/readiness, trend/evidence clarity, actionable drill-downs, and trustworthy empty/degraded states |
 | External Sources | Ready/Partial | Healthy service and canonical external implementation | Preserve ownership boundaries; expose provenance/freshness/failure evidence more clearly |
 | Internal Sources | Ready/Partial | Gateway streams ready; Dionaea/host-auth/web-access views exist | Improve drill-down, sensor freshness, and safe outlier evidence display |
@@ -138,10 +140,21 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | SSRF controls | Partial | External manual URL policy/safe HTTP client and tests exist | Revalidate redirect, DNS rebinding, private range, metadata, size/time, and content-type controls end to end |
 | Security scan/remediation | Pending | No final-branch Codex Security result yet | Run after P0 functionality stabilizes; triage and verify every accepted fix |
 | Cloudflare/custom domain | Deferred | No domain exists in Contabo account; no domain is required for P0 | Keep optional; do not purchase or change DNS without explicit approval |
-| Formal Figma alignment | Pending | Figma reference supplied; current implementation not yet compared node-by-node | Load approved design context and translate it into responsive accessible React components |
+| Reference-informed UI refinement | Partial | Exact ThreatIntel Figma was inspected and UI UX Pro Max guidance was applied to the existing ACTIT component/token/i18n architecture | Continue page-by-page; never replace ACTIT or copy Figma/OpenCTI mock code/data |
 
 ## Decisions and safety boundaries
 
+- Existing ACTIT UI is the implementation baseline. Routes, pages, API integrations, components, i18n/RTL/LTR, dark/light themes, useful navigation, tables/forms, identity, backend contracts, and tests are preserved unless a narrowly justified improvement requires change.
+- Major product decisions use the three-reference model:
+  - Scientific/functional basis: `AI-Based_Holistic_Framework_for_Cyber_Threat_Intelligence_Management.pdf`.
+  - Mature CTI workflow/IA pattern: current OpenCTI documentation and implementation concepts, without cloning or replacing ACTIT architecture.
+  - Visual/interaction basis: only the approved ThreatIntel Figma Make file, without importing mock data or generated architecture.
+- Phase 1 decision rationale:
+  - Paper basis: communicate the internal/external collection, preprocessing/extraction, correlation, storage, and sharing lifecycle.
+  - OpenCTI basis: keep analyst pivots grounded in observations/entities, relationships, source context, and provenance.
+  - Figma basis: selectively use navy/cyan hierarchy, compact operational cards, clear evidence states, and responsive presentation.
+  - ACTIT implementation: retain the existing React router, API client, auth context, translation catalog, design tokens, dashboard, and backend models; add only the public entry and viewer-only account path required by P0.
+- UI UX Pro Max influenced information density, focus visibility, keyboard/accessibility states, responsive breakpoints, and reduced-motion treatment; its generic visual palette was not used where it conflicted with ACTIT and the approved Figma.
 - PostgreSQL remains the source of truth. MISP remains an unpublished-by-default, selective sharing destination.
 - No bulk MISP mirror will be enabled without validation, evidence, deduplication, analyst review, rate/size bounds, and explicit publication controls.
 - Existing Docker volumes and databases must never be removed, recreated, or migrated without a verified backup and rollback plan.
@@ -159,27 +172,28 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 - Executed baseline frontend tests/build, Python test discovery, and the External Sources compile check.
 - Audited existing authentication, RBAC, frontend routes, correlations, risk, ATT&CK, STIX, and MISP code paths.
 - Established this isolated final-production branch/worktree and documented the gap matrix.
+- Added a public ACTIT landing page and a bilingual, responsive Login/Register experience on top of the existing design system.
+- Added public self-registration with strict schema validation, server-enforced `viewer` role, no client role input, safe duplicate handling, and no credential/hash response.
+- Added bounded in-process login/register abuse protection, non-reversible client keys, unknown-user password verification, and authentication audit outcomes.
+- Preserved all existing protected feature routes while moving the protected Dashboard from `/` to `/dashboard` and updating internal fallbacks/links.
+- Built isolated candidate backend/frontend Docker images and completed the Phase 1 targeted, full-frontend, build, and smoke validations without connecting to production data.
 
 ## Next Task
 
-Create an isolated dependency-complete test environment from the committed requirements and rerun the full Python suite. Classify any remaining failures. Then implement P0 secure self-registration as a `viewer`-only flow with bounded abuse protection, audit evidence, backend tests, frontend landing/register pages, and no client-controlled role or privilege escalation.
-
-Before major UI work, load the supplied Figma design context and run the installed `ui-ux-pro-max` design-system/React guidance. Record any unavailable connector guidance as a tool limitation, not as a product result.
+Inspect the existing Dashboard component and its current statistics/health contracts. Implement the smallest real-data improvement that strengthens analyst workflow and readiness visibility without replacing the page or adding mock metrics. Add direct drill-downs into existing events/indicators/sources/runs, preserve current charts and degraded/empty states, run only Dashboard/API-targeted tests plus the frontend production build, and create the next logical checkpoint.
 
 ## Remaining P0 sequence
 
-1. Dependency-complete Python baseline and defect classification.
-2. Secure registration/login hardening and complete RBAC regression coverage.
-3. Public landing page and information-architecture foundation.
-4. Figma/UI design foundation with Arabic/English and responsive accessibility.
-5. Dashboard/readiness improvements.
-6. Bounded global search.
-7. Cross-source evidence and explainable correlations.
-8. Threat storyline/timeline.
-9. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
-10. Deterministic non-destructive demo dataset and readiness checks.
-11. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
-12. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
+1. Dashboard/readiness improvements using only real existing API contracts.
+2. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
+3. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
+4. Bounded global search.
+5. Cross-source evidence and explainable correlations.
+6. Threat storyline/timeline.
+7. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
+8. Deterministic non-destructive demo dataset and readiness checks.
+9. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
+10. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
 
 ## Remaining P1 / deferred
 
@@ -191,9 +205,9 @@ Before major UI work, load the supplied Figma design context and run the install
 ## Known blockers and non-blockers
 
 - Non-blocker: no custom domain. Public IP is the P0 target.
-- Non-blocker: MISP has one event. The connection works; the missing piece is a reviewed delivery workflow.
-- Non-blocker pending retest: Python host dependencies were incomplete; use an isolated environment before diagnosing application failures.
-- Tool dependency for UI phase: the Figma design-to-code guidance resource must be located/loaded before calling the design-context operation.
+- Non-blocker: MISP has one observed event; the final root cause remains unproven until the dedicated targeted investigation.
+- Non-blocker: the complete backend suite passed in the VPS disposable test environment; production remains Docker/Compose only.
+- Non-blocker: the exact Figma Make reference and UI UX Pro Max were available and used for selective guidance.
 - Genuine stop boundaries: destructive database/volume migration, paid domain/service purchase, unavailable credentials, irreversible firewall/DNS action, or an external approval requirement.
 
 ## Background and scheduled work
@@ -204,5 +218,5 @@ None. No unattended process or automation was started during the baseline.
 
 - Production rollback reference: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31`.
 - Source branch reference: `origin/codex/vps-production-integration` at `f9d0c31`.
-- Do not deploy from the Windows worktree directly. Build an immutable VPS release, preserve the current symlink target, verify health/smoke tests, and switch the symlink only after validation.
+- Build immutable releases only on the VPS from a validated VPS worktree, preserve the current symlink target, verify health/smoke tests, and switch the `/opt/cti-platform/current` symlink only after validation.
 - If a future release fails, restore the previous symlink target and container images without deleting volumes, then verify frontend, backend/database, External Sources, gateway, and MISP health.
