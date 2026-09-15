@@ -625,3 +625,38 @@ td { color: #cfdae4; font-size: 12px; } td code { color: #8198ac; font: 10px ui-
   .terminal-head { align-items: flex-start; flex-direction: column; }
   .auth-signals div { flex-direction: column; }
 }
+
+.dashboard-investigation { margin-block-start: 34px; }
+.dashboard-drilldowns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-block-end: 30px;
+}
+.dashboard-drilldowns .button { text-decoration: none; }
+.dashboard-event-list { display: grid; border-inline: 1px solid var(--line); background: var(--paper); }
+.dashboard-event-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+  padding: 17px 19px;
+  color: #edf6fb;
+  text-decoration: none;
+  border-block-end: 1px solid var(--line);
+  transition: border-color var(--ease), background var(--ease);
+}
+.dashboard-event-row:first-child { border-block-start: 1px solid var(--line); }
+.dashboard-event-row:hover { border-color: #2e7890; background: rgb(25 61 80 / .65); }
+.dashboard-event-row:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.dashboard-event-copy { min-width: 0; }
+.dashboard-event-copy strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dashboard-event-copy small { display: block; margin-block-start: 6px; color: #8299ac; }
+.dashboard-event-facts { display: flex; align-items: center; justify-content: flex-end; gap: 14px; color: #8da4b6; font-size: 12px; }
+.dashboard-event-facts > span strong { color: #eff7fb; }
+.pipeline-chip { padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; font: 700 10px 'Space Mono', monospace; text-transform: uppercase; }
+.pipeline-external { color: #67d7e8; border-color: rgb(48 187 210 / .38); }
+.pipeline-internal { color: #bc9cff; border-color: rgb(150 111 225 / .4); }
+:root[data-theme="light"] .dashboard-event-row { color: #173043; background: #fff; }
+:root[data-theme="light"] .dashboard-event-copy small, :root[data-theme="light"] .dashboard-event-facts { color: #607789; }
+@media (max-width: 720px) {

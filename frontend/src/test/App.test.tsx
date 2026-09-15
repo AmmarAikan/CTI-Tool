@@ -14,6 +14,8 @@ import { clearToken } from '../api/client';
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
 const user = { id: 'u1', username: 'analyst', role: 'analyst', is_active: true };
 const sources = [{ source_id: 'cisa-kev', name: 'CISA KEV', source_type: 'vulnerability', status: 'enabled', metadata: {} }];
+const emptyIntelligenceEvents = { items: [], total: 0, limit: 5, offset: 0 };
+const isLatestEventsRequest = (input: RequestInfo | URL) => String(input).includes('/intelligence/events?');
 
 beforeEach(() => { clearToken(); sessionStorage.clear(); window.history.replaceState({}, '', '/'); vi.restoreAllMocks(); });
 
@@ -65,24 +67,24 @@ describe('authentication', () => {
 
 describe('external dashboard and sources', () => {
   it('renders health success and sources with search/filter', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/auth/me') ? json(user) : String(input).endsWith('/integrations/external-control/health') ? json({ configured: true, reachable: true, service: 'external-sources', api_version: 'v1' }) : json(sources));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => isLatestEventsRequest(input) ? json(emptyIntelligenceEvents) : String(input).endsWith('/auth/me') ? json(user) : String(input).endsWith('/integrations/external-control/health') ? json({ configured: true, reachable: true, service: 'external-sources', api_version: 'v1' }) : json(sources));
     sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByText('متاحة')).toBeInTheDocument()); cleanup(); renderWithProviders(<Sources />); await waitFor(() => expect(screen.getByText('CISA KEV')).toBeInTheDocument()); const actor = userEvent.setup(); await actor.type(screen.getByPlaceholderText('بحث بالاسم أو المعرّف'), 'unknown'); expect(screen.getByText('لا توجد نتائج مطابقة للفلاتر الحالية.')).toBeInTheDocument();
   });
   it('renders source loading and error states', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => undefined)); renderWithProviders(<Sources />); expect(screen.getByText('جار تحميل المصادر...')).toBeInTheDocument();
   });
   it('renders health error and source empty states', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/integrations/external-control/health') ? json({}, 503) : json([]));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => isLatestEventsRequest(input) ? json(emptyIntelligenceEvents) : String(input).endsWith('/integrations/external-control/health') ? json({}, 503) : json([]));
     sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument()); cleanup(); renderWithProviders(<Sources />); await waitFor(() => expect(screen.getByText('لا توجد مصادر مسجلة حاليًا.')).toBeInTheDocument());
   });
   it('clears the session after a central 401', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ detail: 'Authentication required' }, 401));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => isLatestEventsRequest(input) ? json(emptyIntelligenceEvents) : json({ detail: 'Authentication required' }, 401));
     sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument()); expect(sessionStorage.getItem('cti_access_token')).toBeNull();
   });
   it('rejects invalid API response shapes and redacts reflected secrets', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ detail: 'token=super-secret https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion/x' }, 500));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => isLatestEventsRequest(input) ? json(emptyIntelligenceEvents) : json({ detail: 'token=super-secret https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.onion/x' }, 500));
     sessionStorage.setItem('cti_access_token', 'token'); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument()); expect(screen.getByRole('alert')).not.toHaveTextContent('super-secret'); expect(screen.getByRole('alert')).not.toHaveTextContent('.onion');
-    cleanup(); vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ reachable: true })); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument()); expect(screen.getByRole('alert')).not.toHaveTextContent('reachable');
+    cleanup(); vi.spyOn(globalThis, 'fetch').mockImplementation((input) => isLatestEventsRequest(input) ? json(emptyIntelligenceEvents) : json({ reachable: true })); renderWithProviders(<Dashboard />); await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument()); expect(screen.getByRole('alert')).not.toHaveTextContent('reachable');
   });
   it('shows manual navigation only to analyst-level users', async () => {
     function Navigation() { return <Layout />; }
