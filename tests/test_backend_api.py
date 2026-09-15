@@ -4,6 +4,7 @@ import os
 import shutil
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -21,6 +22,7 @@ from backend.app.db.models import (
     CorrelationRecord,
     EntityRecord,
     IndicatorRecord,
+    RelationshipRecord,
     Source,
     ThreatEvent,
 )
@@ -343,6 +345,172 @@ class BackendAPITests(unittest.TestCase):
             {("algorithm", "tfidf_cosine"), ("threshold", "0.35")},
         )
         for forbidden in ("must-not-leak", "private internal", '"normalized_text":', '"evidence":'):
+            self.assertNotIn(forbidden, response.text)
+
+
+    def test_threat_storyline_is_bounded_chronological_and_private(self) -> None:
+        observed_at = datetime(2026, 9, 7, 9, 55, tzinfo=timezone.utc)
+        created_at = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
+        last_seen = datetime(2026, 9, 7, 10, 5, tzinfo=timezone.utc)
+        with SessionLocal() as db:
+            external_source = Source(
+                id="storyline-external-source",
+                name="Storyline Research Feed",
+                source_type="research",
+                source_pipeline="external",
+                enabled=True,
+            )
+            internal_source = Source(
+                id="storyline-internal-source",
+                name="Storyline Honeypot",
+                source_type="honeypot",
+                source_pipeline="internal",
+                enabled=True,
+            )
+            root_event = ThreatEvent(
+                id="storyline-root-event",
+                source_id=external_source.id,
+                source_record_id="storyline-root-record",
+                source_type="research",
+                source_pipeline="external",
+                title="PowerShell campaign T1059.001",
+                description="An external report observed PowerShell infrastructure.",
+                normalized_text="PowerShell campaign T1059.001 used command.example.",
+                classification_label="cti_related",
+                classification_confidence=0.91,
+                severity="high",
+                risk_score=78,
+                confidence=0.9,
+                processing_status="transformed",
+                first_seen=observed_at,
+                last_seen=last_seen,
+                created_at=created_at,
+                raw_reference={
+                    "risk_factors": {
+                        "base_severity_or_cvss": 28,
+                        "indicators": 3,
+                        "confidence": 9,
+                        "private_factor": 99,
+                    },
+                    "risk_context": {
+                        "source_count": 2,
+                        "correlation_count": 1,
+                        "private_context": "must-not-leak",
+                    },
+                    "secret": "must-not-leak",
+                },
+            )
+            related_event = ThreatEvent(
+                id="storyline-related-event",
+                source_id=internal_source.id,
+                source_record_id="storyline-related-record",
+                source_type="honeypot",
+                source_pipeline="internal",
+                title="Private internal sensor title",
+                description="Private internal sensor description",
+                normalized_text="PowerShell private internal normalized telemetry",
+                severity="medium",
+                risk_score=62,
+                confidence=0.8,
+                processing_status="transformed",
+                created_at=last_seen,
+            )
+            db.add_all([
+                external_source,
+                internal_source,
+                root_event,
+                related_event,
+                IndicatorRecord(
+                    id="50000000-0000-0000-0000-000000000001",
+                    event_id=root_event.id,
+                    indicator_type="domain",
+                    value="command.example",
+                    confidence=0.88,
+                ),
+                EntityRecord(
+                    id="50000000-0000-0000-0000-000000000002",
+                    event_id=root_event.id,
+                    entity_type="threat_actor",
+                    value="Nebula",
+                    confidence=0.77,
+                ),
+                RelationshipRecord(
+                    id="50000000-0000-0000-0000-000000000003",
+                    event_id=root_event.id,
+                    subject="Nebula",
+                    relation="uses",
+                    object_value="command.example",
+                    confidence=0.76,
+                ),
+                CorrelationRecord(
+                    id="50000000-0000-0000-0000-000000000004",
+                    event_a_id=root_event.id,
+                    event_b_id=related_event.id,
+                    correlation_type="simple_indicator_match",
+                    score=1.0,
+                    reason="same_domain",
+                    evidence={
+                        "indicator_type": "domain",
+                        "values": ["command.example"],
+                        "private": "must-not-leak",
+                    },
+                    created_at=last_seen,
+                ),
+            ])
+            db.commit()
+
+        unauthorized = self.client.get(
+            "/api/v1/intelligence/events/storyline-root-event/storyline"
+        )
+        response = self.client.get(
+            "/api/v1/intelligence/events/storyline-root-event/storyline",
+            headers=self.headers,
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["event"]["id"], "storyline-root-event")
+        self.assertEqual(body["source_name"], "Storyline Research Feed")
+        self.assertEqual(body["risk_method"], "deterministic_rule_score")
+        self.assertEqual(
+            {item["key"] for item in body["risk_factors"]},
+            {"base_severity_or_cvss", "indicators", "confidence"},
+        )
+        self.assertEqual(body["risk_context"], {"source_count": 2, "correlation_count": 1})
+        self.assertEqual(body["evidence_counts"]["correlations"], 1)
+        self.assertEqual(body["observables"][0]["value"], "command.example")
+        self.assertEqual(body["entities"][0]["value"], "Nebula")
+        self.assertEqual(body["relationships"][0]["relation"], "uses")
+        self.assertTrue(body["correlations"][0]["cross_source"])
+        self.assertEqual(body["correlations"][0]["target_event"]["title"], "Internal honeypot event")
+        self.assertEqual(body["attack"]["techniques"][0]["technique_id"], "T1059.001")
+        internal_attack = self.client.get(
+            "/api/v1/intelligence/events/storyline-related-event/attack",
+            headers=self.headers,
+        )
+        internal_layer = self.client.get(
+            "/api/v1/intelligence/events/storyline-related-event/attack-navigator",
+            headers=self.headers,
+        )
+        self.assertEqual(internal_attack.status_code, 200, internal_attack.text)
+        self.assertEqual(internal_layer.status_code, 200, internal_layer.text)
+        self.assertEqual(internal_attack.json()["techniques"][0]["technique_id"], "T1059.001")
+        self.assertIn("raw sensor evidence is hidden", internal_attack.json()["techniques"][0]["evidence"])
+        self.assertIn("raw sensor evidence is hidden", internal_layer.json()["techniques"][0]["comment"])
+        self.assertNotIn("Private internal", internal_attack.text)
+        self.assertNotIn("Private internal", internal_layer.text)
+        self.assertIn("internal_raw_telemetry_hidden", body["limitations"])
+        dated = [item["occurred_at"] for item in body["milestones"] if item["occurred_at"]]
+        self.assertEqual(dated, sorted(dated))
+        self.assertFalse(body["evidence_truncated"])
+        for forbidden in (
+            "must-not-leak",
+            "Private internal",
+            "raw_reference",
+            "normalized_text",
+            "private_factor",
+            "private_context",
+        ):
             self.assertNotIn(forbidden, response.text)
 
 

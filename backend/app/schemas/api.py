@@ -470,6 +470,72 @@ class IntelligenceAttackMappingResponse(BaseModel):
     techniques: list[IntelligenceAttackTechniqueResponse]
 
 
+class IntelligenceStorylineRiskFactorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: Literal[
+        "base_severity_or_cvss",
+        "indicators",
+        "confidence",
+        "source_diversity",
+        "correlations",
+        "internal_outlier",
+    ]
+    value: float = Field(ge=0, le=100)
+
+
+class IntelligenceStorylineRiskContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_count: int | None = Field(default=None, ge=0)
+    correlation_count: int | None = Field(default=None, ge=0)
+
+
+class IntelligenceStorylineEvidenceCountsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    observables: int = Field(ge=0)
+    entities: int = Field(ge=0)
+    relationships: int = Field(ge=0)
+    correlations: int = Field(ge=0)
+    attack_mappings: int = Field(ge=0)
+
+
+class IntelligenceStorylineMilestoneResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(min_length=1, max_length=100)
+    kind: Literal["observed", "last_observed", "processed", "correlated", "attack_mapping"]
+    occurred_at: str | None = Field(default=None, max_length=40)
+    event_id: str = Field(max_length=64)
+    related_event_id: str | None = Field(default=None, max_length=64)
+    title: str = Field(min_length=1, max_length=500)
+    detail: str = Field(min_length=1, max_length=500)
+    source_pipeline: Literal["external", "internal"]
+    evidence_status: Literal["recorded", "derived", "candidate"]
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    score: float | None = Field(default=None, ge=0, le=1)
+
+
+class IntelligenceStorylineResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event: IntelligenceEventSummaryResponse
+    source_name: str | None = Field(default=None, max_length=200)
+    risk_method: Literal["deterministic_rule_score"]
+    risk_factors: list[IntelligenceStorylineRiskFactorResponse] = Field(max_length=6)
+    risk_context: IntelligenceStorylineRiskContextResponse
+    evidence_counts: IntelligenceStorylineEvidenceCountsResponse
+    observables: list[IntelligenceIndicatorResponse] = Field(max_length=20)
+    entities: list[IntelligenceEntityResponse] = Field(max_length=20)
+    relationships: list[IntelligenceRelationshipResponse] = Field(max_length=20)
+    correlations: list[IntelligenceCorrelationResponse] = Field(max_length=20)
+    attack: IntelligenceAttackMappingResponse
+    milestones: list[IntelligenceStorylineMilestoneResponse] = Field(max_length=40)
+    evidence_truncated: bool
+    limitations: list[Literal[
+        "chronology_not_causality",
+        "attack_candidates_require_review",
+        "internal_raw_telemetry_hidden",
+        "bounded_evidence",
+    ]] = Field(max_length=4)
+
+
 class AdminUserCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=3, max_length=100, pattern=r"^[A-Za-z0-9_.-]+$")

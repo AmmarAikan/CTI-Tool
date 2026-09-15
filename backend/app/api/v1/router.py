@@ -76,6 +76,7 @@ from backend.app.schemas.api import (
     IntelligenceOutlierPageResponse,
     IntelligenceRunPageResponse,
     IntelligenceRunResponse,
+    IntelligenceStorylineResponse,
     InternalEventPageResponse,
     InternalPullResponse,
     LoginRequest,
@@ -1403,7 +1404,7 @@ def intelligence_event_attack(event_id: str, db: SessionDep, _: CurrentUser) -> 
         "catalog_version": mapper.CATALOG_VERSION,
         "source": "built_in_subset",
         "official_dataset_url": "https://github.com/mitre-attack/attack-stix-data",
-        "techniques": mapper.map_event(event),
+        "techniques": _safe_attack_techniques(event),
     }
 
 
@@ -1412,7 +1413,14 @@ def intelligence_event_attack_navigator(event_id: str, db: SessionDep, _: Curren
     event = db.scalar(event_query().where(ThreatEvent.id == event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Threat event not found")
-    return AttackMappingService().navigator_layer(event)
+    layer = AttackMappingService().navigator_layer(event)
+    if event.source_pipeline == "internal":
+        for item in layer["techniques"]:
+            item["comment"] = (
+                f"Internal telemetry matched {item['techniqueID']}; "
+                "raw sensor evidence is hidden in this projection."
+            )[:240]
+    return layer
 
 
 def _correlation_endpoint(event: ThreatEvent, source: Source | None) -> dict[str, Any]:
@@ -1471,6 +1479,266 @@ def _correlation_factors(item: CorrelationRecord) -> tuple[str, str, list[dict[s
     }]
 
 
+def _safe_attack_techniques(event: ThreatEvent) -> list[dict[str, Any]]:
+    techniques = AttackMappingService().map_event(event)
+    if event.source_pipeline != "internal":
+        return techniques
+    return [
+        {
+            **item,
+            "evidence": (
+                f"Internal telemetry matched {item['technique_id']}; "
+                "raw sensor evidence is hidden in this projection."
+            )[:240],
+        }
+        for item in techniques
+    ]
+
+
+def _correlation_dict(
+    item: CorrelationRecord,
+    events: dict[str, tuple[ThreatEvent, Source | None]],
+) -> dict[str, Any]:
+    source_event, source = events[item.event_a_id]
+    target_event, target_source = events[item.event_b_id]
+    score_basis, evidence_status, factors = _correlation_factors(item)
+    return {
+        "id": item.id,
+        "source_event_id": item.event_a_id,
+        "target_event_id": item.event_b_id,
+        "type": item.correlation_type,
+        "score": item.score,
+        "reason": item.reason,
+        "source_event": _correlation_endpoint(source_event, source),
+        "target_event": _correlation_endpoint(target_event, target_source),
+        "cross_source": source_event.source_pipeline != target_event.source_pipeline,
+        "score_basis": score_basis,
+        "evidence_status": evidence_status,
+        "factors": factors,
+        "created_at": iso(item.created_at),
+    }
+
+
+_STORYLINE_RISK_FACTORS = (
+    "base_severity_or_cvss",
+    "indicators",
+    "confidence",
+    "source_diversity",
+    "correlations",
+    "internal_outlier",
+)
+
+
+def _storyline_risk(event: ThreatEvent) -> tuple[list[dict[str, Any]], dict[str, int | None]]:
+    raw_reference = event.raw_reference if isinstance(event.raw_reference, dict) else {}
+    stored_factors = raw_reference.get("risk_factors")
+    stored_factors = stored_factors if isinstance(stored_factors, dict) else {}
+    factors = []
+    for key in _STORYLINE_RISK_FACTORS:
+        value = stored_factors.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= float(value) <= 100:
+            factors.append({"key": key, "value": float(value)})
+    stored_context = raw_reference.get("risk_context")
+    stored_context = stored_context if isinstance(stored_context, dict) else {}
+
+    def safe_count(key: str) -> int | None:
+        value = stored_context.get(key)
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+    return factors, {
+        "source_count": safe_count("source_count"),
+        "correlation_count": safe_count("correlation_count"),
+    }
+
+
+@router.get(
+    "/intelligence/events/{event_id}/storyline",
+    tags=["intelligence"],
+    response_model=IntelligenceStorylineResponse,
+)
+def intelligence_event_storyline(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    source = db.get(Source, event.source_id) if event.source_id else None
+    correlation_filter = or_(
+        CorrelationRecord.event_a_id == event.id,
+        CorrelationRecord.event_b_id == event.id,
+    )
+    correlation_total = db.scalar(
+        select(func.count()).select_from(CorrelationRecord).where(correlation_filter)
+    ) or 0
+    correlation_rows = db.scalars(
+        select(CorrelationRecord)
+        .where(correlation_filter)
+        .order_by(CorrelationRecord.created_at, desc(CorrelationRecord.score), CorrelationRecord.id)
+        .limit(20)
+    ).all()
+    related_ids = {
+        related_id
+        for item in correlation_rows
+        for related_id in (item.event_a_id, item.event_b_id)
+    }
+    related_rows = db.execute(
+        select(ThreatEvent, Source)
+        .outerjoin(Source, Source.id == ThreatEvent.source_id)
+        .where(ThreatEvent.id.in_(related_ids))
+    ).all() if related_ids else []
+    events = {related_event.id: (related_event, related_source) for related_event, related_source in related_rows}
+    events[event.id] = (event, source)
+    correlations = [_correlation_dict(item, events) for item in correlation_rows]
+
+    observables_total = len(event.indicators)
+    entities = sorted(
+        (item for item in event.entities if item.entity_type != "source_ip"),
+        key=lambda item: item.id,
+    )
+    relationships = [] if event.source_pipeline == "internal" else sorted(
+        event.relationships,
+        key=lambda item: item.id,
+    )
+    observables = [
+        _indicator_dict(item, event)
+        for item in sorted(event.indicators, key=lambda item: item.id)[:20]
+    ]
+    safe_entities = [
+        {"type": item.entity_type, "value": item.value, "confidence": item.confidence}
+        for item in entities[:20]
+    ]
+    safe_relationships = [
+        {
+            "subject": item.subject,
+            "relation": item.relation,
+            "object": item.object_value,
+            "confidence": item.confidence,
+        }
+        for item in relationships[:20]
+    ]
+    mapper = AttackMappingService()
+    techniques = _safe_attack_techniques(event)
+    attack = {
+        "event_id": event.id,
+        "catalog_version": mapper.CATALOG_VERSION,
+        "source": "built_in_subset",
+        "official_dataset_url": mapper.OFFICIAL_DATASET_URL,
+        "techniques": techniques,
+    }
+    risk_factors, risk_context = _storyline_risk(event)
+    observed_at = iso(event.first_seen or event.created_at)
+    milestones = [{
+        "id": f"{event.id}:observed",
+        "kind": "observed",
+        "occurred_at": observed_at,
+        "event_id": event.id,
+        "related_event_id": None,
+        "title": _safe_event_title(event),
+        "detail": _safe_event_summary(event) or "No event summary was recorded.",
+        "source_pipeline": event.source_pipeline,
+        "evidence_status": "recorded",
+        "confidence": event.confidence,
+        "score": None,
+    }]
+    last_observed_at = iso(event.last_seen)
+    if last_observed_at and last_observed_at != observed_at:
+        milestones.append({
+            **milestones[0],
+            "id": f"{event.id}:last-observed",
+            "kind": "last_observed",
+            "occurred_at": last_observed_at,
+        })
+    milestones.append({
+        "id": f"{event.id}:processed",
+        "kind": "processed",
+        "occurred_at": iso(event.created_at),
+        "event_id": event.id,
+        "related_event_id": None,
+        "title": event.processing_status or "processed",
+        "detail": event.classification_label or event.processing_status or "processed",
+        "source_pipeline": event.source_pipeline,
+        "evidence_status": "recorded",
+        "confidence": event.classification_confidence,
+        "score": None,
+    })
+    for item, projection in zip(correlation_rows, correlations, strict=True):
+        related_id = item.event_b_id if item.event_a_id == event.id else item.event_a_id
+        related_event = events[related_id][0]
+        milestones.append({
+            "id": item.id,
+            "kind": "correlated",
+            "occurred_at": iso(item.created_at),
+            "event_id": event.id,
+            "related_event_id": related_id,
+            "title": _safe_event_title(related_event),
+            "detail": item.reason or item.correlation_type,
+            "source_pipeline": related_event.source_pipeline,
+            "evidence_status": "recorded",
+            "confidence": None,
+            "score": projection["score"],
+        })
+    for technique in techniques:
+        milestones.append({
+            "id": f"{event.id}:{technique['technique_id']}",
+            "kind": "attack_mapping",
+            "occurred_at": None,
+            "event_id": event.id,
+            "related_event_id": None,
+            "title": f"{technique['technique_id']} - {technique['name']}",
+            "detail": technique["evidence"] or technique["mapping_source"],
+            "source_pipeline": event.source_pipeline,
+            "evidence_status": "derived" if technique["mapping_source"] == "explicit_id" else "candidate",
+            "confidence": technique["confidence"],
+            "score": None,
+        })
+    milestone_order = {
+        "observed": 0,
+        "processed": 1,
+        "last_observed": 2,
+        "correlated": 3,
+        "attack_mapping": 4,
+    }
+    milestones.sort(key=lambda item: (
+        item["occurred_at"] is None,
+        item["occurred_at"] or "",
+        milestone_order[item["kind"]],
+        item["id"],
+    ))
+    evidence_truncated = any((
+        observables_total > 20,
+        len(entities) > 20,
+        len(relationships) > 20,
+        correlation_total > 20,
+    ))
+    limitations = ["chronology_not_causality"]
+    if any(item["mapping_source"] == "rule_based_candidate" for item in techniques):
+        limitations.append("attack_candidates_require_review")
+    if any(related_event.source_pipeline == "internal" for related_event, _ in events.values()):
+        limitations.append("internal_raw_telemetry_hidden")
+    if evidence_truncated:
+        limitations.append("bounded_evidence")
+    return {
+        "event": _intelligence_event_dict(event),
+        "source_name": source.name if source else None,
+        "risk_method": "deterministic_rule_score",
+        "risk_factors": risk_factors,
+        "risk_context": risk_context,
+        "evidence_counts": {
+            "observables": observables_total,
+            "entities": len(entities),
+            "relationships": len(relationships),
+            "correlations": correlation_total,
+            "attack_mappings": len(techniques),
+        },
+        "observables": observables,
+        "entities": safe_entities,
+        "relationships": safe_relationships,
+        "correlations": correlations,
+        "attack": attack,
+        "milestones": milestones,
+        "evidence_truncated": evidence_truncated,
+        "limitations": limitations,
+    }
+
+
 @router.get("/intelligence/correlations", tags=["intelligence"], response_model=IntelligenceCorrelationPageResponse)
 def intelligence_correlations(db: SessionDep, _: CurrentUser, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
     total = db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0
@@ -1482,26 +1750,7 @@ def intelligence_correlations(db: SessionDep, _: CurrentUser, limit: int = Query
         .where(ThreatEvent.id.in_(event_ids))
     ).all() if event_ids else []
     events = {event.id: (event, source) for event, source in event_rows}
-    items = []
-    for item in rows:
-        source_event, source = events[item.event_a_id]
-        target_event, target_source = events[item.event_b_id]
-        score_basis, evidence_status, factors = _correlation_factors(item)
-        items.append({
-            "id": item.id,
-            "source_event_id": item.event_a_id,
-            "target_event_id": item.event_b_id,
-            "type": item.correlation_type,
-            "score": item.score,
-            "reason": item.reason,
-            "source_event": _correlation_endpoint(source_event, source),
-            "target_event": _correlation_endpoint(target_event, target_source),
-            "cross_source": source_event.source_pipeline != target_event.source_pipeline,
-            "score_basis": score_basis,
-            "evidence_status": evidence_status,
-            "factors": factors,
-            "created_at": iso(item.created_at),
-        })
+    items = [_correlation_dict(item, events) for item in rows]
     return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 

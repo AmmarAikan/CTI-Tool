@@ -815,3 +815,132 @@ td { color: #cfdae4; font-size: 12px; } td code { color: #8198ac; font: 10px ui-
   .correlation-arrow { justify-self: center; transform: rotate(90deg); }
   .correlation-factors li { grid-template-columns: 1fr; }
 }
+/* Evidence-backed Threat Storyline: incremental ACTIT investigation surface. */
+.story-selector {
+  display: grid;
+  grid-template-columns: minmax(150px, .35fr) minmax(240px, 1fr);
+  gap: 8px 16px;
+  align-items: center;
+  margin-block: 22px 30px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+}
+.story-selector label { color: var(--muted); font-size: 12px; font-weight: 700; }
+.story-selector input,
+.story-selector select {
+  min-height: 44px;
+  padding: 11px 13px;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--canvas-soft);
+}
+.story-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 28px;
+  align-items: center;
+  padding: clamp(22px, 4vw, 36px);
+  border: 1px solid var(--line);
+  border-inline-start: 4px solid #e79a3b;
+  background:
+    linear-gradient(135deg, rgb(231 154 59 / .12), transparent 44%),
+    var(--paper);
+}
+.story-hero h2 { margin-block-start: 8px; overflow-wrap: anywhere; font-size: clamp(24px, 3vw, 36px); }
+.story-hero p { max-width: 760px; margin-block-start: 12px; color: var(--muted); line-height: 1.7; }
+.story-provenance { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-block-start: 18px; color: var(--muted); font-size: 11px; }
+.story-risk-score {
+  min-width: 126px;
+  padding: 18px;
+  border: 1px solid rgb(231 154 59 / .42);
+  background: rgb(231 154 59 / .08);
+  text-align: center;
+}
+.story-risk-score span,
+.story-risk-score small { display: block; color: var(--muted); font-size: 11px; }
+.story-risk-score strong { display: block; margin-block: 8px; color: #e79a3b; font: 700 clamp(34px, 5vw, 52px) 'Space Mono', monospace; line-height: 1; }
+.story-counts { grid-template-columns: repeat(5, minmax(0, 1fr)); margin-block-start: 16px; }
+.story-limitations { display: grid; gap: 8px; margin-block: 18px 0; }
+.story-limitations p {
+  padding: 10px 13px;
+  color: var(--muted);
+  border-inline-start: 2px solid #e79a3b;
+  background: rgb(231 154 59 / .07);
+  font-size: 12px;
+  line-height: 1.55;
+}
+.story-timeline-section { margin-block-start: 42px; }
+.story-timeline { position: relative; display: grid; gap: 16px; margin: 0; padding: 0; list-style: none; }
+.story-timeline::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 12px;
+  width: 1px;
+  background: linear-gradient(#e79a3b, #3d7b91);
+  content: '';
+}
+.story-milestone { position: relative; padding-inline-start: 42px; }
+.story-node {
+  position: absolute;
+  inset-block-start: 23px;
+  inset-inline-start: 6px;
+  z-index: 1;
+  width: 13px;
+  height: 13px;
+  border: 3px solid var(--paper);
+  border-radius: 50%;
+  background: #5cc6d5;
+  box-shadow: 0 0 0 1px #5cc6d5;
+}
+.story-attack_mapping .story-node { background: #e79a3b; box-shadow: 0 0 0 1px #e79a3b; }
+.story-milestone > article { padding: 18px; border: 1px solid var(--line); background: var(--paper); }
+.story-milestone header { display: flex; gap: 20px; align-items: flex-start; justify-content: space-between; }
+.story-milestone h3 { margin: 5px 0 0; font-size: 16px; overflow-wrap: anywhere; }
+.story-milestone h3 a { color: var(--ink); text-decoration-color: #e79a3b; text-underline-offset: 4px; }
+.story-milestone time { color: var(--muted); font: 10px 'Space Mono', monospace; white-space: nowrap; }
+.story-milestone p { margin-block-start: 10px; color: var(--muted); line-height: 1.6; }
+.story-milestone footer { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; margin-block-start: 14px; color: var(--muted); font-size: 10px; }
+.story-evidence-grid,
+.story-related-grid { display: grid; gap: 16px; margin-block-start: 24px; }
+.story-evidence-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.story-related-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.story-evidence-card { min-width: 0; padding: 20px; border: 1px solid var(--line); background: var(--paper); }
+.story-evidence-card h3 { margin: 0; color: var(--ink); font-size: 17px; }
+.story-evidence-card > p { margin-block-start: 10px; color: var(--muted); line-height: 1.6; }
+.story-evidence-card ul { display: grid; gap: 8px; margin: 16px 0 0; padding: 0; list-style: none; }
+.story-evidence-card li {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-block-end: 1px solid var(--line);
+}
+.story-evidence-card li:last-child { border-block-end: 0; }
+.story-evidence-card li span { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.story-evidence-card code { color: var(--ink); overflow-wrap: anywhere; word-break: break-word; }
+.story-risk-context { display: grid; gap: 6px; margin-block-start: 16px; padding-block-start: 14px; border-block-start: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.story-related-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding-block: 14px; border-block-end: 1px solid var(--line); }
+.story-related-item:last-child { border-block-end: 0; }
+.story-related-item > div { display: grid; justify-items: start; gap: 8px; min-width: 0; }
+.story-related-item a { color: var(--ink); overflow-wrap: anywhere; text-decoration-color: #e79a3b; text-underline-offset: 4px; }
+.story-related-item > strong { color: #62cfdd; font: 700 16px 'Space Mono', monospace; }
+.story-related-item code,
+.story-related-item p { grid-column: 1 / -1; margin: 0; color: var(--muted); overflow-wrap: anywhere; font-size: 11px; }
+:root[data-theme="light"] .story-risk-score strong,
+:root[data-theme="light"] .story-related-item > strong { color: #9a5109; }
+@media (max-width: 980px) {
+  .story-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .story-evidence-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .story-selector,
+  .story-hero,
+  .story-related-grid { grid-template-columns: 1fr; }
+  .story-counts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .story-risk-score { width: 100%; }
+  .story-milestone header { flex-direction: column; gap: 8px; }
+  .story-milestone time { white-space: normal; }
+}

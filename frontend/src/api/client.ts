@@ -104,6 +104,44 @@ export interface MISPDelivery { event_id: string; created: boolean; attributes_r
 export interface MISPDeliveryHistory { id: string; event_id?: string; username?: string; created_at: string; created?: boolean; attributes_requested?: number; attributes_added?: number; attributes_verified?: number; published?: boolean; }
 export interface AttackTechnique { technique_id: string; name: string; tactic: string; confidence: number; mapping_source: 'explicit_id' | 'rule_based_candidate'; evidence: string; url: string; }
 export interface AttackMapping { event_id: string; catalog_version: string; source: 'built_in_subset'; official_dataset_url: string; techniques: AttackTechnique[]; }
+export type StorylineRiskFactorKey = 'base_severity_or_cvss' | 'indicators' | 'confidence' | 'source_diversity' | 'correlations' | 'internal_outlier';
+export type StorylineLimitation = 'chronology_not_causality' | 'attack_candidates_require_review' | 'internal_raw_telemetry_hidden' | 'bounded_evidence';
+export interface StorylineMilestone {
+  id: string;
+  kind: 'observed' | 'last_observed' | 'processed' | 'correlated' | 'attack_mapping';
+  occurred_at?: string;
+  event_id: string;
+  related_event_id?: string;
+  title: string;
+  detail: string;
+  source_pipeline: 'external' | 'internal';
+  evidence_status: 'recorded' | 'derived' | 'candidate';
+  confidence?: number;
+  score?: number;
+}
+export interface StorylineEvidenceCounts {
+  observables: number;
+  entities: number;
+  relationships: number;
+  correlations: number;
+  attack_mappings: number;
+}
+export interface StorylineResponse {
+  event: CTIEvent;
+  source_name?: string;
+  risk_method: 'deterministic_rule_score';
+  risk_factors: Array<{ key: StorylineRiskFactorKey; value: number }>;
+  risk_context: { source_count?: number; correlation_count?: number };
+  evidence_counts: StorylineEvidenceCounts;
+  observables: CTIIndicator[];
+  entities: CTIEntity[];
+  relationships: CTIRelationship[];
+  correlations: CTICorrelation[];
+  attack: AttackMapping;
+  milestones: StorylineMilestone[];
+  evidence_truncated: boolean;
+  limitations: StorylineLimitation[];
+}
 export interface AttackNavigatorLayer { name: string; versions: Record<string, string>; domain: 'enterprise-attack'; description: string; techniques: Array<{ techniqueID: string; tactic: string; score: number; color: string; comment: string; enabled: boolean; metadata: Array<{ name: string; value: string }> }>; [key: string]: unknown; }
 export interface Page<T> { items: T[]; total: number; limit: number; offset: number; }
 export interface AdminUser { id: string; username: string; role: Role; is_active: boolean; created_at: string; }
@@ -393,6 +431,78 @@ function parseMISPDelivery(value: unknown): MISPDelivery { if (!isPlainObject(va
 function parseMISPDeliveryHistory(value: unknown): MISPDeliveryHistory { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); exactKeys(value, ['id', 'event_id', 'username', 'created_at', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published']); if (!validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); const optionalCount = (item: unknown) => item === null || item === undefined ? undefined : boundedNumber(item); const optionalBoolean = (item: unknown) => item === null || item === undefined ? undefined : typeof item === 'boolean' ? item : (() => { throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); })(); return { id: requiredText(value.id, 36), event_id: optionalSafeText(value.event_id, 64), username: optionalSafeText(value.username, 100), created_at: value.created_at, created: optionalBoolean(value.created), attributes_requested: optionalCount(value.attributes_requested), attributes_added: optionalCount(value.attributes_added), attributes_verified: optionalCount(value.attributes_verified), published: optionalBoolean(value.published) }; }
 function parseAttackMapping(value: unknown): AttackMapping { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); exactKeys(value, ['event_id', 'catalog_version', 'source', 'official_dataset_url', 'techniques']); if (value.source !== 'built_in_subset' || !Array.isArray(value.techniques) || value.techniques.length > 100) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); const techniques = value.techniques.map((item): AttackTechnique => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); exactKeys(item, ['technique_id', 'name', 'tactic', 'confidence', 'mapping_source', 'evidence', 'url']); if (item.mapping_source !== 'explicit_id' && item.mapping_source !== 'rule_based_candidate') throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); return { technique_id: requiredText(item.technique_id, 20), name: requiredText(item.name, 150), tactic: requiredText(item.tactic, 80), confidence: boundedNumber(item.confidence, 0, 1), mapping_source: item.mapping_source, evidence: requiredText(item.evidence, 240), url: requiredText(item.url, 300) }; }); return { event_id: requiredText(value.event_id, 64), catalog_version: requiredText(value.catalog_version, 50), source: 'built_in_subset', official_dataset_url: requiredText(value.official_dataset_url, 300), techniques }; }
 
+function parseStorylineEntity(value: unknown): CTIEntity { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response'); exactKeys(value, ['type', 'value', 'confidence']); return { type: requiredText(value.type, 100), value: requiredText(value.value, 1000), confidence: boundedNumber(value.confidence, 0, 1) }; }
+function parseStorylineRelationship(value: unknown): CTIRelationship { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response'); exactKeys(value, ['subject', 'relation', 'object', 'confidence']); return { subject: requiredText(value.subject, 1000), relation: requiredText(value.relation, 100), object: requiredText(value.object, 1000), confidence: boundedNumber(value.confidence, 0, 1) }; }
+function parseStoryline(value: unknown): StorylineResponse {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  exactKeys(value, ['event', 'source_name', 'risk_method', 'risk_factors', 'risk_context', 'evidence_counts', 'observables', 'entities', 'relationships', 'correlations', 'attack', 'milestones', 'evidence_truncated', 'limitations']);
+  if (value.risk_method !== 'deterministic_rule_score' || typeof value.evidence_truncated !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  const event = parseCTIEvent(value.event);
+  if (!Array.isArray(value.risk_factors) || value.risk_factors.length > 6 || !isPlainObject(value.risk_context) || !Array.isArray(value.observables) || value.observables.length > 20 || !Array.isArray(value.entities) || value.entities.length > 20 || !Array.isArray(value.relationships) || value.relationships.length > 20 || !Array.isArray(value.correlations) || value.correlations.length > 20 || !Array.isArray(value.milestones) || value.milestones.length > 40 || !Array.isArray(value.limitations) || value.limitations.length > 4) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  if (!isPlainObject(value.evidence_counts)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  const factorKeys: StorylineRiskFactorKey[] = ['base_severity_or_cvss', 'indicators', 'confidence', 'source_diversity', 'correlations', 'internal_outlier'];
+  const riskFactors = value.risk_factors.map((item): StorylineResponse['risk_factors'][number] => {
+    if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    exactKeys(item, ['key', 'value']);
+    if (!factorKeys.includes(item.key as StorylineRiskFactorKey)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    return { key: item.key as StorylineRiskFactorKey, value: boundedNumber(item.value, 0, 100) };
+  });
+  exactKeys(value.risk_context, ['source_count', 'correlation_count']);
+  const optionalCount = (item: unknown) => {
+    if (item === null || item === undefined) return undefined;
+    if (!Number.isSafeInteger(item) || (item as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    return item as number;
+  };
+  const riskContext = { source_count: optionalCount(value.risk_context.source_count), correlation_count: optionalCount(value.risk_context.correlation_count) };
+  const requiredCount = (item: unknown) => {
+    const amount = optionalCount(item);
+    if (amount === undefined) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    return amount;
+  };
+  const countKeys: Array<keyof StorylineEvidenceCounts> = ['observables', 'entities', 'relationships', 'correlations', 'attack_mappings'];
+  exactKeys(value.evidence_counts, countKeys);
+  const evidenceCounts: StorylineEvidenceCounts = {
+    observables: requiredCount(value.evidence_counts.observables),
+    entities: requiredCount(value.evidence_counts.entities),
+    relationships: requiredCount(value.evidence_counts.relationships),
+    correlations: requiredCount(value.evidence_counts.correlations),
+    attack_mappings: requiredCount(value.evidence_counts.attack_mappings),
+  };
+  const observables = value.observables.map(parseIndicator);
+  const entities = value.entities.map(parseStorylineEntity);
+  const relationships = value.relationships.map(parseStorylineRelationship);
+  const correlations = value.correlations.map(parseCorrelation);
+  const attack = parseAttackMapping(value.attack);
+  if (attack.event_id !== event.id || observables.some((item) => item.event_id !== event.id) || correlations.some((item) => item.source_event_id !== event.id && item.target_event_id !== event.id)) throw new ApiError(502, 'invalid_response', 'Storyline identity mismatch');
+  const milestoneKinds: StorylineMilestone['kind'][] = ['observed', 'last_observed', 'processed', 'correlated', 'attack_mapping'];
+  const evidenceStatuses: StorylineMilestone['evidence_status'][] = ['recorded', 'derived', 'candidate'];
+  const milestones = value.milestones.map((item): StorylineMilestone => {
+    if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    exactKeys(item, ['id', 'kind', 'occurred_at', 'event_id', 'related_event_id', 'title', 'detail', 'source_pipeline', 'evidence_status', 'confidence', 'score']);
+    if (!milestoneKinds.includes(item.kind as StorylineMilestone['kind']) || !evidenceStatuses.includes(item.evidence_status as StorylineMilestone['evidence_status']) || (item.source_pipeline !== 'external' && item.source_pipeline !== 'internal')) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+    const milestoneEventId = requiredText(item.event_id, 64);
+    if (milestoneEventId !== event.id) throw new ApiError(502, 'invalid_response', 'Storyline identity mismatch');
+    return {
+      id: requiredText(item.id, 100), kind: item.kind as StorylineMilestone['kind'],
+      occurred_at: optionalTimestamp(item.occurred_at), event_id: milestoneEventId,
+      related_event_id: optionalSafeText(item.related_event_id, 64), title: requiredText(item.title, 500),
+      detail: requiredText(item.detail, 500), source_pipeline: item.source_pipeline,
+      evidence_status: item.evidence_status as StorylineMilestone['evidence_status'],
+      confidence: item.confidence === null || item.confidence === undefined ? undefined : boundedNumber(item.confidence, 0, 1),
+      score: item.score === null || item.score === undefined ? undefined : boundedNumber(item.score, 0, 1),
+    };
+  });
+  const limitationsAllowed: StorylineLimitation[] = ['chronology_not_causality', 'attack_candidates_require_review', 'internal_raw_telemetry_hidden', 'bounded_evidence'];
+  if (value.limitations.some((item) => !limitationsAllowed.includes(item as StorylineLimitation)) || new Set(value.limitations).size !== value.limitations.length) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  if (evidenceCounts.observables < observables.length || evidenceCounts.entities < entities.length || evidenceCounts.relationships < relationships.length || evidenceCounts.correlations < correlations.length || evidenceCounts.attack_mappings < attack.techniques.length) throw new ApiError(502, 'invalid_response', 'Invalid storyline response');
+  return {
+    event, source_name: optionalSafeText(value.source_name, 200), risk_method: 'deterministic_rule_score',
+    risk_factors: riskFactors, risk_context: riskContext, evidence_counts: evidenceCounts,
+    observables, entities, relationships, correlations, attack, milestones,
+    evidence_truncated: value.evidence_truncated, limitations: value.limitations as StorylineLimitation[],
+  };
+}
+
 function parseAttackNavigator(value: unknown): AttackNavigatorLayer { if (!isPlainObject(value) || value.domain !== 'enterprise-attack' || typeof value.name !== 'string' || typeof value.description !== 'string' || !isPlainObject(value.versions) || !Array.isArray(value.techniques) || value.techniques.length > 1000) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); const versions = Object.fromEntries(Object.entries(value.versions).map(([key, item]) => [requiredText(key, 30), requiredText(item, 30)])); const techniques = value.techniques.map((item) => { if (!isPlainObject(item) || !Array.isArray(item.metadata) || typeof item.enabled !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); const metadata = item.metadata.map((entry) => { if (!isPlainObject(entry)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); return { name: requiredText(entry.name, 80), value: requiredText(entry.value, 100) }; }); return { techniqueID: requiredText(item.techniqueID, 20), tactic: requiredText(item.tactic, 80), score: boundedNumber(item.score, 0, 100), color: requiredText(item.color, 20), comment: requiredText(item.comment, 240), enabled: item.enabled, metadata }; }); return { ...value, name: requiredText(value.name, 160), versions, domain: 'enterprise-attack', description: requiredText(value.description, 500), techniques }; }
 function parseSTIX(value: unknown): Record<string, unknown> { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid STIX bundle'); exactKeys(value, ['type', 'id', 'objects']); if (value.type !== 'bundle' || typeof value.id !== 'string' || !Array.isArray(value.objects) || value.objects.length > 5000 || value.objects.some((item) => !isPlainObject(item) || typeof item.type !== 'string' || Object.keys(item).some((key) => /(token|password|secret|authorization|cookie|api[_-]?key)/i.test(key)))) throw new ApiError(502, 'invalid_response', 'Invalid STIX bundle'); return value; }
 function parseAdminUser(value: unknown): AdminUser { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid administration response'); exactKeys(value, ['id', 'username', 'role', 'is_active', 'created_at']); if (!isRole(value.role) || typeof value.is_active !== 'boolean' || !validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid administration response'); return { id: requiredText(value.id, 36), username: requiredText(value.username, 100), role: value.role, is_active: value.is_active, created_at: value.created_at }; }
@@ -635,6 +745,7 @@ export const api = {
   intelligenceSearch: async (query: string, limitPerType = 5) => { const normalized = query.trim(); const params = new URLSearchParams({ q: normalized, limit_per_type: String(limitPerType) }); const result = parseIntelligenceSearch(await request<unknown>(`/intelligence/search?${params}`)); if (result.query !== normalized || result.limit_per_type !== limitPerType) throw new ApiError(502, 'invalid_response', 'Search response identity mismatch'); return result; },
   intelligenceEvents: async (limit = 25, offset = 0, filters: { severity?: string; source_pipeline?: string; processing_status?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parsePage(await request<unknown>(`/intelligence/events?${params}`), parseCTIEvent); },
   intelligenceEvent: async (id: string) => parseEventDetail(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}`)),
+  intelligenceStoryline: async (id: string) => parseStoryline(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}/storyline`)),
   intelligenceIndicators: async (limit = 25, offset = 0, filters: { type?: string; search?: string; semantic_role?: string; assessment?: string; validation_status?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key === 'type' ? 'indicator_type' : key, value); }); return parsePage(await request<unknown>(`/intelligence/indicators?${params}`), parseIndicator); },
   intelligenceIndicatorSummary: async () => parseIndicatorSummary(await request<unknown>('/intelligence/indicators-summary')),
   intelligenceCorrelations: async (limit = 25, offset = 0) => parsePage(await request<unknown>(`/intelligence/correlations?limit=${limit}&offset=${offset}`), parseCorrelation),
