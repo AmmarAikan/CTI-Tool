@@ -10,15 +10,16 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 ## Current checkpoint
 
-- Phase: P0 Phase 1 complete in development: incremental UI/information-architecture foundation plus secure public Register/Login/RBAC hardening.
+- Phase: P0 Phases 1-2 complete in development: incremental UI/Auth foundation plus a real-data Dashboard investigation entry.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
 - UI/Auth implementation checkpoint: `ef2a2b262d6b5465913a75e2b2ecf7dcee92f2ce`.
+- Dashboard implementation checkpoint: `af853e8d6f82d22ae9f319648c5b93efe28253bd`.
 - Production source checkout: `/home/alaaldeen/cti-vps-production-integration`.
 - Active immutable release: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` through `/opt/cti-platform/current`.
-- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phase 1.
-- Candidate-only Docker images `actit-backend:ui-auth-candidate` and `actit-frontend:ui-auth-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
+- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-2.
+- Candidate-only Docker images `actit-backend:ui-auth-candidate`, `actit-frontend:ui-auth-candidate`, and `actit-frontend:dashboard-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
 
 ## Verified production baseline
 
@@ -96,6 +97,8 @@ Observed fact: MISP contained exactly one unpublished event, two attributes, and
 | Source Compose validation | Not completed because the ignored production `.env` is intentionally absent from the Git checkout; this is not a failure of the already-running immutable release |
 
 Phase 1 validation: backend targeted tests passed 5/5 both in the VPS test environment and in the newly built backend candidate image with Compose-equivalent read-only ML report mount; frontend targeted tests passed 16/16; the frontend candidate image passed TypeScript validation, all 108 Vitest tests, production build, and isolated `/` plus `/register` HTTP smoke checks. Existing non-failing React `act(...)` warnings and the Vite 500 kB chunk warning remain documented technical debt.
+Dashboard phase validation: the focused Dashboard, integration, and localization set passed 20/20 on the VPS. The `actit-frontend:dashboard-candidate` Docker build then passed TypeScript validation, all 108 Vitest tests, and the production build. This phase changed no backend contract and used the existing real events endpoint; no production data or service was connected or modified.
+
 
 ## Verified end-to-end lifecycle
 
@@ -118,8 +121,8 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Login and session authentication | Ready in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, and success/rejection audit evidence added | Retain later reverse-proxy/session-storage hardening and validate after immutable deployment |
 | Public registration | Ready in development, not deployed | Public API and bilingual form always create active `viewer`; extra/client role is rejected; duplicate and rate-limit states are safe | Deploy through immutable release only after the next meaningful checkpoint |
 | RBAC and user administration | Partial | Viewer/analyst/admin guards, last-admin protection, audit view | Verify every mutating endpoint and add deny-path tests |
-| Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, and presented MISP as a sharing group | Add global investigation entry, evidence/story paths, and page-by-page incremental accessibility improvements |
-| Executive dashboard | Partial | Counts, severities, pipelines, runs, sources, and processing center exist | Add health/readiness, trend/evidence clarity, actionable drill-downs, and trustworthy empty/degraded states |
+| Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, presented MISP as sharing, and added Dashboard investigation pivots | Add global search, evidence/story paths, and page-by-page incremental accessibility improvements |
+| Executive dashboard | Ready/Partial in development, not deployed | Existing real counts/health/distributions preserved; latest five real events and direct events/indicators/sources/analysis drill-downs added with loading/error/empty states | Add explicit system-readiness evidence and later trend clarity without mock metrics |
 | External Sources | Ready/Partial | Healthy service and canonical external implementation | Preserve ownership boundaries; expose provenance/freshness/failure evidence more clearly |
 | Internal Sources | Ready/Partial | Gateway streams ready; Dionaea/host-auth/web-access views exist | Improve drill-down, sensor freshness, and safe outlier evidence display |
 | Global search | Missing | Search is page-local only | Search events, indicators, entities, sources, and correlations with safe bounded queries |
@@ -154,6 +157,11 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
   - OpenCTI basis: keep analyst pivots grounded in observations/entities, relationships, source context, and provenance.
   - Figma basis: selectively use navy/cyan hierarchy, compact operational cards, clear evidence states, and responsive presentation.
   - ACTIT implementation: retain the existing React router, API client, auth context, translation catalog, design tokens, dashboard, and backend models; add only the public entry and viewer-only account path required by P0.
+- Dashboard decision rationale:
+  - Paper basis: make collected and processed CTI evidence directly reachable from the lifecycle summary.
+  - OpenCTI basis: use observation-led analyst pivots from overview into concrete intelligence records.
+  - Figma basis: apply a compact, scannable recent-intelligence list and clear action hierarchy.
+  - ACTIT implementation: preserve every existing health card, statistic, distribution, state, and API contract; add one real-data component backed by the existing bounded events endpoint.
 - UI UX Pro Max influenced information density, focus visibility, keyboard/accessibility states, responsive breakpoints, and reduced-motion treatment; its generic visual palette was not used where it conflicted with ACTIT and the approved Figma.
 - PostgreSQL remains the source of truth. MISP remains an unpublished-by-default, selective sharing destination.
 - No bulk MISP mirror will be enabled without validation, evidence, deduplication, analyst review, rate/size bounds, and explicit publication controls.
@@ -177,17 +185,19 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 - Added bounded in-process login/register abuse protection, non-reversible client keys, unknown-user password verification, and authentication audit outcomes.
 - Preserved all existing protected feature routes while moving the protected Dashboard from `/` to `/dashboard` and updating internal fallbacks/links.
 - Built isolated candidate backend/frontend Docker images and completed the Phase 1 targeted, full-frontend, build, and smoke validations without connecting to production data.
+- Preserved the existing Dashboard and added direct investigation drill-downs plus the latest five real threat events from the existing API, with severity, risk, pipeline, provenance context, detail links, and explicit loading/error/empty behavior.
+- Built the isolated Dashboard frontend candidate and completed focused and full Dockerized frontend validation without deploying it.
 
 ## Next Task
 
-Inspect the existing Dashboard component and its current statistics/health contracts. Implement the smallest real-data improvement that strengthens analyst workflow and readiness visibility without replacing the page or adding mock metrics. Add direct drill-downs into existing events/indicators/sources/runs, preserve current charts and degraded/empty states, run only Dashboard/API-targeted tests plus the frontend production build, and create the next logical checkpoint.
+Inspect the existing events, indicators, entities, sources, and correlation query contracts and indexes. Implement a bounded authenticated Global Intelligence / IOC Investigation Search that reuses ACTIT's real data, returns safe projections with type and provenance, supports direct analyst pivots into existing detail pages, and preserves viewer read-only access. Add strict request/response validation, deterministic relevance ordering, bilingual responsive states, targeted backend/frontend tests, and Docker/Compose backend parity before declaring the phase complete.
 
 ## Remaining P0 sequence
 
-1. Dashboard/readiness improvements using only real existing API contracts.
+1. Bounded Global Intelligence / IOC Investigation Search.
 2. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
 3. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
-4. Bounded global search.
+4. Explicit System Readiness view using verified health and model-quality evidence.
 5. Cross-source evidence and explainable correlations.
 6. Threat storyline/timeline.
 7. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
