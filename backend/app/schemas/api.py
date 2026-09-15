@@ -271,6 +271,34 @@ class IntelligenceIndicatorSummaryResponse(BaseModel):
     by_type: dict[str, int]
 
 
+class IntelligenceSearchResultResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["event", "indicator", "entity", "source", "correlation"]
+    id: str = Field(max_length=64)
+    label: str = Field(min_length=1, max_length=2048)
+    context: str = Field(min_length=1, max_length=500)
+    match_field: Literal["id", "title", "value", "type", "name", "reason", "event_id"]
+    match_quality: Literal["exact", "prefix", "contains"]
+    source_pipeline: Literal["external", "internal"] | None = None
+    source_type: str | None = Field(default=None, max_length=50)
+    source_id: str | None = Field(default=None, max_length=64)
+    source_name: str | None = Field(default=None, max_length=200)
+    event_id: str | None = Field(default=None, max_length=64)
+    related_event_id: str | None = Field(default=None, max_length=64)
+    severity: str | None = Field(default=None, max_length=30)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    created_at: str | None = Field(default=None, max_length=40)
+
+
+class IntelligenceSearchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    query: str = Field(min_length=2, max_length=100)
+    items: list[IntelligenceSearchResultResponse] = Field(max_length=50)
+    returned: int = Field(ge=0, le=50)
+    limit_per_type: int = Field(ge=1, le=10)
+    truncated: bool
+
+
 class IntelligenceCorrelationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(max_length=36)

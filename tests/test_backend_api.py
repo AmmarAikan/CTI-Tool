@@ -16,6 +16,14 @@ from fastapi.testclient import TestClient
 from stix2 import parse as parse_stix
 
 from backend.app.main import app
+from backend.app.db.database import SessionLocal
+from backend.app.db.models import (
+    CorrelationRecord,
+    EntityRecord,
+    IndicatorRecord,
+    Source,
+    ThreatEvent,
+)
 
 SAMPLE_PATH = Path(__file__).resolve().parents[1] / "data" / "internal_samples" / "wazuh_alerts_sample.json"
 DIONAEA_SAMPLE_PATH = (
@@ -312,6 +320,125 @@ class BackendAPITests(unittest.TestCase):
             {"run_id", "pipeline", "status", "collected_count", "processed_count", "stored_count", "failed_count"},
         )
         self.assertNotIn("private", pulled.text)
+
+    def test_global_intelligence_search_is_bounded_ranked_and_viewer_safe(self) -> None:
+        with SessionLocal() as db:
+            source = Source(
+                id="search-source",
+                name="Needle Intelligence Feed",
+                source_type="research",
+                source_pipeline="external",
+                enabled=True,
+                config={"private": "must-not-leak"},
+            )
+            event = ThreatEvent(
+                id="search-event",
+                source_id=source.id,
+                source_record_id="search-record",
+                source_type="research",
+                source_pipeline="external",
+                title="Needle Operation",
+                description="Safe investigation context.",
+                normalized_text="private normalized text",
+                severity="high",
+                risk_score=80,
+                confidence=0.9,
+                processing_status="transformed",
+                raw_reference={"private": "must-not-leak"},
+            )
+            related = ThreatEvent(
+                id="search-related-event",
+                source_id=source.id,
+                source_record_id="search-related-record",
+                source_type="research",
+                source_pipeline="external",
+                title="Related Operation",
+                description="Related safe context.",
+                normalized_text="private related text",
+                severity="medium",
+                risk_score=50,
+                confidence=0.8,
+                processing_status="transformed",
+            )
+            db.add_all([
+                source,
+                event,
+                related,
+                IndicatorRecord(
+                    id="10000000-0000-0000-0000-000000000001",
+                    event_id=event.id,
+                    indicator_type="domain",
+                    value="needle.example",
+                    confidence=0.95,
+                    extractor="test",
+                ),
+                EntityRecord(
+                    id="20000000-0000-0000-0000-000000000001",
+                    event_id=event.id,
+                    entity_type="malware",
+                    value="Needle Malware",
+                    confidence=0.88,
+                    extractor="test",
+                ),
+                EntityRecord(
+                    id="20000000-0000-0000-0000-000000000002",
+                    event_id=event.id,
+                    entity_type="source_ip",
+                    value="needle-private-source",
+                    confidence=0.99,
+                    extractor="test",
+                ),
+                CorrelationRecord(
+                    id="30000000-0000-0000-0000-000000000001",
+                    event_a_id=event.id,
+                    event_b_id=related.id,
+                    correlation_type="cross_source",
+                    score=0.92,
+                    reason="Shared needle evidence",
+                    evidence={"private": "must-not-leak"},
+                ),
+            ])
+            db.commit()
+
+        created = self.client.post(
+            "/api/v1/users", headers=self.headers,
+            json={"username": "searchviewer", "password": "SearchViewerPassword123!", "role": "viewer"},
+        )
+        self.assertIn(created.status_code, {201, 409})
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "searchviewer", "password": "SearchViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        self.assertEqual(self.client.get("/api/v1/intelligence/search?q=needle").status_code, 401)
+        response = self.client.get(
+            "/api/v1/intelligence/search?q=needle&limit_per_type=1", headers=viewer_headers
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["query"], "needle")
+        self.assertEqual(payload["returned"], len(payload["items"]))
+        self.assertLessEqual(payload["returned"], 5)
+        self.assertEqual({item["kind"] for item in payload["items"]}, {"event", "indicator", "entity", "source", "correlation"})
+        ranks = {"exact": 0, "prefix": 1, "contains": 2}
+        self.assertEqual([ranks[item["match_quality"]] for item in payload["items"]], sorted(ranks[item["match_quality"]] for item in payload["items"]))
+        self.assertNotIn("needle-private-source", response.text)
+        for forbidden in ('"raw_reference":', '"normalized_text":', '"config":', '"evidence":', "must-not-leak"):
+            self.assertNotIn(forbidden, response.text)
+
+        exact = self.client.get(
+            "/api/v1/intelligence/search?q=needle.example&limit_per_type=1", headers=viewer_headers
+        )
+        self.assertEqual(exact.status_code, 200, exact.text)
+        self.assertEqual(exact.json()["items"][0]["kind"], "indicator")
+        self.assertEqual(exact.json()["items"][0]["match_quality"], "exact")
+        self.assertEqual(self.client.get("/api/v1/intelligence/search?q=a", headers=viewer_headers).status_code, 422)
+        self.assertEqual(self.client.get("/api/v1/intelligence/search?q=%20%20", headers=viewer_headers).status_code, 422)
+        self.assertEqual(self.client.get("/api/v1/intelligence/search?q=needle&limit_per_type=11", headers=viewer_headers).status_code, 422)
+        wildcard = self.client.get("/api/v1/intelligence/search?q=%25_", headers=viewer_headers)
+        self.assertEqual(wildcard.status_code, 200, wildcard.text)
+        self.assertEqual(wildcard.json()["returned"], 0)
 
     def test_intelligence_facades_are_bounded_typed_and_sanitized(self) -> None:
         events = self.client.get(

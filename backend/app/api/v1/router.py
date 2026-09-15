@@ -9,7 +9,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import desc, func, select
+from sqlalchemy import case, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
@@ -26,6 +26,7 @@ from backend.app.db.models import (
     AuditLog,
     CorrelationRecord,
     EnrichmentRecord,
+    EntityRecord,
     IndicatorRecord,
     OutlierSessionRecord,
     PipelineRun,
@@ -66,6 +67,7 @@ from backend.app.schemas.api import (
     IntelligenceIndicatorPageResponse,
     IntelligenceIndicatorSummaryResponse,
     IntelligenceAttackMappingResponse,
+    IntelligenceSearchResponse,
     IntelligenceMISPDeliveryResponse,
     IntelligenceMISPDeliveryHistoryResponse,
     IntelligenceMISPHealthResponse,
@@ -1078,6 +1080,176 @@ def _intelligence_event_dict(event: ThreatEvent) -> dict[str, Any]:
         "created_at": iso(event.created_at),
         "indicator_count": len(event.indicators),
         "entity_count": sum(item.entity_type != "source_ip" for item in event.entities),
+    }
+
+
+def _escape_search_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _search_filter(query: str, columns: tuple[Any, ...]):
+    pattern = f"%{_escape_search_like(query)}%"
+    return or_(*(column.ilike(pattern, escape="\\") for column in columns))
+
+
+def _search_rank(query: str, columns: tuple[Any, ...]):
+    lowered = query.casefold()
+    prefix = f"{_escape_search_like(lowered)}%"
+    exact = or_(*(func.lower(column) == lowered for column in columns))
+    starts = or_(*(func.lower(column).like(prefix, escape="\\") for column in columns))
+    return case((exact, 0), (starts, 1), else_=2)
+
+
+def _search_match(query: str, fields: list[tuple[str, str]]) -> tuple[str, str]:
+    needle = query.casefold()
+    for quality, predicate in (
+        ("exact", lambda value: value == needle),
+        ("prefix", lambda value: value.startswith(needle)),
+        ("contains", lambda value: needle in value),
+    ):
+        for field, value in fields:
+            if predicate(value.casefold()):
+                return field, quality
+    return fields[0][0], "contains"
+
+
+@router.get("/intelligence/search", tags=["intelligence"], response_model=IntelligenceSearchResponse)
+def intelligence_search(
+    db: SessionDep,
+    _: CurrentUser,
+    q: str = Query(min_length=2, max_length=100, pattern=r"^[^\x00-\x1F\x7F]+$"),
+    limit_per_type: int = Query(default=5, ge=1, le=10),
+) -> dict[str, Any]:
+    query = q.strip()
+    if len(query) < 2:
+        raise HTTPException(status_code=422, detail="Search query must contain at least two non-space characters")
+
+    row_limit = limit_per_type + 1
+    items: list[dict[str, Any]] = []
+    truncated = False
+
+    event_columns = (ThreatEvent.id, ThreatEvent.title)
+    event_rows = db.execute(
+        select(ThreatEvent, Source)
+        .outerjoin(Source, Source.id == ThreatEvent.source_id)
+        .where(_search_filter(query, event_columns))
+        .order_by(_search_rank(query, event_columns), desc(ThreatEvent.created_at), ThreatEvent.id)
+        .limit(row_limit)
+    ).all()
+    truncated = truncated or len(event_rows) > limit_per_type
+    for event, source in event_rows[:limit_per_type]:
+        match_field, match_quality = _search_match(query, [("id", event.id), ("title", event.title)])
+        items.append({
+            "kind": "event", "id": event.id, "label": _safe_event_title(event),
+            "context": _safe_event_summary(event) or event.source_type,
+            "match_field": match_field, "match_quality": match_quality,
+            "source_pipeline": event.source_pipeline, "source_type": event.source_type,
+            "source_id": event.source_id, "source_name": source.name if source else None,
+            "event_id": event.id, "severity": event.severity,
+            "confidence": event.confidence, "created_at": iso(event.created_at),
+        })
+
+    indicator_columns = (IndicatorRecord.id, IndicatorRecord.value, IndicatorRecord.indicator_type)
+    indicator_rows = db.execute(
+        select(IndicatorRecord, ThreatEvent, Source)
+        .join(ThreatEvent, ThreatEvent.id == IndicatorRecord.event_id)
+        .outerjoin(Source, Source.id == ThreatEvent.source_id)
+        .where(_search_filter(query, indicator_columns))
+        .order_by(_search_rank(query, indicator_columns), desc(ThreatEvent.created_at), IndicatorRecord.id)
+        .limit(row_limit)
+    ).all()
+    truncated = truncated or len(indicator_rows) > limit_per_type
+    for indicator, event, source in indicator_rows[:limit_per_type]:
+        match_field, match_quality = _search_match(query, [
+            ("id", indicator.id), ("value", indicator.value), ("type", indicator.indicator_type),
+        ])
+        items.append({
+            "kind": "indicator", "id": indicator.id, "label": indicator.value,
+            "context": f"{indicator.indicator_type} · {_safe_event_title(event)}"[:500],
+            "match_field": match_field, "match_quality": match_quality,
+            "source_pipeline": event.source_pipeline, "source_type": event.source_type,
+            "source_id": event.source_id, "source_name": source.name if source else None,
+            "event_id": event.id, "severity": event.severity,
+            "confidence": indicator.confidence, "created_at": iso(event.created_at),
+        })
+
+    entity_columns = (EntityRecord.id, EntityRecord.value, EntityRecord.entity_type)
+    entity_rows = db.execute(
+        select(EntityRecord, ThreatEvent, Source)
+        .join(ThreatEvent, ThreatEvent.id == EntityRecord.event_id)
+        .outerjoin(Source, Source.id == ThreatEvent.source_id)
+        .where(EntityRecord.entity_type != "source_ip", _search_filter(query, entity_columns))
+        .order_by(_search_rank(query, entity_columns), desc(ThreatEvent.created_at), EntityRecord.id)
+        .limit(row_limit)
+    ).all()
+    truncated = truncated or len(entity_rows) > limit_per_type
+    for entity, event, source in entity_rows[:limit_per_type]:
+        match_field, match_quality = _search_match(query, [
+            ("id", entity.id), ("value", entity.value), ("type", entity.entity_type),
+        ])
+        items.append({
+            "kind": "entity", "id": entity.id, "label": entity.value,
+            "context": f"{entity.entity_type} · {_safe_event_title(event)}"[:500],
+            "match_field": match_field, "match_quality": match_quality,
+            "source_pipeline": event.source_pipeline, "source_type": event.source_type,
+            "source_id": event.source_id, "source_name": source.name if source else None,
+            "event_id": event.id, "severity": event.severity,
+            "confidence": entity.confidence, "created_at": iso(event.created_at),
+        })
+
+    source_columns = (Source.id, Source.name, Source.source_type)
+    source_rows = db.scalars(
+        select(Source)
+        .where(_search_filter(query, source_columns))
+        .order_by(_search_rank(query, source_columns), desc(Source.updated_at), Source.id)
+        .limit(row_limit)
+    ).all()
+    truncated = truncated or len(source_rows) > limit_per_type
+    for source in source_rows[:limit_per_type]:
+        match_field, match_quality = _search_match(query, [
+            ("id", source.id), ("name", source.name), ("type", source.source_type),
+        ])
+        items.append({
+            "kind": "source", "id": source.id, "label": source.name,
+            "context": source.source_type, "match_field": match_field,
+            "match_quality": match_quality, "source_pipeline": source.source_pipeline,
+            "source_type": source.source_type, "source_id": source.id,
+            "source_name": source.name, "created_at": iso(source.created_at),
+        })
+
+    correlation_columns = (
+        CorrelationRecord.id, CorrelationRecord.reason, CorrelationRecord.correlation_type,
+        CorrelationRecord.event_a_id, CorrelationRecord.event_b_id,
+    )
+    correlation_rows = db.scalars(
+        select(CorrelationRecord)
+        .where(_search_filter(query, correlation_columns))
+        .order_by(_search_rank(query, correlation_columns), desc(CorrelationRecord.score), CorrelationRecord.id)
+        .limit(row_limit)
+    ).all()
+    truncated = truncated or len(correlation_rows) > limit_per_type
+    for correlation in correlation_rows[:limit_per_type]:
+        match_field, match_quality = _search_match(query, [
+            ("id", correlation.id), ("reason", correlation.reason),
+            ("type", correlation.correlation_type), ("event_id", correlation.event_a_id),
+            ("event_id", correlation.event_b_id),
+        ])
+        items.append({
+            "kind": "correlation", "id": correlation.id,
+            "label": correlation.correlation_type,
+            "context": correlation.reason or correlation.correlation_type,
+            "match_field": match_field, "match_quality": match_quality,
+            "event_id": correlation.event_a_id,
+            "related_event_id": correlation.event_b_id,
+            "confidence": correlation.score, "created_at": iso(correlation.created_at),
+        })
+
+    quality_order = {"exact": 0, "prefix": 1, "contains": 2}
+    kind_order = {"event": 0, "indicator": 1, "entity": 2, "source": 3, "correlation": 4}
+    items.sort(key=lambda item: (quality_order[item["match_quality"]], kind_order[item["kind"]]))
+    return {
+        "query": query, "items": items, "returned": len(items),
+        "limit_per_type": limit_per_type, "truncated": truncated,
     }
 
 

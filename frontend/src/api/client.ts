@@ -40,6 +40,31 @@ export interface CTIEntity { type: string; value: string; confidence: number; }
 export interface CTIRelationship { subject: string; relation: string; object: string; confidence: number; }
 export interface CTIEventDetail extends CTIEvent { indicators: CTIIndicator[]; entities: CTIEntity[]; relationships: CTIRelationship[]; }
 export interface CTICorrelation { id: string; source_event_id: string; target_event_id: string; type: string; score: number; reason: string; }
+export type IntelligenceSearchKind = 'event' | 'indicator' | 'entity' | 'source' | 'correlation';
+export interface IntelligenceSearchResult {
+  kind: IntelligenceSearchKind;
+  id: string;
+  label: string;
+  context: string;
+  match_field: 'id' | 'title' | 'value' | 'type' | 'name' | 'reason' | 'event_id';
+  match_quality: 'exact' | 'prefix' | 'contains';
+  source_pipeline?: 'external' | 'internal';
+  source_type?: string;
+  source_id?: string;
+  source_name?: string;
+  event_id?: string;
+  related_event_id?: string;
+  severity?: string;
+  confidence?: number;
+  created_at?: string;
+}
+export interface IntelligenceSearchResponse {
+  query: string;
+  items: IntelligenceSearchResult[];
+  returned: number;
+  limit_per_type: number;
+  truncated: boolean;
+}
 export interface CTIOutlier { id: string; event_id?: string; started_at: string; ended_at: string; alert_count: number; is_outlier: boolean; anomaly_score: number; detector: string; }
 export interface AnalysisRun { id: string; pipeline: string; status: string; collected: number; processed: number; stored: number; failed: number; error_category?: string; started_at: string; completed_at?: string; duration_seconds?: number; }
 export interface MLStatus { execution_model: 'central_backend'; backend: string; primary_model: string; secondary_model: string; primary_loaded: boolean; secondary_loaded: boolean; quality_gates_passed: boolean; held_out_f1?: number; }
@@ -275,6 +300,35 @@ const indicatorKeys = ['id', 'event_id', 'type', 'value', 'confidence', 'source_
 function parseIndicator(value: unknown): CTIIndicator { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, indicatorKeys); if (value.source_pipeline !== 'external' && value.source_pipeline !== 'internal') throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); if (!['external_reference', 'vulnerability', 'observable', 'indicator'].includes(String(value.semantic_role)) || !['valid', 'invalid'].includes(String(value.validation_status)) || !['reference', 'non_actionable', 'unknown', 'suspicious', 'malicious'].includes(String(value.assessment)) || typeof value.actionable !== 'boolean' || !Array.isArray(value.evidence_providers) || value.evidence_providers.some((item) => typeof item !== 'string' || item.length > 80)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); return { id: requiredText(value.id, 36), event_id: requiredText(value.event_id, 64), type: requiredText(value.type, 50), value: requiredText(value.value, 2048), confidence: boundedNumber(value.confidence, 0, 1), source_pipeline: value.source_pipeline, severity: optionalSafeText(value.severity, 30), first_seen: optionalTimestamp(value.first_seen), last_seen: optionalTimestamp(value.last_seen), semantic_role: value.semantic_role as CTIIndicator['semantic_role'], validation_status: value.validation_status as CTIIndicator['validation_status'], assessment: value.assessment as CTIIndicator['assessment'], assessment_confidence: boundedNumber(value.assessment_confidence, 0, 1), actionable: value.actionable, evidence_count: boundedNumber(value.evidence_count), evidence_providers: value.evidence_providers as string[], reason_code: requiredText(value.reason_code, 80) }; }
 function parseEventDetail(value: unknown): CTIEventDetail { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, [...eventKeys, 'indicators', 'entities', 'relationships']); const base = parseCTIEvent(Object.fromEntries(eventKeys.map((key) => [key, value[key]]))); if (!Array.isArray(value.indicators) || !Array.isArray(value.entities) || !Array.isArray(value.relationships)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); const entities = value.entities.map((item): CTIEntity => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(item, ['type', 'value', 'confidence']); return { type: requiredText(item.type, 100), value: requiredText(item.value, 1000), confidence: boundedNumber(item.confidence, 0, 1) }; }); const relationships = value.relationships.map((item): CTIRelationship => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(item, ['subject', 'relation', 'object', 'confidence']); return { subject: requiredText(item.subject, 1000), relation: requiredText(item.relation, 100), object: requiredText(item.object, 1000), confidence: boundedNumber(item.confidence, 0, 1) }; }); return { ...base, indicators: value.indicators.map(parseIndicator), entities, relationships }; }
 function parseCorrelation(value: unknown): CTICorrelation { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, ['id', 'source_event_id', 'target_event_id', 'type', 'score', 'reason']); return { id: requiredText(value.id, 36), source_event_id: requiredText(value.source_event_id, 64), target_event_id: requiredText(value.target_event_id, 64), type: requiredText(value.type, 50), score: boundedNumber(value.score, 0, 1), reason: requiredText(value.reason, 100) }; }
+const searchResultKeys = ['kind', 'id', 'label', 'context', 'match_field', 'match_quality', 'source_pipeline', 'source_type', 'source_id', 'source_name', 'event_id', 'related_event_id', 'severity', 'confidence', 'created_at'];
+function parseIntelligenceSearchResult(value: unknown): IntelligenceSearchResult {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  exactKeys(value, searchResultKeys);
+  const kinds: IntelligenceSearchKind[] = ['event', 'indicator', 'entity', 'source', 'correlation'];
+  const fields = ['id', 'title', 'value', 'type', 'name', 'reason', 'event_id'];
+  const qualities = ['exact', 'prefix', 'contains'];
+  if (!kinds.includes(value.kind as IntelligenceSearchKind) || !fields.includes(String(value.match_field)) || !qualities.includes(String(value.match_quality))) throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  if (value.source_pipeline !== null && value.source_pipeline !== 'external' && value.source_pipeline !== 'internal') throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  return {
+    kind: value.kind as IntelligenceSearchKind, id: requiredText(value.id, 64),
+    label: requiredText(value.label, 2048), context: requiredText(value.context, 500),
+    match_field: value.match_field as IntelligenceSearchResult['match_field'],
+    match_quality: value.match_quality as IntelligenceSearchResult['match_quality'],
+    source_pipeline: value.source_pipeline || undefined,
+    source_type: optionalSafeText(value.source_type, 50), source_id: optionalSafeText(value.source_id, 64),
+    source_name: optionalSafeText(value.source_name, 200), event_id: optionalSafeText(value.event_id, 64),
+    related_event_id: optionalSafeText(value.related_event_id, 64), severity: optionalSafeText(value.severity, 30),
+    confidence: value.confidence === null || value.confidence === undefined ? undefined : boundedNumber(value.confidence, 0, 1),
+    created_at: optionalTimestamp(value.created_at),
+  };
+}
+function parseIntelligenceSearch(value: unknown): IntelligenceSearchResponse {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  exactKeys(value, ['query', 'items', 'returned', 'limit_per_type', 'truncated']);
+  if (!Array.isArray(value.items) || value.items.length > 50 || !Number.isSafeInteger(value.returned) || value.returned !== value.items.length || !Number.isSafeInteger(value.limit_per_type) || (value.limit_per_type as number) < 1 || (value.limit_per_type as number) > 10 || typeof value.truncated !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  const query = requiredText(value.query, 100); if (query.length < 2 || query !== query.trim()) throw new ApiError(502, 'invalid_response', 'Invalid search response');
+  return { query, items: value.items.map(parseIntelligenceSearchResult), returned: value.returned as number, limit_per_type: value.limit_per_type as number, truncated: value.truncated };
+}
 function parseOutlier(value: unknown): CTIOutlier { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, ['id', 'event_id', 'started_at', 'ended_at', 'alert_count', 'is_outlier', 'anomaly_score', 'detector']); if (!validIsoTimestamp(value.started_at) || !validIsoTimestamp(value.ended_at) || typeof value.is_outlier !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); return { id: requiredText(value.id, 64), event_id: optionalSafeText(value.event_id, 64), started_at: value.started_at, ended_at: value.ended_at, alert_count: boundedNumber(value.alert_count), is_outlier: value.is_outlier, anomaly_score: boundedNumber(value.anomaly_score, -1000, 1000), detector: requiredText(value.detector, 100) }; }
 const runKeys = ['id', 'pipeline', 'status', 'collected', 'processed', 'stored', 'failed', 'error_category', 'started_at', 'completed_at', 'duration_seconds'];
 function parseRun(value: unknown): AnalysisRun { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, runKeys); if (!validIsoTimestamp(value.started_at)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); return { id: requiredText(value.id, 36), pipeline: requiredText(value.pipeline, 20), status: requiredText(value.status, 30), collected: boundedNumber(value.collected), processed: boundedNumber(value.processed), stored: boundedNumber(value.stored), failed: boundedNumber(value.failed), error_category: optionalSafeText(value.error_category, 80), started_at: value.started_at, completed_at: optionalTimestamp(value.completed_at), duration_seconds: value.duration_seconds === null ? undefined : boundedNumber(value.duration_seconds) }; }
@@ -526,6 +580,7 @@ export const api = {
   internalHealth: async (integration: InternalIntegration) => parseHealth(await request<unknown>(`/integrations/${integration}/health`)),
   internalEvents: async (integration: InternalIntegration, limit = 25, offset = 0, severity = '') => parseInternalEvents(await request<unknown>(`/internal/sources/${integration}/events?limit=${limit}&offset=${offset}${severity ? `&severity=${encodeURIComponent(severity)}` : ''}`), integration),
   pullInternal: async (integration: InternalIntegration, signal?: AbortSignal) => parsePullResult(await request<unknown>(`/integrations/${integration}/pull`, { method: 'POST', signal }, INTERNAL_PULL_TIMEOUT_MS)),
+  intelligenceSearch: async (query: string, limitPerType = 5) => { const normalized = query.trim(); const params = new URLSearchParams({ q: normalized, limit_per_type: String(limitPerType) }); const result = parseIntelligenceSearch(await request<unknown>(`/intelligence/search?${params}`)); if (result.query !== normalized || result.limit_per_type !== limitPerType) throw new ApiError(502, 'invalid_response', 'Search response identity mismatch'); return result; },
   intelligenceEvents: async (limit = 25, offset = 0, filters: { severity?: string; source_pipeline?: string; processing_status?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parsePage(await request<unknown>(`/intelligence/events?${params}`), parseCTIEvent); },
   intelligenceEvent: async (id: string) => parseEventDetail(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}`)),
   intelligenceIndicators: async (limit = 25, offset = 0, filters: { type?: string; search?: string; semantic_role?: string; assessment?: string; validation_status?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key === 'type' ? 'indicator_type' : key, value); }); return parsePage(await request<unknown>(`/intelligence/indicators?${params}`), parseIndicator); },

@@ -14,6 +14,7 @@ import { Reviews } from './Reviews';
 import { Jobs } from './Jobs';
 import { InternalOverview, InternalSourcePage } from './InternalSources';
 import { AnalysisPage, AttackPage, CorrelationsPage, EventDetailPage, EventsPage, IndicatorsPage, IntelligenceOverview, MISPPage, OutliersPage } from './Intelligence';
+import { IntelligenceSearchPage } from './IntelligenceSearch';
 import { AdminGuard, AdminPage } from './Admin';
 import { AppErrorBoundary, NotFound } from '../components/AppErrorBoundary';
 import { DarkWebWatches } from './DarkWebWatches';
@@ -45,6 +46,7 @@ export function App() {
                   <Route path="/internal-sources/host-auth" element={<InternalSourcePage integration="host-auth" />} />
                   <Route path="/internal-sources/web-access" element={<InternalSourcePage integration="web-access" />} />
                   <Route path="/intelligence" element={<IntelligenceOverview />} />
+                  <Route path="/intelligence/search" element={<IntelligenceSearchPage />} />
                   <Route path="/intelligence/events" element={<EventsPage />} />
                   <Route path="/intelligence/events/:eventId" element={<EventDetailPage />} />
                   <Route path="/intelligence/indicators" element={<IndicatorsPage />} />

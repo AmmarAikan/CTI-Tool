@@ -6,6 +6,7 @@ import { EmptyState, ErrorState, LoadingState } from './States';
 import { StatusBadge } from './StatusBadge';
 
 const drilldowns = [
+  { to: '/intelligence/search', key: 'investigate' },
   { to: '/intelligence/events', key: 'events' },
   { to: '/intelligence/indicators', key: 'indicators' },
   { to: '/external-sources', key: 'sources' },
