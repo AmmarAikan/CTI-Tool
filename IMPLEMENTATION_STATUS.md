@@ -10,7 +10,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 ## Current checkpoint
 
-- Phase: P0 Phases 1-4 complete in development: incremental UI/Auth foundation, real-data Dashboard investigation entry, bounded Global Intelligence / IOC Investigation Search, and explainable Cross-Source Evidence.
+- Phase: P0 Phases 1-5 complete in development: incremental UI/Auth foundation, real-data Dashboard investigation entry, bounded Global Intelligence / IOC Investigation Search, explainable Cross-Source Evidence, and the evidence-backed Threat Storyline.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -18,10 +18,11 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 - Dashboard implementation checkpoint: `af853e8d6f82d22ae9f319648c5b93efe28253bd`.
 - Global search implementation checkpoint: `e29f83d`.
 - Cross-source evidence implementation checkpoint: `7fa1ea9`.
+- Threat Storyline implementation checkpoint: `8abb490b3f901860f5217187ffb7c7895164b980`.
 - Production source checkout: `/home/alaaldeen/cti-vps-production-integration`.
 - Active immutable release: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` through `/opt/cti-platform/current`.
-- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-4.
-- Candidate-only Docker images `actit-backend:ui-auth-candidate`, `actit-frontend:ui-auth-candidate`, `actit-frontend:dashboard-candidate`, `actit-backend:search-candidate`, `actit-frontend:search-candidate`, `actit-backend:correlation-candidate`, and `actit-frontend:correlation-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
+- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-5.
+- Candidate-only Docker images `actit-backend:ui-auth-candidate`, `actit-frontend:ui-auth-candidate`, `actit-frontend:dashboard-candidate`, `actit-backend:search-candidate`, `actit-frontend:search-candidate`, `actit-backend:correlation-candidate`, `actit-frontend:correlation-candidate`, `actit-backend:storyline-candidate`, and `actit-frontend:storyline-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
 
 ## Verified production baseline
 
@@ -102,6 +103,7 @@ Phase 1 validation: backend targeted tests passed 5/5 both in the VPS test envir
 Dashboard phase validation: the focused Dashboard, integration, and localization set passed 20/20 on the VPS. The `actit-frontend:dashboard-candidate` Docker build then passed TypeScript validation, all 108 Vitest tests, and the production build. This phase changed no backend contract and used the existing real events endpoint; no production data or service was connected or modified.
 Global search phase validation: the focused frontend set passed 33/33, TypeScript lint and the production build passed, and the ordered Backend API module passed 10/10 in both the VPS disposable test environment and `actit-backend:search-candidate`. The `actit-frontend:search-candidate` Docker build passed TypeScript validation, all 112 Vitest tests, and the production build. Existing non-failing React `act(...)`, sklearn model-version, and Vite 500 kB chunk warnings remain documented technical debt.
 Cross-source evidence phase validation: the focused frontend set passed 29/29 and TypeScript lint passed; the ordered Backend API module passed 11/11 in both the VPS disposable test environment and `actit-backend:correlation-candidate`. The `actit-frontend:correlation-candidate` Docker build passed TypeScript validation, all 112 Vitest tests, and the production build. Production's nine current correlation rows were inspected read-only and are all internal-to-internal; ACTIT now labels same-pipeline versus cross-source records honestly and does not fabricate an External-to-Internal link.
+Threat Storyline phase validation: the ordered Backend API module passed 12/12 in both the VPS disposable test environment and `actit-backend:storyline-candidate` with the Compose-equivalent read-only ML reports mount. The focused Storyline frontend tests passed 2/2; `actit-frontend:storyline-candidate` passed TypeScript validation, all 114 Vitest tests, the production build, and an isolated Nginx `/healthz` container smoke check. Candidate image IDs are `sha256:4895ba2f1040879ba7d2ca8a83a983ac8d11edd23c1c82844bae45fa1d74267f` for backend and `sha256:3ebef06df8b7dba2db20b6c8ae35abdbd156059da29cccef330cfa6a3d08d548` for frontend.
 
 
 ## Verified end-to-end lifecycle
@@ -125,7 +127,7 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Login and session authentication | Ready in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, and success/rejection audit evidence added | Retain later reverse-proxy/session-storage hardening and validate after immutable deployment |
 | Public registration | Ready in development, not deployed | Public API and bilingual form always create active `viewer`; extra/client role is rejected; duplicate and rate-limit states are safe | Deploy through immutable release only after the next meaningful checkpoint |
 | RBAC and user administration | Partial | Viewer/analyst/admin guards, last-admin protection, audit view | Verify every mutating endpoint and add deny-path tests |
-| Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, presented MISP as sharing, and added Dashboard plus global-search investigation pivots | Add evidence/story paths and page-by-page incremental accessibility improvements |
+| Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, presented MISP as sharing, and added Dashboard, global-search, evidence, and Storyline investigation pivots | Continue page-by-page incremental accessibility and workflow improvements |
 | Executive dashboard | Ready/Partial in development, not deployed | Existing real counts/health/distributions preserved; latest five real events and direct events/indicators/sources/analysis drill-downs added with loading/error/empty states | Add explicit system-readiness evidence and later trend clarity without mock metrics |
 | External Sources | Ready/Partial | Healthy service and canonical external implementation | Preserve ownership boundaries; expose provenance/freshness/failure evidence more clearly |
 | Internal Sources | Ready/Partial | Gateway streams ready; Dionaea/host-auth/web-access views exist | Improve drill-down, sensor freshness, and safe outlier evidence display |
@@ -133,7 +135,7 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Indicator meaning and quality | Partial | Type, semantic role, validation, assessment, evidence fields exist | Explain reference vs suspicious/malicious values and surface evidence consistently |
 | Cross-source evidence | Ready/Partial in development, not deployed | Typed API endpoints expose real source provenance and derived same-pipeline/cross-source scope; UI links both events | Current production rows are same-pipeline; validate real External-to-Internal evidence when generated and cover it in the deterministic demo dataset |
 | Correlation explanation | Ready in development, not deployed | Safe allowlisted factors explain exact observable match or normalized-text method/threshold; arbitrary evidence remains private | Validate against the immutable release after deployment and extend only when a new correlation method has a defined safe projection |
-| Threat storyline | Missing | No dedicated storyline model/service/UI | Build defensible event timeline/story from existing events, relationships, correlations, and ATT&CK mappings |
+| Threat storyline | Ready in development, not deployed | Typed bounded endpoint and bilingual responsive investigation view project real provenance, chronology, observables, entities, relationships, correlations, ATT&CK candidates, and deterministic risk factors | Validate against the immutable release after deployment; preserve chronology-versus-causality and candidate-status labels |
 | MITRE ATT&CK | Partial | Built-in subset, evidence-bearing candidates, Navigator export, official links | Broaden safe catalog use, expose tactic/technique context, and retain candidate/confirmed distinction |
 | STIX sharing | Partial | Per-event STIX endpoint exists | Add obvious UI download/export, validation feedback, and safe filename/content handling |
 | MISP health/preview/send/history | Partial | Connected; preview/send/history UI and idempotent client exist | Add candidate queue/readiness, batch controls, explicit omission reasons, durable delivery records, and usable post-send links |
@@ -177,6 +179,12 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
   - Figma basis: use a compact evidence path, clear strength hierarchy, factor rows, and responsive endpoint cards.
   - ACTIT implementation: preserve the existing correlators and database model; add one batched typed response projection that allowlists shared observables, algorithm, and threshold while excluding raw evidence and internal text.
   - Data-truth rule: label a row cross-source only when the two stored event pipelines differ; the nine inspected production rows are currently same-pipeline.
+- Threat Storyline decision rationale:
+  - Paper basis: connect internal/external collection, extraction, correlation, analysis, storage, and sharing as an inspectable CTI lifecycle.
+  - OpenCTI basis: present provenance, observations, entities, relationships, and analyst pivots without replacing ACTIT's relational architecture.
+  - Figma basis: adapt the approved timeline, evidence-card, and risk-hierarchy patterns to ACTIT's existing visual system.
+  - ACTIT implementation: add one bounded read-only projection and one incremental bilingual page backed only by existing real records; no mock production data or database migration.
+  - Data-truth rule: milestones are chronological evidence, correlations remain scored associations, and rule-based ATT&CK results remain candidates rather than asserted causality.
 - UI UX Pro Max influenced information density, focus visibility, keyboard/accessibility states, responsive breakpoints, and reduced-motion treatment; its generic visual palette was not used where it conflicted with ACTIT and the approved Figma.
 - PostgreSQL remains the source of truth. MISP remains an unpublished-by-default, selective sharing destination.
 - No bulk MISP mirror will be enabled without validation, evidence, deduplication, analyst review, rate/size bounds, and explicit publication controls.
@@ -207,19 +215,20 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 - Added typed, sanitized explainable correlation responses with both real event endpoints, source provenance, derived cross-source scope, score basis, evidence availability, and allowlisted factors.
 - Reworked the existing Correlations page incrementally into bilingual, responsive evidence cards with direct event pivots while retaining the current route, API architecture, themes, and pagination.
 
+- Added a first-class Threat Storyline investigation route with real event provenance, deterministic risk explanation, bounded evidence counts, chronological milestones, observables/entities/relationships, correlation pivots, and ATT&CK candidate context.
+- Added strict safe response parsing and internal-evidence suppression, including sanitized ATT&CK projections for internal events, then validated the implementation in both backend and frontend candidate containers.
 ## Next Task
 
-Inspect the existing event-detail, relationship, correlation, ATT&CK mapping, and timeline-capable fields. Implement the smallest defensible Threat Storyline hero slice from real ACTIT data: a typed read-only storyline endpoint and a bilingual responsive investigation timeline that explains provenance, chronological evidence, related correlations, observables/entities/relationships, ATT&CK candidate status, and risk context without inventing causality. Preserve existing data models unless a measured additive gap is required; add direct pivots, strict safe projections, targeted backend/frontend tests, and Docker parity validation.
+Perform a targeted MISP root-cause investigation by comparing the existing ACTIT candidate/preview/send/history code, production audit evidence, outbound event identity, MISP API state, and MISP database evidence without modifying data. Then implement the smallest safe multi-event sharing workflow: explicit readiness/omission reasons, bounded analyst selection and admin-confirmed batch delivery, deterministic idempotency, durable per-event outcomes, and usable post-send references while keeping MISP unpublished-by-default and PostgreSQL authoritative.
 
 ## Remaining P0 sequence
 
-1. Threat storyline/timeline.
-2. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
-3. Deterministic non-destructive demo dataset and explicit System Readiness view.
-4. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
-5. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
-6. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
-7. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
+1. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
+2. Deterministic non-destructive demo dataset and explicit System Readiness view.
+3. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
+4. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
+5. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
+6. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
 
 ## Remaining P1 / deferred
 
