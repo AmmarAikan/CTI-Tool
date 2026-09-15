@@ -74,7 +74,7 @@ export function Manual() {
   }
 
   if (loading) return <LoadingState label={t('checkingPermissions')} />;
-  if (!can('analyst')) return <Navigate to="/" replace />;
+  if (!can('analyst')) return <Navigate to="/dashboard" replace />;
   const activeJob = Boolean(job && !TERMINAL_STATES.includes(job.state));
   const activeRecheck = Boolean(recheckJob && !TERMINAL_STATES.includes(recheckJob.state));
   const busy = create.isPending || approve.isPending || reject.isPending || activeJob;

@@ -63,6 +63,59 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(model.json()["model_priority"]["primary"], "dnrti_bert_ner")
         self.assertGreater(model.json()["held_out_test"]["bert"]["f1"], 0.75)
 
+    def test_public_registration_is_viewer_only_audited_and_login_ready(self) -> None:
+        registered = self.client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "GraduationViewer",
+                "password": "GraduationViewerPassword123!",
+            },
+        )
+        self.assertEqual(registered.status_code, 201, registered.text)
+        self.assertEqual(registered.json()["username"], "graduationviewer")
+        self.assertEqual(registered.json()["role"], "viewer")
+        self.assertTrue(registered.json()["is_active"])
+        self.assertNotIn("password", registered.text.lower())
+        self.assertNotIn("hash", registered.text.lower())
+
+        role_injection = self.client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "roleinjection",
+                "password": "GraduationViewerPassword123!",
+                "role": "admin",
+            },
+        )
+        duplicate = self.client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "GraduationViewer",
+                "password": "AnotherGraduationPassword123!",
+            },
+        )
+        self.assertEqual(role_injection.status_code, 422)
+        self.assertEqual(duplicate.status_code, 409)
+
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": "graduationviewer",
+                "password": "GraduationViewerPassword123!",
+            },
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        denied = self.client.post(
+            "/api/v1/users",
+            headers=viewer_headers,
+            json={"username": "forbidden", "password": "ForbiddenPassword123!"},
+        )
+        self.assertEqual(denied.status_code, 403)
+
+        audit_page = self.client.get("/api/v1/admin/audit?limit=100", headers=self.headers)
+        self.assertTrue(any(item["action"] == "self_register" for item in audit_page.json()["items"]))
+
+
     def test_admin_facade_rbac_lifecycle_last_admin_and_safe_audit(self) -> None:
         current = self.client.get("/api/v1/auth/me", headers=self.headers).json()
         protected = self.client.patch(

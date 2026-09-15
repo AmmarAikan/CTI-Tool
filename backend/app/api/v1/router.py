@@ -7,13 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import desc, func, select
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import get_settings
+from backend.app.core.rate_limit import SlidingWindowRateLimiter, rate_limit_key, request_identity
 from backend.app.core.security import (
     create_access_token,
     decode_access_token,
@@ -78,6 +79,8 @@ from backend.app.schemas.api import (
     LoginRequest,
     MISPSendRequest,
     SourceCreate,
+    RegisteredUserResponse,
+    RegisterRequest,
     UserCreate,
 )
 from backend.app.services.model_evidence_service import ModelEvidenceService
@@ -87,6 +90,8 @@ from backend.app.services.pipeline_service import PipelineService
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+AUTH_RATE_LIMITER = SlidingWindowRateLimiter()
+DUMMY_PASSWORD_HASH = "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 SessionDep = Annotated[Session, Depends(get_db)]
 
 
@@ -272,11 +277,101 @@ def bootstrap_admin(payload: BootstrapRequest, db: SessionDep) -> dict[str, Any]
     return {"id": user.id, "username": user.username, "role": user.role}
 
 
+def _rate_limited(retry_after: int) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many authentication attempts. Try again later.",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+@router.post(
+    "/auth/register",
+    tags=["auth"],
+    response_model=RegisteredUserResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def register(payload: RegisterRequest, request: Request, db: SessionDep) -> dict[str, Any]:
+    username = payload.username.casefold()
+    identity = request_identity(request)
+    ip_key = rate_limit_key("register", identity)
+    retry_after = AUTH_RATE_LIMITER.consume(ip_key, limit=5, window_seconds=3600)
+    if retry_after is not None:
+        raise _rate_limited(retry_after)
+
+    existing = db.scalar(select(User).where(func.lower(User.username) == username))
+    if existing is not None:
+        CTIRepository(db).audit(
+            "self_register_rejected",
+            "user",
+            username=username,
+            details={"reason": "username_unavailable"},
+        )
+        db.commit()
+        raise HTTPException(status_code=409, detail="Username is unavailable")
+
+    user = User(
+        username=username,
+        password_hash=hash_password(payload.password),
+        role="viewer",
+        is_active=True,
+    )
+    db.add(user)
+    try:
+        db.flush()
+        CTIRepository(db).audit(
+            "self_register",
+            "user",
+            user.id,
+            user_id=user.id,
+            username=user.username,
+            details={"role": "viewer"},
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Username is unavailable") from exc
+    return {
+        "id": user.id,
+        "username": user.username,
+        "role": "viewer",
+        "is_active": user.is_active,
+    }
+
+
 @router.post("/auth/login", tags=["auth"])
-def login(payload: LoginRequest, db: SessionDep) -> dict[str, Any]:
+def login(payload: LoginRequest, request: Request, db: SessionDep) -> dict[str, Any]:
+    identity = request_identity(request)
+    ip_key = rate_limit_key("login_ip", identity)
+    account_key = rate_limit_key("login_account", identity, payload.username)
+    for key, limit in ((ip_key, 30), (account_key, 10)):
+        retry_after = AUTH_RATE_LIMITER.consume(key, limit=limit, window_seconds=300)
+        if retry_after is not None:
+            raise _rate_limited(retry_after)
+
     user = db.scalar(select(User).where(User.username == payload.username))
-    if user is None or not user.is_active or not verify_password(payload.password, user.password_hash):
+    candidate_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    password_valid = verify_password(payload.password, candidate_hash)
+    if user is None or not user.is_active or not password_valid:
+        CTIRepository(db).audit(
+            "login_rejected",
+            "session",
+            user_id=user.id if user is not None else None,
+            username=payload.username,
+            details={"reason": "invalid_credentials"},
+        )
+        db.commit()
         raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    AUTH_RATE_LIMITER.clear(ip_key, account_key)
+    CTIRepository(db).audit(
+        "login_success",
+        "session",
+        user_id=user.id,
+        username=user.username,
+        details={"role": user.role},
+    )
+    db.commit()
     return {
         "access_token": create_access_token(user.id, user.role),
         "token_type": "bearer",

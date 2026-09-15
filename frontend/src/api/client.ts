@@ -516,6 +516,7 @@ function parseUser(value: unknown): User {
 
 export const api = {
   login: async (username: string, password: string) => parseLogin(await request<unknown>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })),
+  register: async (username: string, password: string) => parseUser(await request<unknown>('/auth/register', { method: 'POST', body: JSON.stringify({ username, password }) })),
   me: async () => parseUser(await request<unknown>('/auth/me')),
   externalHealth: async () => parseHealth(await request<unknown>('/integrations/external-control/health')),
   externalSources: async () => parseSources(await request<unknown>('/integrations/external-control/sources')),

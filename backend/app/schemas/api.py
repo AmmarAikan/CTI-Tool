@@ -10,9 +10,28 @@ class BootstrapRequest(BaseModel):
     password: str = Field(min_length=10, max_length=200)
 
 
+class RegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(
+        min_length=3,
+        max_length=100,
+        pattern=r"^[A-Za-z0-9_.-]+$",
+    )
+    password: str = Field(min_length=12, max_length=200)
+
+
+class RegisteredUserResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=36)
+    username: str = Field(max_length=100)
+    role: Literal["viewer"]
+    is_active: bool
+
+
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+    username: str = Field(min_length=1, max_length=100)
+    password: str = Field(min_length=1, max_length=200)
 
 
 class UserCreate(BaseModel):

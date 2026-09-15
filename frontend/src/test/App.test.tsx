@@ -3,17 +3,19 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, beforeEach, vi } from 'vitest';
 import { App } from '../pages/App';
 import { Login } from '../pages/Login';
+import { Register } from '../pages/Register';
 import { Dashboard } from '../pages/Dashboard';
 import { Sources } from '../pages/Sources';
 import { renderWithProviders } from './fixtures';
 import { Layout } from '../components/Layout';
 import { AuthProvider, useAuth } from '../auth/AuthContext';
+import { clearToken } from '../api/client';
 
 const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
 const user = { id: 'u1', username: 'analyst', role: 'analyst', is_active: true };
 const sources = [{ source_id: 'cisa-kev', name: 'CISA KEV', source_type: 'vulnerability', status: 'enabled', metadata: {} }];
 
-beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
+beforeEach(() => { clearToken(); sessionStorage.clear(); window.history.replaceState({}, '', '/'); vi.restoreAllMocks(); });
 
 describe('authentication', () => {
   it('logs in through the central API without rendering the token', async () => {
@@ -29,7 +31,31 @@ describe('authentication', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ detail: 'Invalid username or password' }, 401));
     renderWithProviders(<Login />); const actor = userEvent.setup(); await actor.type(screen.getByLabelText('اسم المستخدم'), 'bad'); await actor.type(screen.getByLabelText('كلمة المرور'), 'bad'); await actor.click(screen.getByRole('button', { name: 'تسجيل الدخول' })); await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('بيانات الدخول غير صحيحة.'));
   });
-  it('redirects protected routes to login', () => { render(<App />); expect(screen.getByText('أهلًا بك في مساحة العمليات')).toBeInTheDocument(); });
+  it('creates a viewer without sending a client-controlled role', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ id: 'u2', username: 'new.viewer', role: 'viewer', is_active: true }, 201));
+    renderWithProviders(<Register />);
+    const actor = userEvent.setup();
+    await actor.type(screen.getByLabelText('اسم المستخدم'), 'New.Viewer');
+    await actor.type(screen.getByLabelText('كلمة المرور'), 'StrongViewerPassword123!');
+    await actor.type(screen.getByLabelText('تأكيد كلمة المرور'), 'StrongViewerPassword123!');
+    await actor.click(screen.getByRole('button', { name: 'إنشاء الحساب' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('تم إنشاء حساب المشاهد بنجاح.'));
+    expect(fetchMock.mock.calls[0][0]).toContain('/api/v1/auth/register');
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(JSON.parse(String(request.body))).toEqual({ username: 'New.Viewer', password: 'StrongViewerPassword123!' });
+    expect(sessionStorage.getItem('cti_access_token')).toBeNull();
+  });
+  it('renders the public intelligence lifecycle without mock metrics', () => {
+    render(<App />);
+    expect(screen.getByRole('heading', { name: 'من الإشارة المتفرقة إلى قصة تهديد قابلة للتحقق.' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'إنشاء حساب مشاهد' })).toHaveAttribute('href', '/register');
+    expect(screen.getByText('الربط والإثراء')).toBeInTheDocument();
+  });
+  it('redirects protected routes to login', () => {
+    window.history.replaceState({}, '', '/dashboard');
+    render(<App />);
+    expect(screen.getByText('أهلًا بك في مساحة العمليات')).toBeInTheDocument();
+  });
   it('clears the session on logout', async () => {
     sessionStorage.setItem('cti_access_token', 'token');
     function LoggedIn() { const { logout } = useAuth(); return <button onClick={logout}>خروج</button>; }
