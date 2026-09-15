@@ -299,6 +299,26 @@ class IntelligenceSearchResponse(BaseModel):
     truncated: bool
 
 
+class IntelligenceCorrelationEndpointResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(max_length=64)
+    title: str = Field(min_length=1, max_length=500)
+    source_pipeline: Literal["external", "internal"]
+    source_type: str = Field(max_length=50)
+    source_id: str | None = Field(default=None, max_length=64)
+    source_name: str | None = Field(default=None, max_length=200)
+    severity: str | None = Field(default=None, max_length=30)
+    risk_score: float = Field(ge=0, le=100)
+    created_at: str = Field(max_length=40)
+
+
+class IntelligenceCorrelationFactorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["shared_observable", "algorithm", "threshold", "method"]
+    label: str = Field(min_length=1, max_length=100)
+    value: str = Field(min_length=1, max_length=2048)
+
+
 class IntelligenceCorrelationResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(max_length=36)
@@ -306,7 +326,14 @@ class IntelligenceCorrelationResponse(BaseModel):
     target_event_id: str = Field(max_length=64)
     type: str = Field(max_length=50)
     score: float = Field(ge=0, le=1)
-    reason: str = Field(max_length=100)
+    reason: str = Field(max_length=500)
+    source_event: IntelligenceCorrelationEndpointResponse
+    target_event: IntelligenceCorrelationEndpointResponse
+    cross_source: bool
+    score_basis: Literal["exact_observable_match", "normalized_text_similarity", "recorded_correlation"]
+    evidence_status: Literal["available", "partial", "unavailable"]
+    factors: list[IntelligenceCorrelationFactorResponse] = Field(max_length=22)
+    created_at: str = Field(max_length=40)
 
 
 class IntelligenceOutlierResponse(BaseModel):

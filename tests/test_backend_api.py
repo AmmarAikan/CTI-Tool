@@ -232,6 +232,120 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.json()["state"], "queued")
 
+    def test_correlation_projection_explains_safe_cross_source_evidence(self) -> None:
+        with SessionLocal() as db:
+            external_source = Source(
+                id="correlation-external-source",
+                name="External Evidence Feed",
+                source_type="research",
+                source_pipeline="external",
+                enabled=True,
+            )
+            internal_source = Source(
+                id="correlation-internal-source",
+                name="Internal Honeypot",
+                source_type="honeypot",
+                source_pipeline="internal",
+                enabled=True,
+            )
+            external_event = ThreatEvent(
+                id="correlation-external-event",
+                source_id=external_source.id,
+                source_record_id="correlation-external-record",
+                source_type="research",
+                source_pipeline="external",
+                title="External campaign evidence",
+                description="Safe external context.",
+                normalized_text="private external normalized text",
+                severity="high",
+                risk_score=82,
+                confidence=0.9,
+                processing_status="transformed",
+            )
+            internal_event = ThreatEvent(
+                id="correlation-internal-event",
+                source_id=internal_source.id,
+                source_record_id="correlation-internal-record",
+                source_type="honeypot",
+                source_pipeline="internal",
+                title="Private internal sensor title",
+                description="private internal description",
+                normalized_text="private internal normalized text",
+                severity="medium",
+                risk_score=64,
+                confidence=0.8,
+                processing_status="transformed",
+            )
+            exact_id = "40000000-0000-0000-0000-000000000001"
+            similarity_id = "40000000-0000-0000-0000-000000000002"
+            db.add_all([
+                external_source,
+                internal_source,
+                external_event,
+                internal_event,
+                CorrelationRecord(
+                    id=exact_id,
+                    event_a_id=external_event.id,
+                    event_b_id=internal_event.id,
+                    correlation_type="simple_indicator_match",
+                    score=1.0,
+                    reason="same_domain",
+                    evidence={
+                        "indicator_type": "domain",
+                        "values": ["command.example"],
+                        "private": "must-not-leak",
+                    },
+                ),
+                CorrelationRecord(
+                    id=similarity_id,
+                    event_a_id=external_event.id,
+                    event_b_id=internal_event.id,
+                    correlation_type="text_similarity",
+                    score=0.75,
+                    reason="similar_text",
+                    evidence={
+                        "backend": "tfidf_cosine",
+                        "threshold": 0.35,
+                        "private": "must-not-leak",
+                    },
+                ),
+            ])
+            db.commit()
+
+        created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "correlationviewer", "password": "CorrelationViewerPassword123!", "role": "viewer"},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "correlationviewer", "password": "CorrelationViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        response = self.client.get("/api/v1/intelligence/correlations?limit=20", headers=viewer_headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        by_id = {item["id"]: item for item in response.json()["items"]}
+
+        exact = by_id[exact_id]
+        self.assertTrue(exact["cross_source"])
+        self.assertEqual(exact["score_basis"], "exact_observable_match")
+        self.assertEqual(exact["evidence_status"], "available")
+        self.assertEqual(exact["source_event"]["source_pipeline"], "external")
+        self.assertEqual(exact["target_event"]["source_pipeline"], "internal")
+        self.assertEqual(exact["target_event"]["title"], "Internal honeypot event")
+        self.assertEqual(exact["factors"], [{"kind": "shared_observable", "label": "domain", "value": "command.example"}])
+
+        similarity = by_id[similarity_id]
+        self.assertEqual(similarity["score_basis"], "normalized_text_similarity")
+        self.assertEqual(
+            {(factor["kind"], factor["value"]) for factor in similarity["factors"]},
+            {("algorithm", "tfidf_cosine"), ("threshold", "0.35")},
+        )
+        for forbidden in ("must-not-leak", "private internal", '"normalized_text":', '"evidence":'):
+            self.assertNotIn(forbidden, response.text)
+
+
     def test_dionaea_upload_persists_sessions_and_outlier_event(self) -> None:
         with DIONAEA_SAMPLE_PATH.open("rb") as handle:
             response = self.client.post(

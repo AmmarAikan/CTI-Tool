@@ -39,7 +39,37 @@ export interface CTIEvent { id: string; title: string; summary: string; source_t
 export interface CTIEntity { type: string; value: string; confidence: number; }
 export interface CTIRelationship { subject: string; relation: string; object: string; confidence: number; }
 export interface CTIEventDetail extends CTIEvent { indicators: CTIIndicator[]; entities: CTIEntity[]; relationships: CTIRelationship[]; }
-export interface CTICorrelation { id: string; source_event_id: string; target_event_id: string; type: string; score: number; reason: string; }
+export interface CTICorrelationEndpoint {
+  event_id: string;
+  title: string;
+  source_pipeline: 'external' | 'internal';
+  source_type: string;
+  source_id?: string;
+  source_name?: string;
+  severity?: string;
+  risk_score: number;
+  created_at: string;
+}
+export interface CTICorrelationFactor {
+  kind: 'shared_observable' | 'algorithm' | 'threshold' | 'method';
+  label: string;
+  value: string;
+}
+export interface CTICorrelation {
+  id: string;
+  source_event_id: string;
+  target_event_id: string;
+  type: string;
+  score: number;
+  reason: string;
+  source_event: CTICorrelationEndpoint;
+  target_event: CTICorrelationEndpoint;
+  cross_source: boolean;
+  score_basis: 'exact_observable_match' | 'normalized_text_similarity' | 'recorded_correlation';
+  evidence_status: 'available' | 'partial' | 'unavailable';
+  factors: CTICorrelationFactor[];
+  created_at: string;
+}
 export type IntelligenceSearchKind = 'event' | 'indicator' | 'entity' | 'source' | 'correlation';
 export interface IntelligenceSearchResult {
   kind: IntelligenceSearchKind;
@@ -299,7 +329,29 @@ function parseCTIEvent(value: unknown): CTIEvent {
 const indicatorKeys = ['id', 'event_id', 'type', 'value', 'confidence', 'source_pipeline', 'severity', 'first_seen', 'last_seen', 'semantic_role', 'validation_status', 'assessment', 'assessment_confidence', 'actionable', 'evidence_count', 'evidence_providers', 'reason_code'];
 function parseIndicator(value: unknown): CTIIndicator { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, indicatorKeys); if (value.source_pipeline !== 'external' && value.source_pipeline !== 'internal') throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); if (!['external_reference', 'vulnerability', 'observable', 'indicator'].includes(String(value.semantic_role)) || !['valid', 'invalid'].includes(String(value.validation_status)) || !['reference', 'non_actionable', 'unknown', 'suspicious', 'malicious'].includes(String(value.assessment)) || typeof value.actionable !== 'boolean' || !Array.isArray(value.evidence_providers) || value.evidence_providers.some((item) => typeof item !== 'string' || item.length > 80)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); return { id: requiredText(value.id, 36), event_id: requiredText(value.event_id, 64), type: requiredText(value.type, 50), value: requiredText(value.value, 2048), confidence: boundedNumber(value.confidence, 0, 1), source_pipeline: value.source_pipeline, severity: optionalSafeText(value.severity, 30), first_seen: optionalTimestamp(value.first_seen), last_seen: optionalTimestamp(value.last_seen), semantic_role: value.semantic_role as CTIIndicator['semantic_role'], validation_status: value.validation_status as CTIIndicator['validation_status'], assessment: value.assessment as CTIIndicator['assessment'], assessment_confidence: boundedNumber(value.assessment_confidence, 0, 1), actionable: value.actionable, evidence_count: boundedNumber(value.evidence_count), evidence_providers: value.evidence_providers as string[], reason_code: requiredText(value.reason_code, 80) }; }
 function parseEventDetail(value: unknown): CTIEventDetail { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, [...eventKeys, 'indicators', 'entities', 'relationships']); const base = parseCTIEvent(Object.fromEntries(eventKeys.map((key) => [key, value[key]]))); if (!Array.isArray(value.indicators) || !Array.isArray(value.entities) || !Array.isArray(value.relationships)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); const entities = value.entities.map((item): CTIEntity => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(item, ['type', 'value', 'confidence']); return { type: requiredText(item.type, 100), value: requiredText(item.value, 1000), confidence: boundedNumber(item.confidence, 0, 1) }; }); const relationships = value.relationships.map((item): CTIRelationship => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(item, ['subject', 'relation', 'object', 'confidence']); return { subject: requiredText(item.subject, 1000), relation: requiredText(item.relation, 100), object: requiredText(item.object, 1000), confidence: boundedNumber(item.confidence, 0, 1) }; }); return { ...base, indicators: value.indicators.map(parseIndicator), entities, relationships }; }
-function parseCorrelation(value: unknown): CTICorrelation { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, ['id', 'source_event_id', 'target_event_id', 'type', 'score', 'reason']); return { id: requiredText(value.id, 36), source_event_id: requiredText(value.source_event_id, 64), target_event_id: requiredText(value.target_event_id, 64), type: requiredText(value.type, 50), score: boundedNumber(value.score, 0, 1), reason: requiredText(value.reason, 100) }; }
+function parseCorrelationEndpoint(value: unknown): CTICorrelationEndpoint {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+  exactKeys(value, ['event_id', 'title', 'source_pipeline', 'source_type', 'source_id', 'source_name', 'severity', 'risk_score', 'created_at']);
+  if (value.source_pipeline !== 'external' && value.source_pipeline !== 'internal' || !validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+  return { event_id: requiredText(value.event_id, 64), title: requiredText(value.title, 500), source_pipeline: value.source_pipeline, source_type: requiredText(value.source_type, 50), source_id: optionalSafeText(value.source_id, 64), source_name: optionalSafeText(value.source_name, 200), severity: optionalSafeText(value.severity, 30), risk_score: boundedNumber(value.risk_score, 0, 100), created_at: value.created_at };
+}
+function parseCorrelation(value: unknown): CTICorrelation {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+  exactKeys(value, ['id', 'source_event_id', 'target_event_id', 'type', 'score', 'reason', 'source_event', 'target_event', 'cross_source', 'score_basis', 'evidence_status', 'factors', 'created_at']);
+  if (typeof value.cross_source !== 'boolean' || !['exact_observable_match', 'normalized_text_similarity', 'recorded_correlation'].includes(String(value.score_basis)) || !['available', 'partial', 'unavailable'].includes(String(value.evidence_status)) || !Array.isArray(value.factors) || value.factors.length > 22 || !validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+  const sourceEvent = parseCorrelationEndpoint(value.source_event);
+  const targetEvent = parseCorrelationEndpoint(value.target_event);
+  const sourceEventId = requiredText(value.source_event_id, 64);
+  const targetEventId = requiredText(value.target_event_id, 64);
+  if (sourceEvent.event_id !== sourceEventId || targetEvent.event_id !== targetEventId || value.cross_source !== (sourceEvent.source_pipeline !== targetEvent.source_pipeline)) throw new ApiError(502, 'invalid_response', 'Correlation identity mismatch');
+  const factors = value.factors.map((factor): CTICorrelationFactor => {
+    if (!isPlainObject(factor)) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+    exactKeys(factor, ['kind', 'label', 'value']);
+    if (!['shared_observable', 'algorithm', 'threshold', 'method'].includes(String(factor.kind))) throw new ApiError(502, 'invalid_response', 'Invalid correlation response');
+    return { kind: factor.kind as CTICorrelationFactor['kind'], label: requiredText(factor.label, 100), value: requiredText(factor.value, 2048) };
+  });
+  return { id: requiredText(value.id, 36), source_event_id: sourceEventId, target_event_id: targetEventId, type: requiredText(value.type, 50), score: boundedNumber(value.score, 0, 1), reason: requiredText(value.reason, 500), source_event: sourceEvent, target_event: targetEvent, cross_source: value.cross_source, score_basis: value.score_basis as CTICorrelation['score_basis'], evidence_status: value.evidence_status as CTICorrelation['evidence_status'], factors, created_at: value.created_at };
+}
 const searchResultKeys = ['kind', 'id', 'label', 'context', 'match_field', 'match_quality', 'source_pipeline', 'source_type', 'source_id', 'source_name', 'event_id', 'related_event_id', 'severity', 'confidence', 'created_at'];
 function parseIntelligenceSearchResult(value: unknown): IntelligenceSearchResult {
   if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid search response');

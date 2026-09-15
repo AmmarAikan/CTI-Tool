@@ -54,10 +54,40 @@ describe('threat intelligence pages', () => {
     expect(document.body).not.toHaveTextContent('••••••••');
   });
 
-  it('renders correlations and outliers without arbitrary evidence, features, or IPs', async () => {
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ id: 'c-1', source_event_id: 'cti-1', target_event_id: 'cti-2', type: 'text_similarity', score: .7, reason: 'similar_text' }])));
+  it('renders explainable cross-source correlations and rejects arbitrary evidence', async () => {
+    const correlation = {
+      id: 'c-1',
+      source_event_id: 'cti-1',
+      target_event_id: 'cti-2',
+      type: 'simple_indicator_match',
+      score: 1,
+      reason: 'same_domain',
+      source_event: {
+        event_id: 'cti-1', title: 'External campaign', source_pipeline: 'external',
+        source_type: 'feed', source_id: 'source-1', source_name: 'External Feed',
+        severity: 'high', risk_score: 82, created_at: '2026-09-07T10:00:00Z',
+      },
+      target_event: {
+        event_id: 'cti-2', title: 'Internal honeypot event', source_pipeline: 'internal',
+        source_type: 'honeypot', source_id: 'source-2', source_name: 'Internal Honeypot',
+        severity: 'medium', risk_score: 64, created_at: '2026-09-07T10:01:00Z',
+      },
+      cross_source: true,
+      score_basis: 'exact_observable_match',
+      evidence_status: 'available',
+      factors: [{ kind: 'shared_observable', label: 'domain', value: 'command.example' }],
+      created_at: '2026-09-07T10:02:00Z',
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([correlation])));
     renderWithProviders(<CorrelationsPage />);
-    await waitFor(() => expect(screen.getByText('similar_text')).toBeInTheDocument());
+    expect(await screen.findByText('تطابق قيمة مرصودة')).toBeInTheDocument();
+    expect(screen.getByText('ارتباط داخلي وخارجي')).toBeInTheDocument();
+    expect(screen.getByText('command.example')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'External campaign' })).toHaveAttribute('href', '/intelligence/events/cti-1');
+    expect(screen.getByRole('link', { name: 'Internal honeypot event' })).toHaveAttribute('href', '/intelligence/events/cti-2');
+    expect(document.body).not.toHaveTextContent('raw_reference');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ ...correlation, evidence: { secret: true } }])));
+    await expect(api.intelligenceCorrelations()).rejects.toMatchObject({ code: 'invalid_response' });
     cleanup();
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ id: 'o-1', event_id: null, started_at: '2026-09-07T10:00:00Z', ended_at: '2026-09-07T10:02:00Z', alert_count: 3, is_outlier: true, anomaly_score: .8, detector: 'isolation_forest' }])));
     renderWithProviders(<OutliersPage />);

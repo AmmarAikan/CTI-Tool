@@ -1415,11 +1415,94 @@ def intelligence_event_attack_navigator(event_id: str, db: SessionDep, _: Curren
     return AttackMappingService().navigator_layer(event)
 
 
+def _correlation_endpoint(event: ThreatEvent, source: Source | None) -> dict[str, Any]:
+    return {
+        "event_id": event.id,
+        "title": _safe_event_title(event),
+        "source_pipeline": event.source_pipeline,
+        "source_type": event.source_type,
+        "source_id": event.source_id,
+        "source_name": source.name if source else None,
+        "severity": event.severity,
+        "risk_score": event.risk_score,
+        "created_at": iso(event.created_at),
+    }
+
+
+def _correlation_factors(item: CorrelationRecord) -> tuple[str, str, list[dict[str, str]]]:
+    evidence = item.evidence if isinstance(item.evidence, dict) else {}
+    if item.correlation_type == "simple_indicator_match":
+        raw_type = evidence.get("indicator_type")
+        indicator_type = raw_type[:50] if isinstance(raw_type, str) and raw_type.strip() else "observable"
+        raw_values = evidence.get("values")
+        factors = []
+        if isinstance(raw_values, list):
+            for raw_value in raw_values[:20]:
+                if not isinstance(raw_value, str):
+                    continue
+                value = raw_value.strip()
+                if value:
+                    factors.append({
+                        "kind": "shared_observable",
+                        "label": indicator_type,
+                        "value": value[:2048],
+                    })
+        return "exact_observable_match", "available" if factors else "unavailable", factors
+
+    if item.correlation_type == "text_similarity":
+        factors = []
+        backend = evidence.get("backend")
+        if backend in {"tfidf_cosine", "token_jaccard_fallback"}:
+            factors.append({"kind": "algorithm", "label": "backend", "value": backend})
+        threshold = evidence.get("threshold")
+        if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and 0 <= float(threshold) <= 1:
+            factors.append({
+                "kind": "threshold",
+                "label": "minimum_score",
+                "value": f"{float(threshold):.2f}",
+            })
+        status_value = "available" if len(factors) == 2 else "partial" if factors else "unavailable"
+        return "normalized_text_similarity", status_value, factors
+
+    return "recorded_correlation", "partial", [{
+        "kind": "method",
+        "label": "recorded_type",
+        "value": item.correlation_type[:50],
+    }]
+
+
 @router.get("/intelligence/correlations", tags=["intelligence"], response_model=IntelligenceCorrelationPageResponse)
 def intelligence_correlations(db: SessionDep, _: CurrentUser, limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
     total = db.scalar(select(func.count()).select_from(CorrelationRecord)) or 0
     rows = db.scalars(select(CorrelationRecord).order_by(desc(CorrelationRecord.score), CorrelationRecord.id).limit(limit).offset(offset)).all()
-    return {"items": [{"id": item.id, "source_event_id": item.event_a_id, "target_event_id": item.event_b_id, "type": item.correlation_type, "score": item.score, "reason": item.reason} for item in rows], "total": total, "limit": limit, "offset": offset}
+    event_ids = {event_id for item in rows for event_id in (item.event_a_id, item.event_b_id)}
+    event_rows = db.execute(
+        select(ThreatEvent, Source)
+        .outerjoin(Source, Source.id == ThreatEvent.source_id)
+        .where(ThreatEvent.id.in_(event_ids))
+    ).all() if event_ids else []
+    events = {event.id: (event, source) for event, source in event_rows}
+    items = []
+    for item in rows:
+        source_event, source = events[item.event_a_id]
+        target_event, target_source = events[item.event_b_id]
+        score_basis, evidence_status, factors = _correlation_factors(item)
+        items.append({
+            "id": item.id,
+            "source_event_id": item.event_a_id,
+            "target_event_id": item.event_b_id,
+            "type": item.correlation_type,
+            "score": item.score,
+            "reason": item.reason,
+            "source_event": _correlation_endpoint(source_event, source),
+            "target_event": _correlation_endpoint(target_event, target_source),
+            "cross_source": source_event.source_pipeline != target_event.source_pipeline,
+            "score_basis": score_basis,
+            "evidence_status": evidence_status,
+            "factors": factors,
+            "created_at": iso(item.created_at),
+        })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/intelligence/outliers", tags=["intelligence"], response_model=IntelligenceOutlierPageResponse)

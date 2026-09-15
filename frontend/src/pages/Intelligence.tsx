@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { api, ApiError, type Page } from '../api/client';
+import { api, ApiError, type CTICorrelationEndpoint, type CTICorrelationFactor, type Page } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { StatusBadge } from '../components/StatusBadge';
@@ -59,7 +59,45 @@ function AttackResults({ data, eventId }: { data: Awaited<ReturnType<typeof api.
 
 export function AttackPage() { const {t}=useI18n();const [eventOffset, setEventOffset] = useState(0); const [eventSearch, setEventSearch] = useState(''); const [eventId, setEventId] = useState(''); const eventLimit = 20; const events = useQuery({ queryKey: ['attack-events', eventOffset, eventSearch], queryFn: () => api.intelligenceEvents(eventLimit, eventOffset, { search: eventSearch.length >= 2 ? eventSearch : '' }), retry: false }); const mapping = useQuery({ queryKey: ['attack-mapping', eventId], queryFn: () => api.attackMapping(eventId), enabled: Boolean(eventId), retry: false }); return <section className="page-section intelligence-module"><Heading eyebrow={t('attackEyebrow')} title="MITRE ATT&CK" text={t('attackDescription')} /><nav className="integration-links" aria-label="MITRE ATT&CK resources"><a href="https://attack.mitre.org/matrices/enterprise/" target="_blank" rel="noreferrer">Matrix</a><a href="https://attack.mitre.org/campaigns/" target="_blank" rel="noreferrer">Campaigns</a><a href="https://attack.mitre.org/groups/" target="_blank" rel="noreferrer">Groups</a><a href="https://attack.mitre.org/software/" target="_blank" rel="noreferrer">Software</a><a href="https://mitre-attack.github.io/attack-navigator/v3/enterprise/" target="_blank" rel="noreferrer">Navigator</a></nav><div className="select-block"><label htmlFor="attack-event-search">{t('searchEvents')}</label><input id="attack-event-search" value={eventSearch} onChange={(e) => { setEventSearch(e.target.value); setEventOffset(0); setEventId(''); }} placeholder={t('minimumTwoCharacters')} /><label htmlFor="attack-event-select">{t('event')}</label><select id="attack-event-select" value={eventId} onChange={(e) => setEventId(e.target.value)}><option value="">{t('chooseEventForAnalysis')}</option>{events.data?.items.map((event) => <option value={event.id} key={event.id}>{event.title}</option>)}</select></div>{events.isLoading && <LoadingState label={t('loadingEvents')} />}{events.isError && <ErrorState onRetry={() => void events.refetch()} />}{events.data?.items.length === 0 && <EmptyState label={t('noEvents')} />}{events.data && <Pager total={events.data.total} offset={eventOffset} limit={eventLimit} setOffset={(value) => { setEventOffset(value); setEventId(''); }} />}{mapping.isLoading && <LoadingState label={t('mappingAttack')} />}{mapping.isError && <ErrorState onRetry={() => void mapping.refetch()} />}{mapping.data && <AttackResults data={mapping.data} eventId={eventId} />}</section>; }
 
-export function CorrelationsPage() { const {t,number}=useI18n();const [offset, setOffset] = useState(0); const limit = 20; const query = useQuery({ queryKey: ['correlations', offset], queryFn: () => api.intelligenceCorrelations(limit, offset), retry: false }); return <SimpleListPage title={t('correlations')} text={t('correlationsDescription')} query={query} offset={offset} limit={limit} setOffset={setOffset} headers={[t('sourceEvent'), t('targetEvent'), t('type'), t('score'), t('reason')]} rows={query.data?.items.map((item) => [item.source_event_id, item.target_event_id, item.type, `${number(Math.round(item.score * 100))}%`, item.reason]) || []} />; }
+const correlationBasisLabel = (value: string, t: Translate) => ({ exact_observable_match: t('exactObservableMatch'), normalized_text_similarity: t('normalizedTextSimilarity'), recorded_correlation: t('recordedCorrelation') }[value] || value);
+const correlationFactorLabel = (factor: CTICorrelationFactor, t: Translate) => ({ shared_observable: t('sharedObservable'), algorithm: t('algorithm'), threshold: t('minimumScore'), method: t('correlationMethod') }[factor.kind]);
+function CorrelationEndpoint({ label, endpoint }: { label: string; endpoint: CTICorrelationEndpoint }) { const {t,number}=useI18n(); return <section className="correlation-endpoint"><span>{label}</span><Link to={`/intelligence/events/${encodeURIComponent(endpoint.event_id)}`}>{endpoint.title}</Link><div><span className={`pipeline-chip pipeline-${endpoint.source_pipeline}`}>{endpoint.source_pipeline}</span><span>{endpoint.source_name || endpoint.source_type}</span><span>{t('risk')}: {number(endpoint.risk_score)}</span></div></section>; }
+
+export function CorrelationsPage() {
+  const {t,number,dateTime}=useI18n();
+  const [offset, setOffset] = useState(0);
+  const limit = 20;
+  const query = useQuery({ queryKey: ['correlations', offset], queryFn: () => api.intelligenceCorrelations(limit, offset), retry: false });
+  return <section className="page-section intelligence-module correlation-evidence-page">
+    <Heading eyebrow={t('intelligence')} title={t('correlations')} text={t('correlationsDescription')} />
+    <div className="notice"><span className="notice-mark">i</span><div><strong>{t('evidenceFirst')}</strong><p>{t('correlationEvidenceNotice')}</p></div></div>
+    <PageState query={query} empty={t('noData')}>
+      <div className="correlation-list">
+        {query.data?.items.map((item) => <article className={`correlation-card ${item.cross_source ? 'cross-source' : ''}`} key={item.id}>
+          <header>
+            <div>
+              <span className={`correlation-scope ${item.cross_source ? 'cross-source' : ''}`}>{item.cross_source ? t('crossSourceCorrelation') : t('withinPipelineCorrelation')}</span>
+              <h3>{correlationBasisLabel(item.score_basis,t)}</h3>
+              <p>{item.reason}</p>
+            </div>
+            <div className="correlation-score"><strong>{number(Math.round(item.score * 100))}%</strong><span>{t('correlationStrength')}</span></div>
+          </header>
+          <div className="correlation-path">
+            <CorrelationEndpoint label={t('sourceEvent')} endpoint={item.source_event} />
+            <span className="correlation-arrow" aria-hidden="true">&harr;</span>
+            <CorrelationEndpoint label={t('targetEvent')} endpoint={item.target_event} />
+          </div>
+          <section className="correlation-factors">
+            <div><h4>{t('evidenceFactors')}</h4><span>{t(`evidence${item.evidence_status[0].toUpperCase()}${item.evidence_status.slice(1)}` as TranslationKey)}</span></div>
+            {item.factors.length ? <ul>{item.factors.map((factor, index) => <li key={`${factor.kind}-${factor.label}-${index}`}><span>{correlationFactorLabel(factor,t)} &middot; {factor.label}</span><code dir="auto">{factor.value}</code></li>)}</ul> : <p>{t('noEvidenceFactors')}</p>}
+          </section>
+          <time dateTime={item.created_at}>{dateTime(item.created_at)}</time>
+        </article>)}
+      </div>
+    </PageState>
+    {query.data && <Pager total={query.data.total} offset={offset} limit={limit} setOffset={setOffset} />}
+  </section>;
+}
 export function OutliersPage() { const {t,number,dateTime}=useI18n();const [offset, setOffset] = useState(0); const limit = 20; const query = useQuery({ queryKey: ['outliers', offset], queryFn: () => api.intelligenceOutliers(limit, offset), retry: false }); return <SimpleListPage title={t('outliers')} text={t('outliersDescription')} query={query} offset={offset} limit={limit} setOffset={setOffset} headers={[t('start'), t('end'), t('alerts'), t('score'), t('status')]} rows={query.data?.items.map((item) => [dateTime(item.started_at), dateTime(item.ended_at), number(item.alert_count), number(item.anomaly_score), item.is_outlier ? t('outlier') : t('normal')]) || []} />; }
 function SimpleListPage({ title, text, query, offset, limit, setOffset, headers, rows }: { title: string; text: string; query: ReturnType<typeof useQuery<Page<unknown>>>; offset: number; limit: number; setOffset: (v: number) => void; headers: string[]; rows: string[][] }) { const {t}=useI18n();return <section className="page-section intelligence-module"><Heading eyebrow={t('intelligence')} title={title} text={text} /><PageState query={query} empty={t('noData')}><div className="table-shell"><table><thead><tr>{headers.map((item) => <th key={item}>{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div></PageState>{query.data && <Pager total={query.data.total} offset={offset} limit={limit} setOffset={setOffset} />}</section>; }
 
