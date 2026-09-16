@@ -12,11 +12,15 @@ TEST_DIRECTORY = Path(tempfile.mkdtemp(prefix="cti_backend_test_"))
 os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_DIRECTORY / 'test.db').as_posix()}"
 os.environ["UPLOAD_DIR"] = str(TEST_DIRECTORY / "uploads")
 os.environ["JWT_SECRET"] = "test-only-secret-that-is-long-enough"
+os.environ["ACCESS_TOKEN_MINUTES"] = "120"
 
 from fastapi.testclient import TestClient
+from fastapi.routing import APIRoute
 from stix2 import parse as parse_stix
+from backend.app.api.v1.router import router
 
 from backend.app.main import app
+from backend.app.core.security import decode_access_token
 from backend.app.db.database import SessionLocal
 from backend.app.db.models import (
     CorrelationRecord,
@@ -72,6 +76,86 @@ class BackendAPITests(unittest.TestCase):
         self.assertEqual(model.status_code, 200)
         self.assertEqual(model.json()["model_priority"]["primary"], "dnrti_bert_ner")
         self.assertGreater(model.json()["held_out_test"]["bert"]["f1"], 0.75)
+        token_payload = decode_access_token(self.headers["Authorization"].split()[1])
+        self.assertGreater(token_payload["exp"] - token_payload["iat"], 0)
+        self.assertLessEqual(token_payload["exp"] - token_payload["iat"], 120 * 60)
+
+    def test_all_mutating_routes_require_roles_and_reject_viewers(self) -> None:
+        created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "rbacdenialviewer", "password": "StrongViewerPassword123!", "role": "viewer"},
+        )
+        self.assertIn(created.status_code, {201, 409}, created.text)
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "rbacdenialviewer", "password": "StrongViewerPassword123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        public_writes = {
+            "/auth/bootstrap", "/auth/register", "/auth/login",
+        }
+        checked = []
+        for route in router.routes:
+            if not isinstance(route, APIRoute) or not route.methods.intersection({"POST", "PUT", "PATCH", "DELETE"}):
+                continue
+            if route.path in public_writes:
+                continue
+            dependencies = list(route.dependant.dependencies)
+            role_guards = [item for item in dependencies if getattr(item.call, "__qualname__", "") == "require_roles.<locals>.dependency"]
+            self.assertTrue(role_guards, f"Mutating route has no role guard: {route.path}")
+            path = route.path
+            for name in ("user_id", "event_id", "job_id", "preview_id", "watch_id", "result_id", "source_id"):
+                path = path.replace("{" + name + "}", "missing")
+            method = sorted(route.methods.intersection({"POST", "PUT", "PATCH", "DELETE"}))[0]
+            unauthenticated = self.client.request(method, f"/api/v1{path}", json={})
+            self.assertEqual(unauthenticated.status_code, 401, f"Anonymous mutation: {route.path}")
+            response = self.client.request(method, f"/api/v1{path}", headers=viewer_headers, json={})
+            self.assertEqual(response.status_code, 403, f"{route.path}: {response.status_code} {response.text[:160]}")
+            checked.append(route.path)
+        self.assertGreaterEqual(len(checked), 25)
+
+    def test_admin_only_mutations_reject_analysts(self) -> None:
+        created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "rbacdenialanalyst", "password": "StrongAnalystPassword123!", "role": "analyst"},
+        )
+        self.assertIn(created.status_code, {201, 409}, created.text)
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "rbacdenialanalyst", "password": "StrongAnalystPassword123!"},
+        )
+        self.assertEqual(login.status_code, 200, login.text)
+        analyst_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        checked = []
+        for route in router.routes:
+            if not isinstance(route, APIRoute) or not route.methods.intersection({"POST", "PUT", "PATCH", "DELETE"}):
+                continue
+            role_guards = [item for item in route.dependant.dependencies if getattr(item.call, "__qualname__", "") == "require_roles.<locals>.dependency"]
+            if not role_guards:
+                continue
+            guard = role_guards[0].call
+            closure = dict(zip(guard.__code__.co_freevars, (cell.cell_contents for cell in guard.__closure__ or ()), strict=True))
+            if closure.get("roles") != ("admin",):
+                continue
+            path = route.path
+            for name in ("user_id", "event_id", "job_id", "preview_id", "watch_id", "result_id", "source_id"):
+                path = path.replace("{" + name + "}", "missing")
+            method = sorted(route.methods.intersection({"POST", "PUT", "PATCH", "DELETE"}))[0]
+            response = self.client.request(method, f"/api/v1{path}", headers=analyst_headers, json={})
+            self.assertEqual(response.status_code, 403, f"Analyst mutation: {route.path}")
+            checked.append(route.path)
+        self.assertGreaterEqual(len(checked), 5)
+        with patch("backend.app.api.v1.router.MISPClient.send_event") as send:
+            denied = self.client.post(
+                "/api/v1/events/missing/misp",
+                headers=analyst_headers,
+                json={"dry_run": False},
+            )
+        self.assertEqual(denied.status_code, 403)
+        send.assert_not_called()
 
     def test_public_registration_is_viewer_only_audited_and_login_ready(self) -> None:
         registered = self.client.post(

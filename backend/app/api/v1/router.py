@@ -2454,11 +2454,11 @@ def send_misp(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
 ) -> dict[str, Any]:
+    if not payload.dry_run and user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins may send data to MISP")
     event = db.scalar(event_query().where(ThreatEvent.id == event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Threat event not found")
-    if not payload.dry_run and user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins may send data to MISP")
     try:
         result = MISPClient().send_event(event, dry_run=payload.dry_run)
     except Exception as exc:

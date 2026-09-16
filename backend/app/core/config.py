@@ -27,7 +27,7 @@ class Settings:
     database_password: str | None = os.getenv("POSTGRES_PASSWORD")
     jwt_secret: str = os.getenv("JWT_SECRET", "development-only-change-me")
     jwt_algorithm: str = "HS256"
-    access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "480"))
+    access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "120"))
     bootstrap_admin_username: str | None = os.getenv("BOOTSTRAP_ADMIN_USERNAME")
     bootstrap_admin_password: str | None = os.getenv("BOOTSTRAP_ADMIN_PASSWORD")
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
