@@ -10,7 +10,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 ## Current checkpoint
 
-- Phase: P0 Phases 1-7 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, reviewed multi-event MISP delivery, and isolated Demo Dataset/System Readiness.
+- Phase: P0 Phases 1-8 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, reviewed multi-event MISP delivery, isolated Demo Dataset/System Readiness, and RBAC/session/reverse-proxy hardening.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -21,11 +21,13 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 - Threat Storyline implementation checkpoint: `8abb490b3f901860f5217187ffb7c7895164b980`.
 - MISP workflow implementation checkpoint: `bd10ff757f34e6937042c05048e1277b1965b878`.
 - Demo Dataset/System Readiness implementation checkpoint: `b3f0fd8`.
+- RBAC/session/proxy security implementation checkpoint: `025929d`; review details and residual risks: `docs/security-hardening-checkpoint.md`.
 - Production source checkout: `/home/alaaldeen/cti-vps-production-integration`.
 - Active immutable release: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` through `/opt/cti-platform/current`.
-- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-7.
+- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-8.
 - Candidate-only Docker images `actit-backend:ui-auth-candidate`, `actit-frontend:ui-auth-candidate`, `actit-frontend:dashboard-candidate`, `actit-backend:search-candidate`, `actit-frontend:search-candidate`, `actit-backend:correlation-candidate`, `actit-frontend:correlation-candidate`, `actit-backend:storyline-candidate`, and `actit-frontend:storyline-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
 - Phase 7 candidate-only image: `actit-frontend:demo-readiness-candidate` (`sha256:f92846380794086b0e0bd66a0d085637fa5f6d91c18f839114870d36c6d7927e`). Backend code was unchanged; parity tests used the existing `actit-backend:misp-candidate` image.
+- Phase 8 candidate-only images: `actit-backend:security-candidate` (`sha256:952e7b20a44985c95c4196905f1997b86cdcbf990f275a683d1893291622bcde`) and `actit-frontend:security-candidate` (`sha256:ea60abbaa6bcce091e2a4030ef0cf1c5f47a7a8aee1dedb2cdf2d5d97990d257`); neither was deployed.
 
 ## Verified production baseline
 
@@ -110,6 +112,7 @@ Threat Storyline phase validation: the ordered Backend API module passed 12/12 i
 MISP phase validation: Backend API passed 13/13 in VPS venv and `actit-backend:misp-candidate` with read-only ML reports. Two MISP client idempotency tests passed in Docker. Focused frontend tests passed 13/13; `actit-frontend:misp-candidate` passed TypeScript, all 115 Vitest tests, build, and isolated Nginx `/healthz`. Candidate IDs: backend `sha256:1a0828aa092317c42f07a944da5f8fac60a724f074d95133bcfe42e2ff532255`; frontend `sha256:97d18472577f7ba7f6d8b70153a654655159957a52d239de4e6d4bed76fdf5a9`.
 
 Demo/readiness phase validation: isolated demo tests passed 3/3 in both the VPS disposable venv and the existing backend Docker candidate (read-only fixture mounts, private temporary SQLite). The full VPS Python suite passed 361/361. The focused readiness UI test passed and `actit-frontend:demo-readiness-candidate` passed TypeScript, all 116 Vitest tests, and production build. Isolated Nginx `/healthz` returned `ok` with a non-production backend hostname alias; the earlier `--network none` smoke attempt failed before that alias was provided. Existing non-failing React `act(...)` and Vite chunk-size warnings remain. No production deploy or data mutation occurred.
+Security phase validation: three focused RBAC/session tests passed in the VPS disposable venv and isolated backend Docker candidate. Full VPS Python regression passed 363/363. The frontend candidate build passed TypeScript, all 116 Vitest tests, and production compilation. An isolated private Docker network smoke returned Nginx `/healthz` 200, HTML/API `Cache-Control: no-store`, and the existing CSP. Six registration requests with rotating forged `X-Forwarded-For`/`Forwarded` headers yielded five 201 responses then 429, confirming the proxy strips the spoofed chain before rate limiting. Temporary smoke containers/network were removed; `git diff --check` passed. Existing non-failing React `act(...)` and Vite chunk warnings remain. A formal desktop Codex Security scan was not run because its target-path workflow requires a local checkout while the authoritative ACTIT worktree is VPS-only; manual changed-code review was completed. No production deploy or data mutation occurred.
 
 ## Verified end-to-end lifecycle
 
@@ -129,9 +132,9 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | VPS-only immutable deployment | Ready | Active release `20260914T172623Z-f9d0c31`; clean source checkout | Preserve release/rollback model during deployment |
 | Tailscale analyst access | Ready | Frontend and service routes verified | Preserve as private administrative/analyst transport |
 | Public-IP ACTIT access | Missing | Public 80/443 probes did not expose the application | Add hardened reverse proxy on the existing VPS/public IP without exposing backend/databases |
-| Login and session authentication | Ready in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, and success/rejection audit evidence added | Retain later reverse-proxy/session-storage hardening and validate after immutable deployment |
+| Login and session authentication | Ready/Partial in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, success/rejection audit evidence, and a 120-minute default token lifetime. Browser token stays in sessionStorage and clears on logout/401 | Verify any explicit production token-lifetime override and the Tailscale Serve client-rate-limit identity before immutable deployment |
 | Public registration | Ready in development, not deployed | Public API and bilingual form always create active `viewer`; extra/client role is rejected; duplicate and rate-limit states are safe | Deploy through immutable release only after the next meaningful checkpoint |
-| RBAC and user administration | Partial | Viewer/analyst/admin guards, last-admin protection, audit view | Verify every mutating endpoint and add deny-path tests |
+| RBAC and user administration | Ready/Partial in development, not deployed | Viewer/analyst/admin guards, last-admin protection, audit view; all central FastAPI mutating routes have role dependencies and anonymous/viewer deny-path tests, plus admin-only analyst denial | Validate against immutable release after deployment; keep External Sources' separate authenticated control tests |
 | Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, presented MISP as sharing, and added Dashboard, global-search, evidence, and Storyline investigation pivots | Continue page-by-page incremental accessibility and workflow improvements |
 | Executive dashboard | Ready/Partial in development, not deployed | Existing real counts/health/distributions preserved; latest five real events and direct events/indicators/sources/analysis drill-downs added with loading/error/empty states | Add explicit system-readiness evidence and later trend clarity without mock metrics |
 | External Sources | Ready/Partial | Healthy service and canonical external implementation | Preserve ownership boundaries; expose provenance/freshness/failure evidence more clearly |
@@ -150,9 +153,9 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
 | Outlier detection | Partial | 413 sessions and Isolation Forest/fallback metadata exist | Explain features, sample sufficiency, detector choice, and event relationship |
 | Demo/readiness dataset | Ready in development, not deployed | Private disposable SQLite fixture with fixed external/internal evidence, Storyline/risk/ATT&CK/STIX/MISP projections and deterministic CLI walkthrough; protected readiness page reads existing live API contracts only | Keep demo synthetic and offline; after a separately approved immutable deployment, verify readiness UI against the release and demonstrate actual pipeline-generated cross-source evidence when available |
-| App/API security | Partial | Loopback binding, CSP, default-deny firewall, separated networks, read-only/cap-drop on core services | Rate limits, stricter headers/cookies/token storage review, input/response controls, audit completeness, regression tests |
+| App/API security | Partial in development, not deployed | Loopback binding, CSP, default-deny firewall, separated networks, read-only/cap-drop on core services; candidate proxy discards untrusted forwarded chains, sets no-store on HTML/API, and passes isolated spoof/rate-limit smoke | Verify Tailscale Serve client-rate-limit fairness, public ingress/TLS/header policy, production token override, and audit completeness before release |
 | SSRF controls | Partial | External manual URL policy/safe HTTP client and tests exist | Revalidate redirect, DNS rebinding, private range, metadata, size/time, and content-type controls end to end |
-| Security scan/remediation | Pending | No final-branch Codex Security result yet | Run after P0 functionality stabilizes; triage and verify every accepted fix |
+| Security scan/remediation | Pending | Manual Phase 8 changed-code review documented; formal Codex Security desktop scan could not target the VPS-only authoritative worktree | Run a legitimate VPS-local scan or otherwise supported remote-target scan before release; triage and verify every accepted fix |
 | Cloudflare/custom domain | Deferred | No domain exists in Contabo account; no domain is required for P0 | Keep optional; do not purchase or change DNS without explicit approval |
 | Reference-informed UI refinement | Partial | Exact ThreatIntel Figma was inspected and UI UX Pro Max guidance was applied to the existing ACTIT component/token/i18n architecture | Continue page-by-page; never replace ACTIT or copy Figma/OpenCTI mock code/data |
 
@@ -225,17 +228,18 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 - MISP decision: retain selective unpublished sharing, deterministic ACTIT-to-MISP identity, and PostgreSQL authority. The paper supports CTI sharing; OpenCTI informs review/provenance patterns; approved ThreatIntel informs queue/status presentation. ACTIT previews eligibility, permits admin-confirmed batches up to 20, records independent outcomes, and links verified MISP IDs. No automatic mirror or production mutation was introduced.
 - Added an isolated synthetic graduation fixture and deterministic `scripts.demo_walkthrough` covering an external advisory, two internal observations, cross-source versus same-pipeline evidence, Storyline, explicit ATT&CK, risk factors, STIX, and unpublished MISP preview. It does not run the collection/ML pipelines or send to MISP; see `docs/graduation-demo.md`.
 - Added a protected bilingual System Readiness page at `/system/readiness` using existing health, ML, MISP, and data-summary APIs, with honest limitations for public network, backup/restore, and synthetic data.
+- Added rejection-path tests across central mutating routes and admin-only actions, prevented legacy live MISP sends from leaking missing-event existence to analysts, shortened the default token life, and made the frontend proxy discard untrusted forwarding headers while marking HTML/API responses non-cacheable. See `docs/security-hardening-checkpoint.md`.
 
 ## Next Task
 
-Begin mutating-endpoint RBAC deny-path coverage and focused reverse-proxy/session security review. Preserve the working architecture and current production release; use targeted tests during changes. Do not deploy to `/opt` until the next integrated security group is complete, validated, and documented.
+Complete the remaining focused security review: check Tailscale Serve client identity/rate-limit fairness and public-IP ingress/TLS policy without changing production; run targeted SSRF regressions, then an appropriately scoped formal security scan when the VPS worktree can be targeted. Document findings and full Docker/regression results before proposing any immutable `/opt` release. Do not deploy to `/opt` yet.
 
 ## Remaining P0 sequence
 
-1. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
+1. Complete Tailscale Serve client-identity/rate-limit fairness and public-IP reverse-proxy/TLS hardening while preserving private access.
 2. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
-3. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
-4. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
+3. Complete SSRF regression, full Docker/Compose parity validation, formal security scan where supported, remediation, documentation, and final demo validation.
+4. Prepare a separately reviewed immutable release; keep production untouched until its security/test outcome is documented.
 
 ## Remaining P1 / deferred
 
@@ -250,6 +254,8 @@ Begin mutating-endpoint RBAC deny-path coverage and focused reverse-proxy/sessio
 - Non-blocker: production MISP still has one event by design; root cause verified. The multi-event workflow is developed but not deployed or exercised against live MISP.
 - Non-blocker: the complete backend suite passed in the VPS disposable test environment; production remains Docker/Compose only.
 - Non-blocker: the exact Figma Make reference and UI UX Pro Max were available and used for selective guidance.
+- Non-blocker for candidate testing, release gate for production: the active production token-lifetime override was not read, and Tailscale Serve may make multiple tailnet clients share one proxy-observed rate-limit key; validate this before release without trusting client-supplied XFF.
+- Formal desktop security scanning of the VPS-only worktree was not available through the local-target scanner; do not represent the manual review as an official scan.
 - Genuine stop boundaries: destructive database/volume migration, paid domain/service purchase, unavailable credentials, irreversible firewall/DNS action, or an external approval requirement.
 
 ## Background and scheduled work
