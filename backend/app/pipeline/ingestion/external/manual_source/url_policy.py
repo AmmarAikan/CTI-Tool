@@ -9,6 +9,9 @@ from urllib.parse import urlsplit
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
 
 
+MAX_APPROVED_ADDRESSES = 8
+
+
 class URLPolicyError(ValueError):
     pass
 
@@ -21,6 +24,7 @@ class ValidatedURL:
     canonical_url: str
     hostname: str
     is_onion: bool
+    approved_addresses: tuple[str, ...] = ()
 
 
 class ManualURLPolicy:
@@ -61,4 +65,5 @@ class ManualURLPolicy:
             for address in parsed
         ):
             raise URLPolicyError("destination resolves to a non-public address")
-        return ValidatedURL(canonical, host, False)
+        approved = tuple(str(address) for address in sorted(parsed, key=lambda address: (address.version, int(address)))[:MAX_APPROVED_ADDRESSES])
+        return ValidatedURL(canonical, host, False, approved)
