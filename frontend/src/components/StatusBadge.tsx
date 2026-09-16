@@ -1,6 +1,6 @@
 import { useI18n, type TranslationKey } from '../i18n/I18nContext';
 
-const translatedStatuses: Record<string, TranslationKey> = { queued: 'queued', running: 'processing', completed: 'completed', partial: 'partial', failed: 'failed', cancelled: 'cancelled', cancellation_requested: 'cancellation_requested', ready: 'ready', requires_configuration: 'requiresConfiguration', temporarily_unavailable: 'temporarilyUnavailable', unsupported_configuration: 'unsupportedConfiguration' };
+const translatedStatuses: Record<string, TranslationKey> = { queued: 'queued', running: 'processing', completed: 'completed', partial: 'partial', failed: 'failed', cancelled: 'cancelled', cancellation_requested: 'cancellation_requested', ready: 'ready', requires_configuration: 'requiresConfiguration', temporarily_unavailable: 'temporarilyUnavailable', unsupported_configuration: 'unsupportedConfiguration', healthy: 'healthy', degraded: 'degraded', unconfigured: 'unconfiguredState', unavailable: 'disconnectedState' };
 
 export function StatusBadge({ status }: { status: string }) {
   const { t } = useI18n();

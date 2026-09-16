@@ -4,6 +4,7 @@ import { AuthProvider } from '../auth/AuthContext';
 import { Layout } from '../components/Layout';
 import { ProtectedRoute } from '../components/ProtectedRoute';
 import { Dashboard } from './Dashboard';
+import { SystemReadiness } from './SystemReadiness';
 import { Login } from './Login';
 import { Manual } from './Manual';
 import { Landing } from './Landing';
@@ -36,6 +37,7 @@ export function App() {
               <Route element={<ProtectedRoute />}>
                 <Route element={<Layout />}>
                   <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/system/readiness" element={<SystemReadiness />} />
                   <Route path="/external-sources" element={<Sources />} />
                   <Route path="/dark-web" element={<DarkWebWatches />} />
                   <Route path="/jobs" element={<Jobs />} />
