@@ -16,6 +16,7 @@ TAILSCALE = ROOT / "infra" / "vps" / "scripts" / "configure_tailscale_serve.sh"
 DEPLOY_MISP = ROOT / "infra" / "vps" / "scripts" / "deploy_misp.sh"
 FRONTEND_DOCKERFILE = ROOT / "frontend" / "Dockerfile"
 FRONTEND_NGINX = ROOT / "frontend" / "nginx.conf"
+PUBLIC_EDGE = ROOT / "infra" / "vps" / "public-edge.conf"
 
 
 def render_production() -> dict:
@@ -163,6 +164,24 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertEqual(self.frontend_nginx.count("add_header Content-Security-Policy"), 3)
         self.assertEqual(self.frontend_nginx.count('add_header X-Content-Type-Options "nosniff"'), 3)
         self.assertEqual(self.frontend_nginx.count('add_header X-Frame-Options "DENY"'), 3)
+
+    def test_proxy_identity_keeps_only_the_last_trusted_hop(self) -> None:
+        self.assertIn("set_real_ip_from 172.16.0.0/12;", self.frontend_nginx)
+        self.assertIn("real_ip_header X-Forwarded-For;", self.frontend_nginx)
+        self.assertIn("real_ip_recursive off;", self.frontend_nginx)
+        self.assertIn("proxy_set_header X-Forwarded-For $remote_addr;", self.frontend_nginx)
+        self.assertNotIn("$proxy_add_x_forwarded_for", self.frontend_nginx)
+
+    def test_public_edge_is_ip_bound_and_sanitizes_client_headers(self) -> None:
+        edge = PUBLIC_EDGE.read_text(encoding="utf-8")
+        self.assertIn("listen 169.58.249.3:443 ssl;", edge)
+        self.assertIn("listen 169.58.249.3:80;", edge)
+        self.assertIn("proxy_pass http://127.0.0.1:18080;", edge)
+        self.assertIn("proxy_set_header X-Forwarded-For $remote_addr;", edge)
+        self.assertIn('proxy_set_header Tailscale-User-Login "";', edge)
+        self.assertIn("ssl_protocols TLSv1.2 TLSv1.3;", edge)
+        self.assertIn("limit_req zone=cti_public_auth burst=10 nodelay;", edge)
+        self.assertNotIn("0.0.0.0:443", edge)
 
 
 if __name__ == "__main__":

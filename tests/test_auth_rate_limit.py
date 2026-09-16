@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from backend.app.core.rate_limit import SlidingWindowRateLimiter, rate_limit_key
+from starlette.requests import Request
+
+from backend.app.core.rate_limit import SlidingWindowRateLimiter, rate_limit_key, request_identity
 
 
 class SlidingWindowRateLimiterTests(unittest.TestCase):
@@ -29,6 +31,19 @@ class SlidingWindowRateLimiterTests(unittest.TestCase):
 
         self.assertIsNone(limiter.consume(first, limit=1, window_seconds=60))
         self.assertIsNotNone(limiter.consume(second, limit=1, window_seconds=60))
+
+    def test_proxy_resolved_clients_get_distinct_keys(self) -> None:
+        def identity(peer: str, forwarded: str) -> str:
+            scope = {
+                "type": "http",
+                "client": (peer, 12345),
+                "headers": [(b"x-forwarded-for", forwarded.encode("ascii"))],
+            }
+            return request_identity(Request(scope))
+
+        self.assertNotEqual(identity("172.25.0.5", "100.91.28.22"), identity("172.25.0.5", "100.91.28.23"))
+        self.assertEqual(identity("198.51.100.4", "203.0.113.9"), identity("198.51.100.4", "198.51.100.4"))
+        self.assertEqual(identity("172.25.0.5", "not-an-ip"), identity("172.25.0.5", "172.25.0.5"))
 
 
 if __name__ == "__main__":

@@ -234,10 +234,13 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 - Added a protected bilingual System Readiness page at `/system/readiness` using existing health, ML, MISP, and data-summary APIs, with honest limitations for public network, backup/restore, and synthetic data.
 - Added rejection-path tests across central mutating routes and admin-only actions, prevented legacy live MISP sends from leaking missing-event existence to analysts, shortened the default token life, and made the frontend proxy discard untrusted forwarding headers while marking HTML/API responses non-cacheable. See `docs/security-hardening-checkpoint.md`.
 - After explicit approval, closed the External Sources DNS validation-to-connect race for manual, Telegram, Reddit RSS, and social linked-article fetches without changing the collection architecture. See `docs/security-hardening-checkpoint.md`.
+- Verified Serve's live XFF spoof stripping and the candidate Nginx last-hop real-IP behavior, prepared public-IP ACME/TLS edge configurations without activation, and completed focused VPS/Docker checks. Formal remote scan and real ACME issuance remain release gates; see `docs/public-ingress-security.md`.
 
 ## Next Task
 
-Validate Tailscale Serve client-identity/rate-limit fairness and design the public-IP HTTPS edge while preserving the existing tailnet path; make no production network change until an immutable candidate and rollback are ready. Then run the supported formal security review, complete end-to-end Docker/Compose validation, and document a release decision. Do not deploy to `/opt` yet.
+Finish the public-ingress security gates in `docs/public-ingress-security.md`: verify rate-limit fairness with two distinct tailnet clients and run an isolated end-to-end auth/edge smoke, without modifying production data. Stage and prove short-lived public-IP certificate issuance and unattended renewal only after an immutable release and rollback are reviewed; keep Tailscale Serve intact and do not expose public ports prematurely.
+
+The Codex Security desktop Standard scan cannot target this VPS-only worktree (tool error: `Scan target must be an absolute local directory path.`). Obtain a supported remote-capable formal scan or explicitly decide how to handle that release gate. Complete final Docker/Compose regression and document the decision before any `/opt` cutover. Current decision: NO-GO for public exposure or deployment.
 
 ## Remaining P0 sequence
 
