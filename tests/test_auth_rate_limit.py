@@ -43,6 +43,7 @@ class SlidingWindowRateLimiterTests(unittest.TestCase):
 
         self.assertNotEqual(identity("172.25.0.5", "100.91.28.22"), identity("172.25.0.5", "100.91.28.23"))
         self.assertEqual(identity("198.51.100.4", "203.0.113.9"), identity("198.51.100.4", "198.51.100.4"))
+        self.assertEqual(identity("192.168.0.4", "203.0.113.9"), identity("192.168.0.4", "192.168.0.4"))
         self.assertEqual(identity("172.25.0.5", "not-an-ip"), identity("172.25.0.5", "172.25.0.5"))
 
 
