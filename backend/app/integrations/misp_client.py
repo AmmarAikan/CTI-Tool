@@ -210,6 +210,8 @@ class MISPClient:
                 "created": created,
                 "event_id": event_id,
                 "event_uuid": event_uuid,
+                "misp_event_id": event_id,
+                "misp_event_uuid": event_uuid,
                 "attributes_requested": len(expected_attributes),
                 "attributes_added": len(pending),
                 "attributes_verified": len(expected_keys),

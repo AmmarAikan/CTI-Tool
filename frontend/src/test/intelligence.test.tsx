@@ -10,6 +10,7 @@ const json = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400
 const event = { id: 'cti-1', title: 'CVE campaign', summary: 'Safe CTI summary', source_type: 'feed', source_pipeline: 'external', category: 'cti_related', severity: 'high', risk_score: 8, confidence: .9, processing_status: 'transformed', first_seen: '2026-09-07T10:00:00Z', last_seen: null, created_at: '2026-09-07T10:00:00Z', indicator_count: 1, entity_count: 1 };
 const page = <T,>(items: T[]) => ({ items, total: items.length, limit: 20, offset: 0 });
 const assessed = { semantic_role: 'observable', validation_status: 'valid', assessment: 'unknown', assessment_confidence: 0, actionable: false, evidence_count: 0, evidence_providers: [], reason_code: 'needs_enrichment' } as const;
+const mispCandidate = { event_id: 'cti-1', title: 'CVE campaign', source_pipeline: 'external', severity: 'high', risk_score: 91, included: 1, omitted: 0, omitted_by_reason: { external_reference: 0, invalid: 0, non_actionable: 0, unsupported: 0 }, ready: true, readiness_reason: 'ready', delivery_count: 0, last_delivered_at: null, last_misp_event_id: null };
 
 beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
 afterEach(cleanup);
@@ -110,27 +111,50 @@ describe('analysis and MISP', () => {
 
   it('keeps viewers read-only on MISP', async () => {
     sessionStorage.setItem('cti_access_token', 'token');
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'u1', username: 'viewer', role: 'viewer', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.includes('/misp/deliveries')) return json(page([])); return json({ ...page([event]), limit: 50 }); });
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'u1', username: 'viewer', role: 'viewer', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.includes('/misp/deliveries')) return json(page([])); if (path.includes('/misp/candidates?')) return json({ ...page([mispCandidate]), configured: true }); throw new Error(`Unexpected request: ${path}`); });
     renderWithProviders(<MISPPage />);
     await waitFor(() => expect(screen.getByText('متصل')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'إرسال إلى MISP' })).not.toBeInTheDocument();
+    expect(await screen.findByText('CVE campaign')).toBeInTheDocument();
+    expect(screen.getByText(/معرّف MISP حتمي واحد/)).toBeInTheDocument();
+    expect(screen.getByText('جاهز للمشاركة')).toBeInTheDocument();
+    expect(screen.queryByLabelText('تحديد CVE campaign للمشاركة')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'إرسال الأحداث المحددة' })).not.toBeInTheDocument();
+  });
+
+  it('rejects unknown fields in MISP candidate responses', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ ...page([{ ...mispCandidate, api_key: 'secret' }]), configured: true }));
+    await expect(api.mispCandidates()).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
   it('requires confirmation and prevents duplicate admin MISP sends', async () => {
     sessionStorage.setItem('cti_access_token', 'token');
     let resolveSend: ((response: Response) => void) | undefined;
     const pending = new Promise<Response>((resolve) => { resolveSend = resolve; });
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => { const path = String(input); if (path.endsWith('/auth/me')) return json({ id: 'a1', username: 'admin', role: 'admin', is_active: true }); if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true }); if (path.includes('/misp/deliveries')) return json(page([])); if (path.endsWith('/misp-preview')) return json({ event_id: 'cti-1', title: 'CVE campaign', configured: true, published: false, distribution: 0, attributes: [{ type: 'vulnerability', category: 'External analysis', value: 'CVE-2026-1', to_ids: false }], tags: ['cti-platform:external'], included: 1, omitted: 0, omitted_by_reason: { external_reference: 0, invalid: 0, non_actionable: 0, unsupported: 0 } }); if (options?.method === 'POST') return pending; return json({ ...page([event]), limit: 50 }); });
+    const batchRequests: RequestInit[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => {
+      const path = String(input);
+      if (path.endsWith('/auth/me')) return json({ id: 'a1', username: 'admin', role: 'admin', is_active: true });
+      if (path.endsWith('/misp/health')) return json({ configured: true, reachable: true });
+      if (path.includes('/misp/deliveries')) return json(page([]));
+      if (path.includes('/misp/candidates?')) return json({ ...page([mispCandidate]), configured: true });
+      if (path.endsWith('/misp-preview')) return json({ event_id: 'cti-1', title: 'CVE campaign', configured: true, published: false, distribution: 0, attributes: [{ type: 'vulnerability', category: 'External analysis', value: 'CVE-2026-1', to_ids: false }], tags: ['cti-platform:external'], included: 1, omitted: 0, omitted_by_reason: { external_reference: 0, invalid: 0, non_actionable: 0, unsupported: 0 } });
+      if (path.endsWith('/misp/batch') && options?.method === 'POST') { batchRequests.push(options); return pending; }
+      throw new Error(`Unexpected request: ${path}`);
+    });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderWithProviders(<MISPPage />);
-    const eventSelect = await screen.findByLabelText('الحدث');
-    await screen.findByRole('option', { name: 'CVE campaign' });
-    await userEvent.setup().selectOptions(eventSelect, 'cti-1');
-    const send = await screen.findByRole('button', { name: 'إرسال إلى MISP' });
-    await userEvent.setup().click(send);
+    const actor = userEvent.setup();
+    await actor.click(await screen.findByRole('button', { name: 'مراجعة المعاينة' }));
+    expect(await screen.findByText('CVE-2026-1')).toBeInTheDocument();
+    await actor.click(screen.getByLabelText('تحديد CVE campaign للمشاركة'));
+    const send = screen.getByRole('button', { name: 'إرسال الأحداث المحددة' });
+    await actor.click(send);
     expect(screen.getByRole('button', { name: 'جار الإرسال والتحقق...' })).toBeDisabled();
-    resolveSend?.(await json({ event_id: 'cti-1', created: true, attributes_requested: 1, attributes_added: 1, attributes_verified: 1, published: false }));
-    await waitFor(() => expect(screen.getByText(/وتحققنا من 1/)).toBeInTheDocument());
+    expect(batchRequests).toHaveLength(1);
+    expect(JSON.parse(String(batchRequests[0].body))).toEqual({ event_ids: ['cti-1'], confirm_unpublished: true });
+    resolveSend?.(await json({ batch_id: '11111111-1111-4111-8111-111111111111', requested: 1, delivered: 1, skipped: 0, failed: 0, published: 0, items: [{ event_id: 'cti-1', status: 'delivered', reason: null, created: true, attributes_requested: 1, attributes_added: 1, attributes_verified: 1, published: false, misp_event_id: '42', misp_event_uuid: '22222222-2222-4222-8222-222222222222' }] }));
+    await waitFor(() => expect(screen.getByText(/تم التسليم: 1/)).toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'فتح حدث MISP' })).toHaveAttribute('href', expect.stringContaining('/events/view/42'));
   });
 
   it('shows evidence-backed MITRE ATT&CK candidates', async () => {

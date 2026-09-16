@@ -68,6 +68,9 @@ from backend.app.schemas.api import (
     IntelligenceIndicatorSummaryResponse,
     IntelligenceAttackMappingResponse,
     IntelligenceSearchResponse,
+    IntelligenceMISPBatchRequest,
+    IntelligenceMISPBatchResponse,
+    IntelligenceMISPCandidatePageResponse,
     IntelligenceMISPDeliveryResponse,
     IntelligenceMISPDeliveryHistoryResponse,
     IntelligenceMISPHealthResponse,
@@ -1800,44 +1803,406 @@ def intelligence_misp_health(_: CurrentUser) -> dict[str, Any]:
     return {"configured": result.get("configured") is True, "reachable": result.get("reachable") is True, "failure_category": result.get("error_type")}
 
 
-@router.get("/intelligence/events/{event_id}/misp-preview", tags=["intelligence"], response_model=IntelligenceMISPPreviewResponse)
-def intelligence_misp_preview(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
-    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
-    if event is None:
-        raise HTTPException(status_code=404, detail="Threat event not found")
+_MISP_HISTORY_ACTIONS = ("misp_send", "misp_send_skipped", "misp_send_failed")
+_MISP_HISTORY_REASONS = {
+    "event_not_found",
+    "misp_unconfigured",
+    "no_transferable_attributes",
+    "preview_failed",
+    "delivery_failed",
+}
+
+
+def _safe_misp_event_id(value: object) -> str | None:
+    text = str(value or "").strip()
+    return text if text.isdigit() and len(text) <= 64 else None
+
+
+def _safe_misp_event_uuid(value: object) -> str | None:
     try:
-        client = MISPClient()
-        payload = client.event_payload(event)
-        mapped = payload["Event"]
-        filtering = payload["cti_filtering"]
-    except (ValueError, RuntimeError, TypeError) as exc:
-        raise HTTPException(status_code=503, detail=f"MISP preview unavailable: {type(exc).__name__}") from exc
+        return str(uuid.UUID(str(value)))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _misp_preview_projection(event: ThreatEvent, client: MISPClient) -> dict[str, Any]:
+    payload = client.event_payload(event)
+    mapped = payload["Event"]
+    filtering = payload["cti_filtering"]
     return {
         "event_id": event.id,
-        "title": str(mapped["info"]),
+        "title": _safe_event_title(event),
         "configured": client.configured,
         "published": False,
         "distribution": 0,
-        "attributes": [{"type": item["type"], "category": item["category"], "value": item["value"], "to_ids": item["to_ids"]} for item in mapped.get("Attribute", [])],
-        "tags": [str(item.get("name")) for item in mapped.get("Tag", []) if item.get("name")],
+        "attributes": [
+            {
+                "type": item["type"],
+                "category": item["category"],
+                "value": item["value"],
+                "to_ids": item["to_ids"],
+            }
+            for item in mapped.get("Attribute", [])
+        ],
+        "tags": [
+            str(item.get("name"))
+            for item in mapped.get("Tag", [])
+            if item.get("name")
+        ],
         "included": filtering["included"],
         "omitted": filtering["omitted"],
         "omitted_by_reason": filtering["omitted_by_reason"],
     }
 
 
-@router.post("/intelligence/events/{event_id}/misp", tags=["intelligence"], response_model=IntelligenceMISPDeliveryResponse)
-def intelligence_misp_send(event_id: str, db: SessionDep, user: Annotated[User, Depends(require_roles("admin"))]) -> dict[str, Any]:
+def _misp_delivery_projection(event_id: str, result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "event_id": event_id,
+        "created": result["created"],
+        "attributes_requested": result["attributes_requested"],
+        "attributes_added": result["attributes_added"],
+        "attributes_verified": result["attributes_verified"],
+        "published": result["published"],
+        "misp_event_id": _safe_misp_event_id(
+            result.get("misp_event_id") or result.get("event_id")
+        ),
+        "misp_event_uuid": _safe_misp_event_uuid(
+            result.get("misp_event_uuid") or result.get("event_uuid")
+        ),
+    }
+
+
+@router.get(
+    "/intelligence/misp/candidates",
+    tags=["intelligence"],
+    response_model=IntelligenceMISPCandidatePageResponse,
+)
+def intelligence_misp_candidates(
+    db: SessionDep,
+    _: CurrentUser,
+    source_pipeline: str | None = Query(default=None, pattern="^(external|internal)$"),
+    search: str | None = Query(default=None, min_length=2, max_length=100),
+    limit: int = Query(default=20, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
+) -> dict[str, Any]:
+    filters = []
+    if source_pipeline:
+        filters.append(ThreatEvent.source_pipeline == source_pipeline)
+    if search:
+        filters.append(_search_filter(search, (ThreatEvent.title,)))
+    total = db.scalar(
+        select(func.count()).select_from(ThreatEvent).where(*filters)
+    ) or 0
+    events = db.scalars(
+        event_query()
+        .where(*filters)
+        .order_by(desc(ThreatEvent.risk_score), desc(ThreatEvent.created_at), ThreatEvent.id)
+        .limit(limit)
+        .offset(offset)
+    ).unique().all()
+    try:
+        client = MISPClient()
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MISP candidate preview unavailable: {type(exc).__name__}",
+        ) from exc
+
+    event_ids = [event.id for event in events]
+    deliveries: dict[str, list[AuditLog]] = {event_id: [] for event_id in event_ids}
+    if event_ids:
+        rows = db.scalars(
+            select(AuditLog)
+            .where(
+                AuditLog.action == "misp_send",
+                AuditLog.resource_type == "threat_event",
+                AuditLog.resource_id.in_(event_ids),
+            )
+            .order_by(desc(AuditLog.created_at), desc(AuditLog.id))
+        ).all()
+        for row in rows:
+            if row.resource_id in deliveries:
+                deliveries[row.resource_id].append(row)
+
+    items = []
+    for event in events:
+        preview = _misp_preview_projection(event, client)
+        event_deliveries = deliveries[event.id]
+        latest = event_deliveries[0] if event_deliveries else None
+        latest_details = latest.details if latest and isinstance(latest.details, dict) else {}
+        if not client.configured:
+            readiness_reason = "misp_unconfigured"
+        elif preview["included"] == 0:
+            readiness_reason = "no_transferable_attributes"
+        else:
+            readiness_reason = "ready"
+        items.append(
+            {
+                "event_id": event.id,
+                "title": _safe_event_title(event),
+                "source_pipeline": event.source_pipeline,
+                "severity": event.severity,
+                "risk_score": event.risk_score,
+                "included": preview["included"],
+                "omitted": preview["omitted"],
+                "omitted_by_reason": preview["omitted_by_reason"],
+                "ready": readiness_reason == "ready",
+                "readiness_reason": readiness_reason,
+                "delivery_count": len(event_deliveries),
+                "last_delivered_at": iso(latest.created_at) if latest else None,
+                "last_misp_event_id": _safe_misp_event_id(
+                    latest_details.get("misp_event_id")
+                    or latest_details.get("event_id")
+                ),
+            }
+        )
+    return {
+        "configured": client.configured,
+        "items": items,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get(
+    "/intelligence/events/{event_id}/misp-preview",
+    tags=["intelligence"],
+    response_model=IntelligenceMISPPreviewResponse,
+)
+def intelligence_misp_preview(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
     event = db.scalar(event_query().where(ThreatEvent.id == event_id))
     if event is None:
         raise HTTPException(status_code=404, detail="Threat event not found")
     try:
-        result = MISPClient().send_event(event, dry_run=False)["cti_delivery"]
+        return _misp_preview_projection(event, MISPClient())
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MISP preview unavailable: {type(exc).__name__}",
+        ) from exc
+
+
+@router.post("/intelligence/events/{event_id}/misp", tags=["intelligence"], response_model=IntelligenceMISPDeliveryResponse)
+def intelligence_misp_send(
+    event_id: str,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    client = MISPClient()
+    try:
+        preview = _misp_preview_projection(event, client)
+    except (ValueError, RuntimeError, TypeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"MISP preview unavailable: {type(exc).__name__}",
+        ) from exc
+    if preview["included"] == 0:
+        audit(
+            db,
+            user,
+            "misp_send_skipped",
+            "threat_event",
+            event_id,
+            reason="no_transferable_attributes",
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="No transferable attributes are eligible for MISP",
+        )
+    try:
+        result = client.send_event(event, dry_run=False)["cti_delivery"]
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"MISP delivery failed: {type(exc).__name__}") from exc
-    audit(db, user, "misp_send", "threat_event", event_id, **result)
+        audit(
+            db,
+            user,
+            "misp_send_failed",
+            "threat_event",
+            event_id,
+            reason="delivery_failed",
+            failure_category=type(exc).__name__,
+        )
+        db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"MISP delivery failed: {type(exc).__name__}",
+        ) from exc
+    delivery = _misp_delivery_projection(event_id, result)
+    audit(
+        db,
+        user,
+        "misp_send",
+        "threat_event",
+        event_id,
+        status="delivered",
+        created=delivery["created"],
+        attributes_requested=delivery["attributes_requested"],
+        attributes_added=delivery["attributes_added"],
+        attributes_verified=delivery["attributes_verified"],
+        published=delivery["published"],
+        misp_event_id=delivery["misp_event_id"],
+        misp_event_uuid=delivery["misp_event_uuid"],
+    )
     db.commit()
-    return {"event_id": event_id, "created": result["created"], "attributes_requested": result["attributes_requested"], "attributes_added": result["attributes_added"], "attributes_verified": result["attributes_verified"], "published": result["published"]}
+    return delivery
+
+
+@router.post(
+    "/intelligence/misp/batch",
+    tags=["intelligence"],
+    response_model=IntelligenceMISPBatchResponse,
+)
+def intelligence_misp_batch(
+    payload: IntelligenceMISPBatchRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin"))],
+) -> dict[str, Any]:
+    event_ids = list(dict.fromkeys(payload.event_ids))
+    if any(not event_id.strip() or len(event_id) > 64 for event_id in event_ids):
+        raise HTTPException(status_code=422, detail="Invalid event identifier")
+    client = MISPClient()
+    if not client.configured:
+        raise HTTPException(status_code=503, detail="MISP is not configured")
+    events = db.scalars(
+        event_query().where(ThreatEvent.id.in_(event_ids))
+    ).unique().all()
+    events_by_id = {event.id: event for event in events}
+    batch_id = str(uuid.uuid4())
+    items: list[dict[str, Any]] = []
+
+    for event_id in event_ids:
+        event = events_by_id.get(event_id)
+        if event is None:
+            item = {
+                "event_id": event_id,
+                "status": "skipped",
+                "reason": "event_not_found",
+            }
+            audit(
+                db,
+                user,
+                "misp_send_skipped",
+                "threat_event",
+                event_id,
+                batch_id=batch_id,
+                reason=item["reason"],
+            )
+            db.commit()
+            items.append(item)
+            continue
+        try:
+            preview = _misp_preview_projection(event, client)
+        except (ValueError, RuntimeError, TypeError) as exc:
+            item = {
+                "event_id": event_id,
+                "status": "failed",
+                "reason": "preview_failed",
+            }
+            audit(
+                db,
+                user,
+                "misp_send_failed",
+                "threat_event",
+                event_id,
+                batch_id=batch_id,
+                reason=item["reason"],
+                failure_category=type(exc).__name__,
+            )
+            db.commit()
+            items.append(item)
+            continue
+        if preview["included"] == 0:
+            item = {
+                "event_id": event_id,
+                "status": "skipped",
+                "reason": "no_transferable_attributes",
+            }
+            audit(
+                db,
+                user,
+                "misp_send_skipped",
+                "threat_event",
+                event_id,
+                batch_id=batch_id,
+                reason=item["reason"],
+                omitted=preview["omitted"],
+                omitted_by_reason=preview["omitted_by_reason"],
+            )
+            db.commit()
+            items.append(item)
+            continue
+        try:
+            raw_delivery = client.send_event(event, dry_run=False)["cti_delivery"]
+            delivery = _misp_delivery_projection(event_id, raw_delivery)
+        except Exception as exc:
+            item = {
+                "event_id": event_id,
+                "status": "failed",
+                "reason": "delivery_failed",
+            }
+            audit(
+                db,
+                user,
+                "misp_send_failed",
+                "threat_event",
+                event_id,
+                batch_id=batch_id,
+                reason=item["reason"],
+                failure_category=type(exc).__name__,
+            )
+            db.commit()
+            items.append(item)
+            continue
+        item = {**delivery, "status": "delivered", "reason": None}
+        audit(
+            db,
+            user,
+            "misp_send",
+            "threat_event",
+            event_id,
+            batch_id=batch_id,
+            status="delivered",
+            created=delivery["created"],
+            attributes_requested=delivery["attributes_requested"],
+            attributes_added=delivery["attributes_added"],
+            attributes_verified=delivery["attributes_verified"],
+            published=delivery["published"],
+            misp_event_id=delivery["misp_event_id"],
+            misp_event_uuid=delivery["misp_event_uuid"],
+        )
+        db.commit()
+        items.append(item)
+
+    delivered = sum(item["status"] == "delivered" for item in items)
+    skipped = sum(item["status"] == "skipped" for item in items)
+    failed = sum(item["status"] == "failed" for item in items)
+    published = sum(item.get("published") is True for item in items)
+    audit(
+        db,
+        user,
+        "misp_batch",
+        "misp_batch",
+        batch_id,
+        requested=len(event_ids),
+        delivered=delivered,
+        skipped=skipped,
+        failed=failed,
+        published=published,
+    )
+    db.commit()
+    return {
+        "batch_id": batch_id,
+        "requested": len(event_ids),
+        "delivered": delivered,
+        "skipped": skipped,
+        "failed": failed,
+        "published": published,
+        "items": items,
+    }
 
 
 @router.get(
@@ -1851,7 +2216,10 @@ def intelligence_misp_deliveries(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> dict[str, Any]:
-    filters = [AuditLog.action == "misp_send", AuditLog.resource_type == "threat_event"]
+    filters = [
+        AuditLog.action.in_(_MISP_HISTORY_ACTIONS),
+        AuditLog.resource_type == "threat_event",
+    ]
     total = db.scalar(select(func.count()).select_from(AuditLog).where(*filters)) or 0
     rows = db.scalars(
         select(AuditLog)
@@ -1860,20 +2228,42 @@ def intelligence_misp_deliveries(
         .limit(limit)
         .offset(offset)
     ).all()
+
+    def optional_count(value: object) -> int | None:
+        return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+    def optional_bool(value: object) -> bool | None:
+        return value if isinstance(value, bool) else None
+
     items = []
     for row in rows:
         details = row.details if isinstance(row.details, dict) else {}
+        status_by_action = {
+            "misp_send": "delivered",
+            "misp_send_skipped": "skipped",
+            "misp_send_failed": "failed",
+        }
+        reason = details.get("reason")
         items.append(
             {
                 "id": row.id,
                 "event_id": row.resource_id,
                 "username": row.username,
                 "created_at": iso(row.created_at),
-                "created": details.get("created"),
-                "attributes_requested": details.get("attributes_requested"),
-                "attributes_added": details.get("attributes_added"),
-                "attributes_verified": details.get("attributes_verified"),
-                "published": details.get("published"),
+                "status": status_by_action[row.action],
+                "reason": reason if reason in _MISP_HISTORY_REASONS else None,
+                "batch_id": _safe_misp_event_uuid(details.get("batch_id")),
+                "misp_event_id": _safe_misp_event_id(
+                    details.get("misp_event_id") or details.get("event_id")
+                ),
+                "misp_event_uuid": _safe_misp_event_uuid(
+                    details.get("misp_event_uuid") or details.get("event_uuid")
+                ),
+                "created": optional_bool(details.get("created")),
+                "attributes_requested": optional_count(details.get("attributes_requested")),
+                "attributes_added": optional_count(details.get("attributes_added")),
+                "attributes_verified": optional_count(details.get("attributes_verified")),
+                "published": optional_bool(details.get("published")),
             }
         )
     return {"items": items, "total": total, "limit": limit, "offset": offset}

@@ -423,6 +423,34 @@ class IntelligenceMISPPreviewResponse(BaseModel):
     omitted_by_reason: dict[str, int]
 
 
+class IntelligenceMISPCandidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(max_length=64)
+    title: str = Field(max_length=500)
+    source_pipeline: Literal["external", "internal"]
+    severity: str | None = Field(default=None, max_length=30)
+    risk_score: float = Field(ge=0, le=100)
+    included: int = Field(ge=0)
+    omitted: int = Field(ge=0)
+    omitted_by_reason: dict[str, int]
+    ready: bool
+    readiness_reason: Literal["ready", "misp_unconfigured", "no_transferable_attributes"]
+    delivery_count: int = Field(ge=0)
+    last_delivered_at: str | None = Field(default=None, max_length=40)
+    last_misp_event_id: str | None = Field(default=None, max_length=64)
+
+
+class IntelligenceMISPCandidatePageResponse(IntelligencePageMeta):
+    configured: bool
+    items: list[IntelligenceMISPCandidateResponse]
+
+
+class IntelligenceMISPBatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_ids: list[str] = Field(min_length=1, max_length=20)
+    confirm_unpublished: Literal[True]
+
+
 class IntelligenceMISPDeliveryResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_id: str = Field(max_length=64)
@@ -431,6 +459,33 @@ class IntelligenceMISPDeliveryResponse(BaseModel):
     attributes_added: int = Field(ge=0)
     attributes_verified: int = Field(ge=0)
     published: bool
+    misp_event_id: str | None = Field(default=None, max_length=64)
+    misp_event_uuid: str | None = Field(default=None, max_length=36)
+
+
+class IntelligenceMISPBatchItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(max_length=64)
+    status: Literal["delivered", "skipped", "failed"]
+    reason: str | None = Field(default=None, max_length=80)
+    created: bool | None = None
+    attributes_requested: int | None = Field(default=None, ge=0)
+    attributes_added: int | None = Field(default=None, ge=0)
+    attributes_verified: int | None = Field(default=None, ge=0)
+    published: bool | None = None
+    misp_event_id: str | None = Field(default=None, max_length=64)
+    misp_event_uuid: str | None = Field(default=None, max_length=36)
+
+
+class IntelligenceMISPBatchResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    batch_id: str = Field(max_length=36)
+    requested: int = Field(ge=1, le=20)
+    delivered: int = Field(ge=0)
+    skipped: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    published: int = Field(ge=0)
+    items: list[IntelligenceMISPBatchItemResponse] = Field(max_length=20)
 
 
 class IntelligenceMISPDeliveryHistoryItem(BaseModel):
@@ -439,6 +494,11 @@ class IntelligenceMISPDeliveryHistoryItem(BaseModel):
     event_id: str | None = Field(default=None, max_length=64)
     username: str | None = Field(default=None, max_length=100)
     created_at: str = Field(max_length=40)
+    status: Literal["delivered", "skipped", "failed"]
+    reason: str | None = Field(default=None, max_length=80)
+    batch_id: str | None = Field(default=None, max_length=36)
+    misp_event_id: str | None = Field(default=None, max_length=64)
+    misp_event_uuid: str | None = Field(default=None, max_length=36)
     created: bool | None = None
     attributes_requested: int | None = Field(default=None, ge=0)
     attributes_added: int | None = Field(default=None, ge=0)

@@ -100,8 +100,61 @@ export interface AnalysisRun { id: string; pipeline: string; status: string; col
 export interface MLStatus { execution_model: 'central_backend'; backend: string; primary_model: string; secondary_model: string; primary_loaded: boolean; secondary_loaded: boolean; quality_gates_passed: boolean; held_out_f1?: number; }
 export interface MISPHealth { configured: boolean; reachable: boolean; failure_category?: string; }
 export interface MISPPreview { event_id: string; title: string; configured: boolean; published: false; distribution: 0; attributes: Array<{ type: string; category: string; value: string; to_ids: boolean }>; tags: string[]; included: number; omitted: number; omitted_by_reason: Record<string, number>; }
-export interface MISPDelivery { event_id: string; created: boolean; attributes_requested: number; attributes_added: number; attributes_verified: number; published: boolean; }
-export interface MISPDeliveryHistory { id: string; event_id?: string; username?: string; created_at: string; created?: boolean; attributes_requested?: number; attributes_added?: number; attributes_verified?: number; published?: boolean; }
+export type MISPReadinessReason = 'ready' | 'misp_unconfigured' | 'no_transferable_attributes';
+export interface MISPCandidate {
+  event_id: string;
+  title: string;
+  source_pipeline: 'external' | 'internal';
+  severity?: string;
+  risk_score: number;
+  included: number;
+  omitted: number;
+  omitted_by_reason: Record<string, number>;
+  ready: boolean;
+  readiness_reason: MISPReadinessReason;
+  delivery_count: number;
+  last_delivered_at?: string;
+  last_misp_event_id?: string;
+}
+export interface MISPCandidatePage extends Page<MISPCandidate> { configured: boolean; }
+export interface MISPDelivery {
+  event_id: string;
+  created: boolean;
+  attributes_requested: number;
+  attributes_added: number;
+  attributes_verified: number;
+  published: boolean;
+  misp_event_id?: string;
+  misp_event_uuid?: string;
+}
+export type MISPDeliveryStatus = 'delivered' | 'skipped' | 'failed';
+export interface MISPBatchItem {
+  event_id: string;
+  status: MISPDeliveryStatus;
+  reason?: string;
+  created?: boolean;
+  attributes_requested?: number;
+  attributes_added?: number;
+  attributes_verified?: number;
+  published?: boolean;
+  misp_event_id?: string;
+  misp_event_uuid?: string;
+}
+export interface MISPBatchResult {
+  batch_id: string;
+  requested: number;
+  delivered: number;
+  skipped: number;
+  failed: number;
+  published: number;
+  items: MISPBatchItem[];
+}
+export interface MISPDeliveryHistory extends MISPBatchItem {
+  id: string;
+  username?: string;
+  created_at: string;
+  batch_id?: string;
+}
 export interface AttackTechnique { technique_id: string; name: string; tactic: string; confidence: number; mapping_source: 'explicit_id' | 'rule_based_candidate'; evidence: string; url: string; }
 export interface AttackMapping { event_id: string; catalog_version: string; source: 'built_in_subset'; official_dataset_url: string; techniques: AttackTechnique[]; }
 export type StorylineRiskFactorKey = 'base_severity_or_cvss' | 'indicators' | 'confidence' | 'source_diversity' | 'correlations' | 'internal_outlier';
@@ -427,8 +480,128 @@ function parseMISPHealth(value: unknown): MISPHealth { if (!isPlainObject(value)
 function countMap(value: unknown): Record<string, number> { if (!isPlainObject(value) || Object.values(value).some((item) => !Number.isSafeInteger(item) || (item as number) < 0)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); return value as Record<string, number>; }
 function parseIndicatorSummary(value: unknown): IndicatorSummary { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid intelligence response'); exactKeys(value, ['total', 'by_role', 'by_assessment', 'by_validation', 'by_type']); return { total: boundedNumber(value.total), by_role: countMap(value.by_role), by_assessment: countMap(value.by_assessment), by_validation: countMap(value.by_validation), by_type: countMap(value.by_type) }; }
 function parseMISPPreview(value: unknown): MISPPreview { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); exactKeys(value, ['event_id', 'title', 'configured', 'published', 'distribution', 'attributes', 'tags', 'included', 'omitted', 'omitted_by_reason']); if (typeof value.configured !== 'boolean' || value.published !== false || value.distribution !== 0 || !Array.isArray(value.attributes) || value.attributes.length > 1000 || !Array.isArray(value.tags) || value.tags.length > 100) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); const attributes = value.attributes.map((item) => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); exactKeys(item, ['type', 'category', 'value', 'to_ids']); if (typeof item.to_ids !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); return { type: requiredText(item.type, 40), category: requiredText(item.category, 80), value: requiredText(item.value, 2048), to_ids: item.to_ids }; }); const tags = value.tags.map((item) => requiredText(item, 255)); return { event_id: requiredText(value.event_id, 64), title: requiredText(value.title, 255), configured: value.configured, published: false, distribution: 0, attributes, tags, included: boundedNumber(value.included), omitted: boundedNumber(value.omitted), omitted_by_reason: countMap(value.omitted_by_reason) }; }
-function parseMISPDelivery(value: unknown): MISPDelivery { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); exactKeys(value, ['event_id', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published']); if (typeof value.created !== 'boolean' || typeof value.published !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); return { event_id: requiredText(value.event_id, 64), created: value.created, attributes_requested: boundedNumber(value.attributes_requested), attributes_added: boundedNumber(value.attributes_added), attributes_verified: boundedNumber(value.attributes_verified), published: value.published }; }
-function parseMISPDeliveryHistory(value: unknown): MISPDeliveryHistory { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); exactKeys(value, ['id', 'event_id', 'username', 'created_at', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published']); if (!validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); const optionalCount = (item: unknown) => item === null || item === undefined ? undefined : boundedNumber(item); const optionalBoolean = (item: unknown) => item === null || item === undefined ? undefined : typeof item === 'boolean' ? item : (() => { throw new ApiError(502, 'invalid_response', 'Invalid MISP response'); })(); return { id: requiredText(value.id, 36), event_id: optionalSafeText(value.event_id, 64), username: optionalSafeText(value.username, 100), created_at: value.created_at, created: optionalBoolean(value.created), attributes_requested: optionalCount(value.attributes_requested), attributes_added: optionalCount(value.attributes_added), attributes_verified: optionalCount(value.attributes_verified), published: optionalBoolean(value.published) }; }
+const mispOutcomeReasons = ['event_not_found', 'misp_unconfigured', 'no_transferable_attributes', 'preview_failed', 'delivery_failed'] as const;
+function optionalOutcomeCount(value: unknown): number | undefined { return value === null || value === undefined ? undefined : boundedNumber(value); }
+function optionalOutcomeBoolean(value: unknown): boolean | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return value;
+}
+function optionalMISPEventId(value: unknown): string | undefined {
+  const eventId = optionalSafeText(value, 64);
+  if (eventId && !/^\d+$/.test(eventId)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return eventId;
+}
+function optionalMISPEventUuid(value: unknown): string | undefined {
+  const eventUuid = optionalSafeText(value, 36);
+  if (eventUuid && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(eventUuid)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return eventUuid;
+}
+function parseMISPCandidate(value: unknown): MISPCandidate {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, ['event_id', 'title', 'source_pipeline', 'severity', 'risk_score', 'included', 'omitted', 'omitted_by_reason', 'ready', 'readiness_reason', 'delivery_count', 'last_delivered_at', 'last_misp_event_id']);
+  if (value.source_pipeline !== 'external' && value.source_pipeline !== 'internal') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  if (!mispOutcomeReasons.slice(1, 3).includes(value.readiness_reason as 'misp_unconfigured' | 'no_transferable_attributes') && value.readiness_reason !== 'ready') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  if (typeof value.ready !== 'boolean' || value.ready !== (value.readiness_reason === 'ready')) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return {
+    event_id: requiredText(value.event_id, 64),
+    title: requiredText(value.title, 500),
+    source_pipeline: value.source_pipeline,
+    severity: optionalSafeText(value.severity, 30),
+    risk_score: boundedNumber(value.risk_score, 0, 100),
+    included: boundedNumber(value.included),
+    omitted: boundedNumber(value.omitted),
+    omitted_by_reason: countMap(value.omitted_by_reason),
+    ready: value.ready,
+    readiness_reason: value.readiness_reason as MISPReadinessReason,
+    delivery_count: boundedNumber(value.delivery_count),
+    last_delivered_at: optionalTimestamp(value.last_delivered_at),
+    last_misp_event_id: optionalMISPEventId(value.last_misp_event_id),
+  };
+}
+function parseMISPCandidatePage(value: unknown): MISPCandidatePage {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, [...pageKeys, 'configured']);
+  if (typeof value.configured !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  const page = parsePage({ items: value.items, total: value.total, limit: value.limit, offset: value.offset }, parseMISPCandidate);
+  if (page.limit > 50) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return { ...page, configured: value.configured };
+}
+function parseMISPDelivery(value: unknown): MISPDelivery {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, ['event_id', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published', 'misp_event_id', 'misp_event_uuid']);
+  if (typeof value.created !== 'boolean' || typeof value.published !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return {
+    event_id: requiredText(value.event_id, 64),
+    created: value.created,
+    attributes_requested: boundedNumber(value.attributes_requested),
+    attributes_added: boundedNumber(value.attributes_added),
+    attributes_verified: boundedNumber(value.attributes_verified),
+    published: value.published,
+    misp_event_id: optionalMISPEventId(value.misp_event_id),
+    misp_event_uuid: optionalMISPEventUuid(value.misp_event_uuid),
+  };
+}
+function parseMISPBatchItem(value: unknown): MISPBatchItem {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, ['event_id', 'status', 'reason', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published', 'misp_event_id', 'misp_event_uuid']);
+  if (value.status !== 'delivered' && value.status !== 'skipped' && value.status !== 'failed') throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  const reason = optionalSafeText(value.reason, 80);
+  if (reason && !mispOutcomeReasons.includes(reason as typeof mispOutcomeReasons[number])) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return {
+    event_id: requiredText(value.event_id, 64),
+    status: value.status,
+    reason,
+    created: optionalOutcomeBoolean(value.created),
+    attributes_requested: optionalOutcomeCount(value.attributes_requested),
+    attributes_added: optionalOutcomeCount(value.attributes_added),
+    attributes_verified: optionalOutcomeCount(value.attributes_verified),
+    published: optionalOutcomeBoolean(value.published),
+    misp_event_id: optionalMISPEventId(value.misp_event_id),
+    misp_event_uuid: optionalMISPEventUuid(value.misp_event_uuid),
+  };
+}
+function parseMISPBatch(value: unknown): MISPBatchResult {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, ['batch_id', 'requested', 'delivered', 'skipped', 'failed', 'published', 'items']);
+  if (!Array.isArray(value.items) || value.items.length < 1 || value.items.length > 20) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  const items = value.items.map(parseMISPBatchItem);
+  const result = {
+    batch_id: requiredText(value.batch_id, 36),
+    requested: boundedNumber(value.requested, 1, 20),
+    delivered: boundedNumber(value.delivered, 0, 20),
+    skipped: boundedNumber(value.skipped, 0, 20),
+    failed: boundedNumber(value.failed, 0, 20),
+    published: boundedNumber(value.published, 0, 20),
+    items,
+  };
+  if (result.requested !== items.length || result.delivered !== items.filter((item) => item.status === 'delivered').length || result.skipped !== items.filter((item) => item.status === 'skipped').length || result.failed !== items.filter((item) => item.status === 'failed').length || result.published !== items.filter((item) => item.published === true).length) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  return result;
+}
+function parseMISPDeliveryHistory(value: unknown): MISPDeliveryHistory {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  exactKeys(value, ['id', 'event_id', 'username', 'created_at', 'status', 'reason', 'batch_id', 'misp_event_id', 'misp_event_uuid', 'created', 'attributes_requested', 'attributes_added', 'attributes_verified', 'published']);
+  if (!validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid MISP response');
+  const outcome = parseMISPBatchItem({
+    event_id: value.event_id,
+    status: value.status,
+    reason: value.reason,
+    created: value.created,
+    attributes_requested: value.attributes_requested,
+    attributes_added: value.attributes_added,
+    attributes_verified: value.attributes_verified,
+    published: value.published,
+    misp_event_id: value.misp_event_id,
+    misp_event_uuid: value.misp_event_uuid,
+  });
+  return {
+    ...outcome,
+    id: requiredText(value.id, 36),
+    username: optionalSafeText(value.username, 100),
+    created_at: value.created_at,
+    batch_id: optionalMISPEventUuid(value.batch_id),
+  };
+}
 function parseAttackMapping(value: unknown): AttackMapping { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); exactKeys(value, ['event_id', 'catalog_version', 'source', 'official_dataset_url', 'techniques']); if (value.source !== 'built_in_subset' || !Array.isArray(value.techniques) || value.techniques.length > 100) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); const techniques = value.techniques.map((item): AttackTechnique => { if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); exactKeys(item, ['technique_id', 'name', 'tactic', 'confidence', 'mapping_source', 'evidence', 'url']); if (item.mapping_source !== 'explicit_id' && item.mapping_source !== 'rule_based_candidate') throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK response'); return { technique_id: requiredText(item.technique_id, 20), name: requiredText(item.name, 150), tactic: requiredText(item.tactic, 80), confidence: boundedNumber(item.confidence, 0, 1), mapping_source: item.mapping_source, evidence: requiredText(item.evidence, 240), url: requiredText(item.url, 300) }; }); return { event_id: requiredText(value.event_id, 64), catalog_version: requiredText(value.catalog_version, 50), source: 'built_in_subset', official_dataset_url: requiredText(value.official_dataset_url, 300), techniques }; }
 
 function parseStorylineEntity(value: unknown): CTIEntity { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid storyline response'); exactKeys(value, ['type', 'value', 'confidence']); return { type: requiredText(value.type, 100), value: requiredText(value.value, 1000), confidence: boundedNumber(value.confidence, 0, 1) }; }
@@ -754,8 +927,10 @@ export const api = {
   analysisRun: async (id: string) => parseRun(await request<unknown>(`/intelligence/runs/${encodeURIComponent(id)}`)),
   mlStatus: async () => parseMLStatus(await request<unknown>('/intelligence/ml/status')),
   mispHealth: async () => parseMISPHealth(await request<unknown>('/intelligence/misp/health')),
+  mispCandidates: async (limit = 20, offset = 0, filters: { source_pipeline?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parseMISPCandidatePage(await request<unknown>(`/intelligence/misp/candidates?${params}`)); },
   mispPreview: async (eventId: string) => parseMISPPreview(await request<unknown>(`/intelligence/events/${encodeURIComponent(eventId)}/misp-preview`)),
   mispSend: async (eventId: string) => parseMISPDelivery(await request<unknown>(`/intelligence/events/${encodeURIComponent(eventId)}/misp`, { method: 'POST' })),
+  mispBatch: async (eventIds: string[]) => parseMISPBatch(await request<unknown>('/intelligence/misp/batch', { method: 'POST', body: JSON.stringify({ event_ids: eventIds, confirm_unpublished: true }) })),
   mispDeliveries: async (limit = 20, offset = 0) => parsePage(await request<unknown>(`/intelligence/misp/deliveries?limit=${limit}&offset=${offset}`), parseMISPDeliveryHistory),
   attackMapping: async (eventId: string) => parseAttackMapping(await request<unknown>(`/intelligence/events/${encodeURIComponent(eventId)}/attack`)),
   attackNavigator: async (eventId: string) => parseAttackNavigator(await request<unknown>(`/intelligence/events/${encodeURIComponent(eventId)}/attack-navigator`)),

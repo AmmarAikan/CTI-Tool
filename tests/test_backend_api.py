@@ -769,9 +769,239 @@ class BackendAPITests(unittest.TestCase):
         health = self.client.get("/api/v1/intelligence/misp/health", headers=self.headers)
         self.assertEqual(set(health.json()), {"configured", "reachable"})
 
+    def test_misp_candidates_batch_delivery_and_durable_outcomes(self) -> None:
+        ready_id = "misp-batch-ready"
+        blocked_id = "misp-batch-blocked"
+        with SessionLocal() as db:
+            db.add_all(
+                [
+                    ThreatEvent(
+                        id=ready_id,
+                        source_record_id="misp-ready-record",
+                        source_type="research",
+                        source_pipeline="external",
+                        title="MISP batch ready candidate",
+                        description="Safe sharing candidate.",
+                        normalized_text="",
+                        severity="high",
+                        risk_score=88,
+                        confidence=0.9,
+                        processing_status="transformed",
+                    ),
+                    ThreatEvent(
+                        id=blocked_id,
+                        source_record_id="misp-blocked-record",
+                        source_type="research",
+                        source_pipeline="external",
+                        title="MISP batch blocked candidate",
+                        description="No transferable attributes.",
+                        normalized_text="",
+                        severity="low",
+                        risk_score=12,
+                        confidence=0.5,
+                        processing_status="transformed",
+                    ),
+                    IndicatorRecord(
+                        id="40000000-0000-0000-0000-000000000001",
+                        event_id=ready_id,
+                        indicator_type="domain",
+                        value="batch-security.org",
+                        confidence=0.95,
+                        extractor="test",
+                    ),
+                ]
+            )
+            db.commit()
+
+        send_calls: list[str] = []
+
+        class FakeMISPClient:
+            configured = True
+
+            def event_payload(self, event):
+                ready = event.id == ready_id
+                attributes = (
+                    [
+                        {
+                            "type": "domain",
+                            "category": "Network activity",
+                            "value": "batch-security.org",
+                            "to_ids": False,
+                        }
+                    ]
+                    if ready
+                    else []
+                )
+                omitted = {
+                    "external_reference": 0,
+                    "invalid": 0,
+                    "non_actionable": 0 if ready else 1,
+                    "unsupported": 0,
+                }
+                return {
+                    "Event": {"Attribute": attributes, "Tag": []},
+                    "cti_filtering": {
+                        "included": len(attributes),
+                        "omitted": sum(omitted.values()),
+                        "omitted_by_reason": omitted,
+                    },
+                }
+
+            def send_event(self, event, dry_run=True):
+                self.assert_false_if_dry_run(dry_run)
+                send_calls.append(event.id)
+                return {
+                    "cti_delivery": {
+                        "created": True,
+                        "event_id": "42",
+                        "event_uuid": "11111111-1111-4111-8111-111111111111",
+                        "attributes_requested": 1,
+                        "attributes_added": 1,
+                        "attributes_verified": 1,
+                        "published": False,
+                    }
+                }
+
+            @staticmethod
+            def assert_false_if_dry_run(dry_run):
+                if dry_run:
+                    raise AssertionError("batch delivery must not be a dry run")
+
+        viewer_created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={
+                "username": "mispbatchviewer",
+                "password": "MispBatchViewerPassword123!",
+                "role": "viewer",
+            },
+        )
+        self.assertEqual(viewer_created.status_code, 201, viewer_created.text)
+        viewer_login = self.client.post(
+            "/api/v1/auth/login",
+            json={
+                "username": "mispbatchviewer",
+                "password": "MispBatchViewerPassword123!",
+            },
+        )
+        viewer_headers = {
+            "Authorization": f"Bearer {viewer_login.json()['access_token']}"
+        }
+
+        with patch("backend.app.api.v1.router.MISPClient", return_value=FakeMISPClient()):
+            candidates = self.client.get(
+                "/api/v1/intelligence/misp/candidates",
+                headers=self.headers,
+                params={"search": "MISP batch", "limit": 10},
+            )
+            self.assertEqual(candidates.status_code, 200, candidates.text)
+            by_id = {item["event_id"]: item for item in candidates.json()["items"]}
+            self.assertTrue(by_id[ready_id]["ready"])
+            self.assertEqual(by_id[ready_id]["readiness_reason"], "ready")
+            self.assertFalse(by_id[blocked_id]["ready"])
+            self.assertEqual(
+                by_id[blocked_id]["readiness_reason"],
+                "no_transferable_attributes",
+            )
+
+            forbidden = self.client.post(
+                "/api/v1/intelligence/misp/batch",
+                headers=viewer_headers,
+                json={"event_ids": [ready_id], "confirm_unpublished": True},
+            )
+            self.assertEqual(forbidden.status_code, 403)
+            self.assertEqual(send_calls, [])
+            self.assertEqual(
+                self.client.post(
+                    "/api/v1/intelligence/misp/batch",
+                    headers=self.headers,
+                    json={"event_ids": [ready_id], "confirm_unpublished": False},
+                ).status_code,
+                422,
+            )
+
+            delivered = self.client.post(
+                "/api/v1/intelligence/misp/batch",
+                headers=self.headers,
+                json={
+                    "event_ids": [
+                        ready_id,
+                        blocked_id,
+                        "misp-batch-missing",
+                        ready_id,
+                    ],
+                    "confirm_unpublished": True,
+                },
+            )
+            self.assertEqual(delivered.status_code, 200, delivered.text)
+            payload = delivered.json()
+            self.assertEqual(payload["requested"], 3)
+            self.assertEqual(payload["delivered"], 1)
+            self.assertEqual(payload["skipped"], 2)
+            self.assertEqual(payload["failed"], 0)
+            self.assertEqual(payload["published"], 0)
+            self.assertEqual(send_calls, [ready_id])
+            results = {item["event_id"]: item for item in payload["items"]}
+            self.assertEqual(results[ready_id]["misp_event_id"], "42")
+            self.assertEqual(results[blocked_id]["reason"], "no_transferable_attributes")
+            self.assertEqual(results["misp-batch-missing"]["reason"], "event_not_found")
+
+            refreshed = self.client.get(
+                "/api/v1/intelligence/misp/candidates",
+                headers=self.headers,
+                params={"search": "MISP batch", "limit": 10},
+            )
+            refreshed_by_id = {
+                item["event_id"]: item for item in refreshed.json()["items"]
+            }
+            self.assertEqual(refreshed_by_id[ready_id]["delivery_count"], 1)
+            self.assertEqual(refreshed_by_id[ready_id]["last_misp_event_id"], "42")
+
+        history = self.client.get(
+            "/api/v1/intelligence/misp/deliveries?limit=100",
+            headers=self.headers,
+        )
+        self.assertEqual(history.status_code, 200, history.text)
+        recorded = {
+            (item["event_id"], item["status"], item.get("reason"))
+            for item in history.json()["items"]
+        }
+        self.assertIn((ready_id, "delivered", None), recorded)
+        self.assertIn(
+            (blocked_id, "skipped", "no_transferable_attributes"),
+            recorded,
+        )
+        self.assertIn(("misp-batch-missing", "skipped", "event_not_found"), recorded)
+
     def test_misp_preview_is_read_only_and_send_remains_admin_only(self) -> None:
-        events = self.client.get("/api/v1/intelligence/events?limit=1", headers=self.headers).json()
-        event_id = events["items"][0]["id"]
+        event_id = "misp-single-ready"
+        with SessionLocal() as db:
+            db.add_all(
+                [
+                    ThreatEvent(
+                        id=event_id,
+                        source_record_id="misp-single-record",
+                        source_type="research",
+                        source_pipeline="external",
+                        title="Single MISP delivery candidate",
+                        description="Safe sharing candidate.",
+                        normalized_text="",
+                        severity="medium",
+                        risk_score=55,
+                        confidence=0.8,
+                        processing_status="transformed",
+                    ),
+                    IndicatorRecord(
+                        id="70000000-0000-0000-0000-000000000001",
+                        event_id=event_id,
+                        indicator_type="domain",
+                        value="single-security.org",
+                        confidence=0.95,
+                        extractor="test",
+                    ),
+                ]
+            )
+            db.commit()
         preview = self.client.get(
             f"/api/v1/intelligence/events/{event_id}/misp-preview", headers=self.headers
         )
