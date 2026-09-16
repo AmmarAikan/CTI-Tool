@@ -10,7 +10,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 ## Current checkpoint
 
-- Phase: P0 Phases 1-5 complete in development: incremental UI/Auth foundation, real-data Dashboard investigation entry, bounded Global Intelligence / IOC Investigation Search, explainable Cross-Source Evidence, and the evidence-backed Threat Storyline.
+- Phase: P0 Phases 1-6 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, and reviewed multi-event MISP delivery.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -19,9 +19,10 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 - Global search implementation checkpoint: `e29f83d`.
 - Cross-source evidence implementation checkpoint: `7fa1ea9`.
 - Threat Storyline implementation checkpoint: `8abb490b3f901860f5217187ffb7c7895164b980`.
+- MISP workflow implementation checkpoint: `bd10ff757f34e6937042c05048e1277b1965b878`.
 - Production source checkout: `/home/alaaldeen/cti-vps-production-integration`.
 - Active immutable release: `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` through `/opt/cti-platform/current`.
-- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-5.
+- Production remains unchanged and still runs from `/opt`; no production container, network, firewall, volume, database, credential, symlink, or release was changed in Phases 1-6.
 - Candidate-only Docker images `actit-backend:ui-auth-candidate`, `actit-frontend:ui-auth-candidate`, `actit-frontend:dashboard-candidate`, `actit-backend:search-candidate`, `actit-frontend:search-candidate`, `actit-backend:correlation-candidate`, `actit-frontend:correlation-candidate`, `actit-backend:storyline-candidate`, and `actit-frontend:storyline-candidate` were built from the VPS development worktree for isolated parity testing; they are not deployed.
 
 ## Verified production baseline
@@ -76,7 +77,7 @@ PostgreSQL is the authoritative ACTIT datastore. Approximate live row counts at 
 | Users | 5 |
 | Enrichments | 0 |
 
-Observed fact: MISP contained exactly one unpublished event, two attributes, and no objects while ACTIT had many events. Deterministic UUID reuse, dry-run behavior, and the absence of automatic pipeline synchronization are implementation hypotheses that may explain this state, but they are not yet the verified final root cause. The dedicated MISP phase must compare the live ACTIT event, audit, outbound request, MISP API, and MISP database evidence before applying a fix.
+Verified MISP root cause: seven ACTIT audit actions targeted one controlled event (three dry-runs, four sends). Its deterministic UUID matched the sole MISP event (ID 2), which the MISP API and database confirmed unpublished, distribution 0, with two attributes. Repeated sends correctly reused that event; no other ACTIT event had been submitted. The gap was the reviewed multi-event workflow, not connectivity. Production MISP data was not modified.
 
 ### Verified ML and analytics state
 
@@ -104,6 +105,7 @@ Dashboard phase validation: the focused Dashboard, integration, and localization
 Global search phase validation: the focused frontend set passed 33/33, TypeScript lint and the production build passed, and the ordered Backend API module passed 10/10 in both the VPS disposable test environment and `actit-backend:search-candidate`. The `actit-frontend:search-candidate` Docker build passed TypeScript validation, all 112 Vitest tests, and the production build. Existing non-failing React `act(...)`, sklearn model-version, and Vite 500 kB chunk warnings remain documented technical debt.
 Cross-source evidence phase validation: the focused frontend set passed 29/29 and TypeScript lint passed; the ordered Backend API module passed 11/11 in both the VPS disposable test environment and `actit-backend:correlation-candidate`. The `actit-frontend:correlation-candidate` Docker build passed TypeScript validation, all 112 Vitest tests, and the production build. Production's nine current correlation rows were inspected read-only and are all internal-to-internal; ACTIT now labels same-pipeline versus cross-source records honestly and does not fabricate an External-to-Internal link.
 Threat Storyline phase validation: the ordered Backend API module passed 12/12 in both the VPS disposable test environment and `actit-backend:storyline-candidate` with the Compose-equivalent read-only ML reports mount. The focused Storyline frontend tests passed 2/2; `actit-frontend:storyline-candidate` passed TypeScript validation, all 114 Vitest tests, the production build, and an isolated Nginx `/healthz` container smoke check. Candidate image IDs are `sha256:4895ba2f1040879ba7d2ca8a83a983ac8d11edd23c1c82844bae45fa1d74267f` for backend and `sha256:3ebef06df8b7dba2db20b6c8ae35abdbd156059da29cccef330cfa6a3d08d548` for frontend.
+MISP phase validation: Backend API passed 13/13 in VPS venv and `actit-backend:misp-candidate` with read-only ML reports. Two MISP client idempotency tests passed in Docker. Focused frontend tests passed 13/13; `actit-frontend:misp-candidate` passed TypeScript, all 115 Vitest tests, build, and isolated Nginx `/healthz`. Candidate IDs: backend `sha256:1a0828aa092317c42f07a944da5f8fac60a724f074d95133bcfe42e2ff532255`; frontend `sha256:97d18472577f7ba7f6d8b70153a654655159957a52d239de4e6d4bed76fdf5a9`.
 
 
 ## Verified end-to-end lifecycle
@@ -138,8 +140,8 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Threat storyline | Ready in development, not deployed | Typed bounded endpoint and bilingual responsive investigation view project real provenance, chronology, observables, entities, relationships, correlations, ATT&CK candidates, and deterministic risk factors | Validate against the immutable release after deployment; preserve chronology-versus-causality and candidate-status labels |
 | MITRE ATT&CK | Partial | Built-in subset, evidence-bearing candidates, Navigator export, official links | Broaden safe catalog use, expose tactic/technique context, and retain candidate/confirmed distinction |
 | STIX sharing | Partial | Per-event STIX endpoint exists | Add obvious UI download/export, validation feedback, and safe filename/content handling |
-| MISP health/preview/send/history | Partial | Connected; preview/send/history UI and idempotent client exist | Add candidate queue/readiness, batch controls, explicit omission reasons, durable delivery records, and usable post-send links |
-| MISP population | Partial by design | 13,994 ACTIT events versus one unpublished MISP event | Implement reviewed selection/delivery workflow; do not blindly mirror all PostgreSQL data |
+| MISP health/preview/send/history | Ready in development, not deployed | Candidate queue, readiness/omission reasons, admin-confirmed batch of at most 20, per-event audit outcomes, post-send links, and idempotent client passed Docker parity tests | Validate after immutable deployment; retain review and unpublished-by-default policy |
+| MISP population | Partial by design | Sole production MISP event is the only ACTIT event actually sent; deterministic UUID prevents duplicates. Multi-event workflow exists only in development | Do not mirror PostgreSQL; admin deliberately selects and confirms eligible events after deployment |
 | Enrichment | Missing live data | Enrichment table contains zero rows | Add controlled enrichment runs/status and make risk/assessment provenance visible |
 | ML transparency | Partial | Runtime model and stored metrics endpoint exists | Show individual quality gates, model scope/limitations, inference evidence, and fallback/degraded state |
 | Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
@@ -217,18 +219,18 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 
 - Added a first-class Threat Storyline investigation route with real event provenance, deterministic risk explanation, bounded evidence counts, chronological milestones, observables/entities/relationships, correlation pivots, and ATT&CK candidate context.
 - Added strict safe response parsing and internal-evidence suppression, including sanitized ATT&CK projections for internal events, then validated the implementation in both backend and frontend candidate containers.
+- MISP decision: retain selective unpublished sharing, deterministic ACTIT-to-MISP identity, and PostgreSQL authority. The paper supports CTI sharing; OpenCTI informs review/provenance patterns; approved ThreatIntel informs queue/status presentation. ACTIT previews eligibility, permits admin-confirmed batches up to 20, records independent outcomes, and links verified MISP IDs. No automatic mirror or production mutation was introduced.
 ## Next Task
 
-Perform a targeted MISP root-cause investigation by comparing the existing ACTIT candidate/preview/send/history code, production audit evidence, outbound event identity, MISP API state, and MISP database evidence without modifying data. Then implement the smallest safe multi-event sharing workflow: explicit readiness/omission reasons, bounded analyst selection and admin-confirmed batch delivery, deterministic idempotency, durable per-event outcomes, and usable post-send references while keeping MISP unpublished-by-default and PostgreSQL authoritative.
+Implement the deterministic, non-destructive graduation Demo Dataset and System Readiness view. Inspect existing fixtures/seeding, dashboard/health/ML endpoints, and current UI. Add a clearly labeled demo path exercising Internal-to-External evidence, storyline, risk, ATT&CK, STIX, and reviewed MISP without replacing production data. Expose actual readiness checks and limitations in the existing UI. Use targeted tests and Docker parity checks; keep `/opt` untouched until a separately validated immutable release.
 
 ## Remaining P0 sequence
 
-1. MISP candidate readiness, reviewed/batch delivery, durable evidence, and improved MISP center.
-2. Deterministic non-destructive demo dataset and explicit System Readiness view.
-3. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
-4. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
-5. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
-6. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
+1. Deterministic non-destructive demo dataset and explicit System Readiness view.
+2. Complete mutating-endpoint RBAC deny-path coverage and later reverse-proxy/session hardening.
+3. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
+4. Public-IP reverse proxy and network/application security hardening while preserving Tailscale.
+5. SSRF regression, full regression suite, Codex Security scan, remediation, documentation, and final demo validation.
 
 ## Remaining P1 / deferred
 
@@ -240,7 +242,7 @@ Perform a targeted MISP root-cause investigation by comparing the existing ACTIT
 ## Known blockers and non-blockers
 
 - Non-blocker: no custom domain. Public IP is the P0 target.
-- Non-blocker: MISP has one observed event; the final root cause remains unproven until the dedicated targeted investigation.
+- Non-blocker: production MISP still has one event by design; root cause verified. The multi-event workflow is developed but not deployed or exercised against live MISP.
 - Non-blocker: the complete backend suite passed in the VPS disposable test environment; production remains Docker/Compose only.
 - Non-blocker: the exact Figma Make reference and UI UX Pro Max were available and used for selective guidance.
 - Genuine stop boundaries: destructive database/volume migration, paid domain/service purchase, unavailable credentials, irreversible firewall/DNS action, or an external approval requirement.
