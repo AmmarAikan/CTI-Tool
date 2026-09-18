@@ -388,3 +388,98 @@ public ingress is ready.
 
 No background/scheduled job was started. All ACTIT installs, builds, and tests
 for this fix ran on the Contabo VPS; none ran on local Windows.
+
+## Controlled production deployment and final live verification (2026-09-18)
+
+This checkpoint supersedes the pre-deployment release gate above. The owner
+approved deployment. The exact clean source commit
+`1acf56434cd5dab274a18b76f84c8997b26ace2d` on
+`codex/actit-final-production` was archived to the immutable release
+`/opt/cti-platform/releases/20260918T141113Z-1acf564`. The Central deployment
+script updated Backend/Frontend; only Gateway and External Sources were then
+rebuilt/recreated through their existing VPS Compose project. The
+`/opt/cti-platform/current` symlink now points to the new release. Previous
+release `/opt/cti-platform/releases/20260914T172623Z-f9d0c31` remains.
+No database, MISP container, Docker volume, firewall, public listener, ACME
+certificate, or production data was reset or migrated.
+
+### Recovery and rollback guard
+
+- Deployment state: `/opt/cti-platform/deployments/20260918T141442Z`;
+  `state.env` is 0600. Verified PostgreSQL custom-format dump:
+  `/opt/cti-platform/backups/central-predeploy-20260918T141442Z.dump`
+  (40,562,936 bytes, 0600; `pg_restore --list` passed).
+- Gateway volume snapshot:
+  `/opt/cti-platform/backups/gateway-predeploy-20260918T141442Z.tar`
+  (100,874,240 bytes, 0600). It is not an automatic restore target:
+  overwriting the live volume could lose newer evidence.
+- Prior Gateway and External images were retained as
+  `cti-vps-gateway:rollback-20260918T141113Z` and
+  `cti-external-sources:rollback-20260918T141113Z`.
+  Current Backend, Frontend, Gateway, External image ID prefixes are
+  `cd6cb88f36fd`, `8b571c57f6be`, `e5db0c43da9b`, and `dc0137964ca9`.
+- **Gateway downgrade guard:** live web-access log has already undergone
+  base-offset compaction. The old Gateway cannot parse it. If necessary,
+  roll back Central/Frontend/External while keeping the new Gateway and
+  its volume; do not start the old Gateway against the current volume.
+  Never automatically restore a stale volume or database dump.
+
+### Final live checks on Contabo VPS
+
+- Released Frontend TypeScript/lint, 116/116 Vitest tests, and Vite build
+  passed. Production Backend image passed 56/56 isolated Docker tests with
+  read-only fixtures, tmpfs, and no network. Full source Python regression
+  passed 379/379 before deployment. No ACTIT build/test/install ran on Windows.
+- Active Backend, Frontend, Gateway, External Sources, PostgreSQL, and MISP
+  core containers inspected healthy. Frontend routes /, login, register,
+  dashboard, readiness, intelligence search/storyline, and MISP returned 200.
+  Gateway health and all three signed sensor/feed reads passed. Integration
+  health reported configured/reachable/valid contracts; host-auth HMAC passed.
+- Authenticated production web-access pull collected 41 items, stored 71
+  raw items, zero failures. A second pull collected/stored zero. Raw items
+  moved from 539 to 580; committed checkpoint exists. ACK compacted log
+  to a 33-byte base-offset header at offset 583. No manual ACK was sent.
+- Live admin `/auth/me` returned 200; anonymous admin route returned 401;
+  viewer admin route returned 403. No user was created. Successful password
+  login UX was not tested in this API-only validation.
+- Real dashboard/investigation counts: 13,997 events, 20,393 observables,
+  9 correlations, 440 sessions, 45 outliers. Search, indicator summary,
+  runs, storyline, STIX, and ATT&CK APIs responded. Latest storyline had
+  3 milestones and 2 limitations; ATT&CK had 0 techniques for that event,
+  an honest absence rather than an invented match.
+- MISP remained reachable: one physical event, two attributes. Candidate
+  queue and delivery history readable (13,997 candidates, four records).
+  No MISP send/publish; inspected latest-event preview was ineligible.
+- Tailscale Serve HTTPS via the tailnet IP and `curl --resolve` verified TLS
+  and HTTP 200 for UI/API (443), MISP (8443), External (8444), Gateway (8445).
+  Direct MagicDNS resolution from the VPS itself failed, not the Serve/TLS
+  probe. UI emitted no-store, CSP frame denial, nosniff, and DENY headers.
+  ACTIT Docker ports remain loopback-published; no public 80/443 listener
+  or certificate was enabled. Only one distinct tailnet user was online,
+  so two-user rate-limit fairness remains unverified.
+- Mirror, SSH collector, External collection, and storage maintenance timers
+  remained enabled/active. Mirror and SSH collector last runs succeeded.
+  No destructive cleanup, public ingress change, or MISP sharing occurred.
+
+### Final decision and Next Task
+
+**Deployment successful; core runtime GO; full automated External collection
+readiness NO-GO.** Pre-existing `cti-external-collection.service` last exited
+52 at 2026-09-18 13:27:37 UTC, before this deployment. Earlier runs also
+had `curl: (52) Empty reply from server`; one same-day run partially succeeded.
+Kernel logs recorded a 512 MiB Gateway cgroup OOM at that failure, killing
+Python while handling the approximately 100 MiB external feed. The released
+Gateway feed merge path was unchanged; no new OOM occurred after deployment.
+This strongly indicates a pre-existing feed-publish memory-budget problem,
+not proof of a new-release regression. The heavy scheduled job was not rerun
+just to reproduce OOM. Rolling back would not fix the prior failure and
+would introduce the Gateway log compatibility hazard, so no rollback occurred.
+
+**Next Task, requiring owner approval because it expands beyond deploy and
+verify:** make a narrow, data-preserving Gateway external-feed publish
+memory-budget fix or justified resource adjustment; test a representative
+large export in isolated VPS Compose; run one scheduled workflow under
+observation; repeat readiness checks. Preserve existing pipeline, volumes,
+MISP data, and Tailscale-only ingress. Do not claim full operational GO or
+repeatedly trigger production collection while unresolved. Previously tracked
+low MISP ADMIN_KEY scope and two-user tailnet fairness remain open.
