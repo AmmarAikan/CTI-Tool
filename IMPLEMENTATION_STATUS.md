@@ -238,11 +238,11 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 
 ## Next Task
 
-Resolve and verify bounded gateway web-access log retention in the VPS development worktree, or obtain explicit project-owner acceptance of the medium residual availability risk. Track the low MISP service-key privilege issue separately; do not read or rotate live credentials without an approved procedure. Re-run affected targeted tests and Docker smoke after a fix, then update GO/NO-GO. Public HTTPS stays disabled and optional. Do not deploy to `/opt` without explicit approval.
+Await explicit owner approval for the documented immutable `/opt` release. Before executing it, record the approved commit and recheck the clean VPS worktree, existing services, volumes, database backup path, gateway log format, and previous image IDs. Keep Tailscale as the presentation ingress; do not enable public HTTPS or alter credentials. Preserve the forward-compatible Gateway during any post-compaction Central rollback. Track the low MISP service-key privilege issue separately.
 
 ## Remaining P0 sequence
 
-1. Resolve or explicitly accept the medium gateway availability risk; track low MISP least-privilege work.
+1. Gateway availability risk resolved in development; await explicit approval for controlled immutable release. Track low MISP least-privilege work.
 2. If a second distinct tailnet user becomes available, repeat live fairness testing without trusting supplied identity headers.
 3. After security disposition and explicit approval, stage an immutable VPS release and validate before switching `/opt/cti-platform/current`.
 4. Treat public-IP HTTPS, ACME, and firewall changes as separately approved optional work; preserve Tailscale.
@@ -295,3 +295,96 @@ This dated checkpoint supersedes older public-IP, scan, and release-gate stateme
 2. Run `<new-release>/infra/vps/scripts/deploy_central_stack.sh <new-release>` only after checking its `pg_dump -Fc`/restore-list backup, rollback image tags, and deployment state. Verify Backend/database, Frontend `/healthz`, tailnet auth/RBAC/rate limits, readiness, gateway, External, and MISP health.
 3. For the External DNS-pinning change, record the previous External image ID/tag and exact Compose project/network/volume settings. Update only `external-sources` with `docker compose --env-file /etc/cti-platform/vps.env -f <new-release>/infra/vps/compose.yaml build external-sources` then `up -d --no-deps external-sources`; verify its health and existing schedules. Preserve all volumes and automations. Atomically switch `/opt/cti-platform/current` only after all services pass.
 4. If checks fail, run `<new-release>/infra/vps/scripts/rollback_central_stack.sh /opt/cti-platform/deployments/<timestamp>`, restore the recorded previous External image/tag and prior release symlink, and recheck Frontend, Backend/database, External, gateway, Tailscale, and MISP. Retain the verified PostgreSQL dump; never restore the database automatically or delete volumes.
+
+
+## Gateway log-growth remediation and final release gate (2026-09-18 02:07 UTC)
+
+This checkpoint supersedes the older **NO-GO** and gateway-risk Next Task above.
+The medium CWE-400 availability finding is fixed in the VPS development worktree;
+nothing has been deployed to `/opt`, and the production symlink remains
+`/opt/cti-platform/releases/20260914T172623Z-f9d0c31`.
+
+- Source-to-sink fix: Gateway still uses `gateway_data:/data/web_access.jsonl`.
+  New logged requests reserve a bounded 16 KiB slot, append durably, and are
+  backpressured with 503/`Retry-After` at the 64 MiB default cap. Health,
+  Dionaea/host-auth/web-access reads, and external-feed read/publish remain
+  available as operational routes. There is no blind truncation or age-only
+  eviction; capacity cannot be finite and lossless under unlimited arrivals,
+  so backpressure is intentional.
+- Retention/rotation: web-access pages stream the legacy or compacted JSONL
+  without the old whole-file 50 MiB rejection. Each page is bounded to 8 MiB
+  of normalized events; oversized or malformed legacy rows fail explicitly.
+  Signed cursors remain absolute across an atomic, fsynced compaction with a
+  base-offset header. Only a previously PostgreSQL-committed checkpoint is
+  acknowledged on the next pull. The ACK is purpose-separated HMAC using the
+  existing sensor read token, so optional response-HMAC configuration cannot
+  silently disable retention. The read token now also authorizes ACK and must
+  be protected as an ingestion credential. Unacknowledged rows survive;
+  stale/beyond-end offsets return 409.
+- Compatibility: partial batches are enabled only for web-access; Dionaea and
+  host-auth keep their previous strict page/byte behavior. No schema, database,
+  volume, or frontend migration is required. The live Gateway log was checked
+  read-only: 239,764 bytes, 582 lines, longest line 424 bytes; no row approaches
+  the 8 MiB page/event bound. No live log content or secret was printed.
+- Verification on Contabo VPS only: targeted 38/38; full Python regression
+  379/379; candidate Backend Docker image regression 56/56 with read-only
+  fixtures, disposable tmpfs, and no network. New tests cover legacy files
+  above 50 MiB, large-record page budgets, ACK/absolute cursor/retention
+  across restart, post-commit partial ingestion, optional response-HMAC
+  absence, malformed-line preservation, operational-route availability at
+  capacity, backpressure, and recovery. Candidate Gateway and Backend images
+  built successfully as `actit-gateway:web-log-candidate`
+  (`sha256:f4c534c4081e40cb6a22466586eadbc7ef1e273c98a95ea582025878e133934b`)
+  and `actit-backend:web-log-candidate`
+  (`sha256:0aaf988f88e38e61cd354a2084a8acc6950592046ef6ecfba87070057b6e3a00`).
+  Gateway image import and existing production-env VPS Compose render passed.
+  Initial Docker test invocation lacked an existing collector fixture mount,
+  and the next invocation loaded SQLite configuration in the wrong test order;
+  corrected isolated runs passed without source changes. Existing Starlette
+  and sklearn compatibility warnings remain non-failing.
+- Independent read-only post-patch review found and prompted closure of
+  operational-route blocking, optional-HMAC ACK, large-page, and malformed-row
+  edges. The previous Codex Security Standard scan covered the pre-fix commit
+  only and 25/427 files; no claim of a new exhaustive scan or live VPS scan.
+  Low MISP ADMIN_KEY service scope remains tracked, not a demonstrated leak.
+  Real two-user tailnet fairness remains unverified because a second distinct
+  user was unavailable; optional public HTTPS remains disabled.
+
+**Final decision: GO for a controlled Tailscale-only immutable release, subject
+to the owner's explicit deployment approval and the staged health/rollback
+checks below.** This is not a claim that the candidate is deployed or that
+public ingress is ready.
+
+### Deployment and rollback checkpoint (prepared, not executed)
+
+1. Before any production command, record `hostname`, `pwd`, branch, approved
+   commit/clean tree, current symlink, image IDs, service health, and the
+   presence/permissions (not contents) of environment files. Stage a new
+   immutable release from that exact commit; keep the old release and volumes.
+   Render both Compose projects with existing env files. Do not bootstrap.
+2. Record previous Gateway and External image IDs under rollback tags before
+   their fixed Compose image tags are rebuilt. Run the existing Central
+   deployment script against the new release; it creates a verified
+   `pg_dump -Fc`, tags Backend/Frontend rollback images, and updates only
+   those two services. Check API, auth/RBAC, readiness, frontend, and Tailscale.
+3. Build and restart only the Gateway from the new release Compose file, with
+   its existing `gateway_data` volume and pairwise networks. Check health,
+   signed web-access pages, checkpoint/ACK behavior, and the other sensor/feed
+   routes. Then build/restart only External Sources for the separate DNS-pinning
+   change. Check its health/schedules and MISP reachability. Switch
+   `/opt/cti-platform/current` atomically only after all smoke checks pass.
+   Never publish ports, activate ACME/public HTTPS, or reset a volume here.
+4. On a failed Central/Frontend/External rollout, use the recorded Central
+   rollback state, previous External image tag, and old release symlink;
+   recheck every service. Gateway requires a special compatibility guard:
+   **before its first compaction** the prior Gateway image can be restored
+   with the unchanged log. **After compaction**, its base-offset JSONL is not
+   understood by the old Gateway image, so do not run that image against the
+   rotated volume. Preserve the new Gateway image/volume while rolling back
+   Central/External/Frontend, or isolate Gateway and prepare a forward-compatible
+   repair. Never restore a stale Gateway volume snapshot or database dump
+   automatically, since that could discard newer unacknowledged evidence.
+   Retain the verified backup and escalate if a data-format recovery is needed.
+
+No background/scheduled job was started. All ACTIT installs, builds, and tests
+for this fix ran on the Contabo VPS; none ran on local Windows.
