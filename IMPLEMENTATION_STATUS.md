@@ -1,6 +1,6 @@
 # ACTIT Final Production Implementation Status
 
-Last updated: 2026-09-16 (UTC)
+Last updated: 2026-09-18 (UTC)
 
 ## Objective
 
@@ -135,7 +135,7 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | --- | --- | --- | --- |
 | VPS-only immutable deployment | Ready | Active release `20260914T172623Z-f9d0c31`; clean source checkout | Preserve release/rollback model during deployment |
 | Tailscale analyst access | Ready | Frontend and service routes verified | Preserve as private administrative/analyst transport |
-| Public-IP ACTIT access | Missing | Public 80/443 probes did not expose the application | Add hardened reverse proxy on the existing VPS/public IP without exposing backend/databases |
+| Public-IP ACTIT access | Deferred, optional | Public 80/443 do not expose ACTIT; Tailscale Serve is the working presentation path | No public certificate or open port in this checkpoint; separate approval required |
 | Login and session authentication | Ready/Partial in development, not deployed | Existing Scrypt/signed token flow preserved; bounded IP/account limits, timing-safe unknown-user verification, success/rejection audit evidence, and a 120-minute default token lifetime. Browser token stays in sessionStorage and clears on logout/401 | Verify any explicit production token-lifetime override and the Tailscale Serve client-rate-limit identity before immutable deployment |
 | Public registration | Ready in development, not deployed | Public API and bilingual form always create active `viewer`; extra/client role is rejected; duplicate and rate-limit states are safe | Deploy through immutable release only after the next meaningful checkpoint |
 | RBAC and user administration | Ready/Partial in development, not deployed | Viewer/analyst/admin guards, last-admin protection, audit view; all central FastAPI mutating routes have role dependencies and anonymous/viewer deny-path tests, plus admin-only analyst denial | Validate against immutable release after deployment; keep External Sources' separate authenticated control tests |
@@ -157,9 +157,9 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
 | Outlier detection | Partial | 413 sessions and Isolation Forest/fallback metadata exist | Explain features, sample sufficiency, detector choice, and event relationship |
 | Demo/readiness dataset | Ready in development, not deployed | Private disposable SQLite fixture with fixed external/internal evidence, Storyline/risk/ATT&CK/STIX/MISP projections and deterministic CLI walkthrough; protected readiness page reads existing live API contracts only | Keep demo synthetic and offline; after a separately approved immutable deployment, verify readiness UI against the release and demonstrate actual pipeline-generated cross-source evidence when available |
-| App/API security | Partial in development, not deployed | Loopback binding, CSP, default-deny firewall, separated networks, read-only/cap-drop on core services; candidate proxy discards untrusted forwarded chains, sets no-store on HTML/API, and passes isolated spoof/rate-limit smoke | Verify Tailscale Serve client-rate-limit fairness, public ingress/TLS/header policy, production token override, and audit completeness before release |
+| App/API security | Partial in development, not deployed | Isolated two-client rate-limit and Auth/RBAC HTTPS ingress smoke passed; loopback, CSP, firewall, and network separation remain | Real two-user Tailscale fairness remains unverified because only one distinct peer user is online; public ingress is optional |
 | SSRF controls | DNS race fixed in development, not deployed | Candidate External Sources pins each socket to a validated public IP while retaining original Host/TLS SNI/certificate checks; 232/232 External Docker tests and 368/368 VPS regression pass | Keep final holistic SSRF/security review and immutable-release validation before public ingress; do not represent this as a live production fix |
-| Security scan/remediation | Pending | Manual Phase 8 changed-code review documented; formal Codex Security desktop scan could not target the VPS-only authoritative worktree | Run a legitimate VPS-local scan or otherwise supported remote-target scan before release; triage and verify every accepted fix |
+| Security scan/remediation | Partial; two open findings | Codex Security Standard scan completed on a clean local source-only checkout matching VPS commit `3500855`; 25 security-sensitive files fully reviewed, not exhaustive | Fix or explicitly accept medium gateway log-growth risk; track low MISP credential-scope issue |
 | Cloudflare/custom domain | Deferred | No domain exists in Contabo account; no domain is required for P0 | Keep optional; do not purchase or change DNS without explicit approval |
 | Reference-informed UI refinement | Partial | Exact ThreatIntel Figma was inspected and UI UX Pro Max guidance was applied to the existing ACTIT component/token/i18n architecture | Continue page-by-page; never replace ACTIT or copy Figma/OpenCTI mock code/data |
 
@@ -238,16 +238,14 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 
 ## Next Task
 
-Finish the public-ingress security gates in `docs/public-ingress-security.md`: verify rate-limit fairness with two distinct tailnet clients and run an isolated end-to-end auth/edge smoke, without modifying production data. Stage and prove short-lived public-IP certificate issuance and unattended renewal only after an immutable release and rollback are reviewed; keep Tailscale Serve intact and do not expose public ports prematurely.
-
-The Codex Security desktop Standard scan cannot target this VPS-only worktree (tool error: `Scan target must be an absolute local directory path.`). Obtain a supported remote-capable formal scan or explicitly decide how to handle that release gate. Complete final Docker/Compose regression and document the decision before any `/opt` cutover. Current decision: NO-GO for public exposure or deployment.
+Resolve and verify bounded gateway web-access log retention in the VPS development worktree, or obtain explicit project-owner acceptance of the medium residual availability risk. Track the low MISP service-key privilege issue separately; do not read or rotate live credentials without an approved procedure. Re-run affected targeted tests and Docker smoke after a fix, then update GO/NO-GO. Public HTTPS stays disabled and optional. Do not deploy to `/opt` without explicit approval.
 
 ## Remaining P0 sequence
 
-1. Complete Tailscale Serve client-identity/rate-limit fairness and public-IP reverse-proxy/TLS hardening while preserving private access.
-2. Continue Figma/UI refinement incrementally per affected page with Arabic/English and responsive accessibility.
-3. Complete the remaining holistic SSRF/security review, full Docker/Compose parity validation, formal scan where supported, remediation, documentation, and final demo validation.
-4. Prepare a separately reviewed immutable release; keep production untouched until its security/test outcome is documented.
+1. Resolve or explicitly accept the medium gateway availability risk; track low MISP least-privilege work.
+2. If a second distinct tailnet user becomes available, repeat live fairness testing without trusting supplied identity headers.
+3. After security disposition and explicit approval, stage an immutable VPS release and validate before switching `/opt/cti-platform/current`.
+4. Treat public-IP HTTPS, ACME, and firewall changes as separately approved optional work; preserve Tailscale.
 
 ## Remaining P1 / deferred
 
@@ -258,12 +256,12 @@ The Codex Security desktop Standard scan cannot target this VPS-only worktree (t
 
 ## Known blockers and non-blockers
 
-- Non-blocker: no custom domain. Public IP is the P0 target.
+- Non-blocker: no custom domain or public-IP HTTPS; Tailscale is the approved presentation transport for this checkpoint.
 - Non-blocker: production MISP still has one event by design; root cause verified. The multi-event workflow is developed but not deployed or exercised against live MISP.
 - Non-blocker: the complete backend suite passed in the VPS disposable test environment; production remains Docker/Compose only.
 - Non-blocker: the exact Figma Make reference and UI UX Pro Max were available and used for selective guidance.
-- Non-blocker for candidate testing, release gate for production: the active backend has no explicit token-lifetime environment override; deploying the candidate would shorten the default. Tailscale Serve may make multiple tailnet clients share one proxy-observed rate-limit key; validate this before release without trusting client-supplied XFF.
-- Formal desktop security scanning of the VPS-only worktree was not available through the local-target scanner; do not represent the manual review as an official scan.
+- Non-blocker with honest limit: no active token-lifetime override, so the candidate's shorter default applies on release. Real two-user tailnet fairness was unavailable; isolated two-client behavior passed without trusting supplied headers.
+- Codex Security Standard scan was source-only on a clean exact-commit local checkout, not a VPS runtime scan; its file coverage was partial. Scanner locality alone does not block release, but the medium finding needs disposition.
 - Genuine stop boundaries: destructive database/volume migration, paid domain/service purchase, unavailable credentials, irreversible firewall/DNS action, or an external approval requirement.
 
 ## Background and scheduled work
@@ -276,3 +274,24 @@ None. No unattended process or automation was started during the baseline.
 - Source branch reference: `origin/codex/vps-production-integration` at `f9d0c31`.
 - Build immutable releases only on the VPS from a validated VPS worktree, preserve the current symlink target, verify health/smoke tests, and switch the `/opt/cti-platform/current` symlink only after validation.
 - If a future release fails, restore the previous symlink target and container images without deleting volumes, then verify frontend, backend/database, External Sources, gateway, and MISP health.
+
+## Final pre-deployment verification (2026-09-17/18 UTC)
+
+This dated checkpoint supersedes older public-IP, scan, and release-gate statements above where they conflict. Approved presentation transport is Tailscale; public HTTPS/certificates/ports are optional and were not activated.
+
+- Reviewed VPS code commit: `3500855b8f8f934bc067af41141f32523538ddba` on `codex/actit-final-production`. `/opt/cti-platform/current` still resolves to `/opt/cti-platform/releases/20260914T172623Z-f9d0c31`. No production data, volume, service, symlink, firewall, certificate, or public port was changed.
+- Only one distinct Tailscale peer user was online, so a real two-user tailnet fairness test remains **unverified**. Existing live Serve XFF stripping and the isolated two-client test support, but do not replace, that proof.
+- Isolated private VPS Compose ingress: ephemeral PostgreSQL, exact candidate Backend/Frontend, and Nginx; no host-published ports or production volumes. Two fixed clients on `172.30.211.0/24`: client A received five registration 201 responses then 429 with `Retry-After`; forged forwarding headers did not evade the limit. Client B registered 201 as server-assigned `viewer` while A was limited. An initial auto-assigned `192.168.64.0/24` test network fell outside the Backend's trusted Docker proxy range and merged client identities; the corrected network matched the production `172.16.0.0/12` boundary. Temporary containers, networks, and self-signed test certificate were removed.
+- Auth/RBAC through isolated HTTPS ingress: anonymous `/auth/me` 401; public registration 201 and `viewer`; client role injection 422; viewer login and `/auth/me` 200; viewer admin read/write 403; admin login/read 200.
+- Docker parity: Backend image `actit-backend:predeploy-3500855` (`sha256:8ff8c3c11c7a924786ef008037dec006b6b68a90ae39a35382cd8e5295f0d3a0`) passed 18/18 targeted API/rate-limit tests with read-only fixture/report mounts. The first fixture-less harness attempt had four loading errors; rerun passed without code changes. Full VPS disposable-venv Python regression: 371/371. Frontend image `actit-frontend:predeploy-3500855` (`sha256:08ce32e7251f2ac99a13dbf5365b222fe6e2c8edd53aea157e8178664c6bf60f`) passed lint/TypeScript, 116/116 Vitest, and production build. Existing production-env Central Compose rendered with `config --quiet`; no secrets printed or services started. Existing non-failing sklearn model-version and Vite chunk-size warnings remain.
+- Codex Security Standard scan `d29ae598-f13a-4766-9351-f217b70a403f` completed on a **clean local source-only checkout** matching the exact VPS commit. No ACTIT install, build, or tests ran on Windows; the scanner did not assess live VPS runtime. Focused coverage was partial: 25 security-sensitive files fully reviewed from 427 inventoried. Report: `C:\Users\ZBOOK\AppData\Local\Temp\codex-security-scans-IuB0I4\actit-security-3500855-37d6da1d4ad0429d8ea65fcef8257683\3500855b8f8f934bc067af41141f32523538ddba_20260917T163151Z__75brnpu\report.md`.
+- Medium / CWE-400: `infra/vps/gateway/app.py` appends unauthenticated non-health requests to persistent `gateway_data:/data/web_access.jsonl` without size/retention bounds; web-access sensor reads reject files above 50 MiB. Tailnet-private; source-traced only, no DoS traffic or production log mutation. This is availability/telemetry risk, not an observed outage.
+- Low / CWE-250: `infra/vps/scripts/deploy_misp.sh` copies MISP `ADMIN_KEY` into Backend `MISP_API_KEY` instead of a scoped service key. Root-owned private config and MISP network isolation mitigate exposure. Live key and actual account privileges were not read; this is conditional blast radius, not a demonstrated key leak.
+- **NO-GO for deployment** until the medium gateway risk is fixed and verified or explicitly accepted by the project owner. Missing second live tailnet user, optional public HTTPS, and scanner locality are documented limitations, not independent blockers. No `/opt` deployment occurred.
+
+### Prepared deployment and rollback (approval required; not executed)
+
+1. On VPS record `hostname`, `pwd`, and `git branch --show-current`; confirm approved commit/clean tree, old `/opt/cti-platform/current` target, healthy services, and root-owned env-file presence without printing secrets. Stage a new immutable release under `/opt/cti-platform/releases/<timestamp>-<commit>` from the approved VPS commit. Render Central and External Compose configurations with existing env files. Do not run first-install/bootstrap scripts.
+2. Run `<new-release>/infra/vps/scripts/deploy_central_stack.sh <new-release>` only after checking its `pg_dump -Fc`/restore-list backup, rollback image tags, and deployment state. Verify Backend/database, Frontend `/healthz`, tailnet auth/RBAC/rate limits, readiness, gateway, External, and MISP health.
+3. For the External DNS-pinning change, record the previous External image ID/tag and exact Compose project/network/volume settings. Update only `external-sources` with `docker compose --env-file /etc/cti-platform/vps.env -f <new-release>/infra/vps/compose.yaml build external-sources` then `up -d --no-deps external-sources`; verify its health and existing schedules. Preserve all volumes and automations. Atomically switch `/opt/cti-platform/current` only after all services pass.
+4. If checks fail, run `<new-release>/infra/vps/scripts/rollback_central_stack.sh /opt/cti-platform/deployments/<timestamp>`, restore the recorded previous External image/tag and prior release symlink, and recheck Frontend, Backend/database, External, gateway, Tailscale, and MISP. Retain the verified PostgreSQL dump; never restore the database automatically or delete volumes.
