@@ -54,6 +54,32 @@ The systemd collector reads `journalctl` JSON and maps supported SSH outcomes su
 
 Gateway middleware records method, path, status code, duration, and source address. It excludes authentication headers, cookies, request bodies, query secrets, health probes, and the web-access stream's own read endpoint to avoid recursive logging.
 
+The web-access JSONL stays at `/data/web_access.jsonl`. Gateway streams pages without
+loading or rejecting an entire legacy file above the generic 50 MiB sensor limit.
+Each page is capped at 8 MiB of normalized events, and signed cursors retain
+absolute event offsets across compaction. An individual event above that limit
+or a malformed legacy line fails explicitly (413/422); neither is silently
+discarded.
+
+The backend may commit a bounded partial batch when its page or cumulative-byte
+limit is reached, then resume from its PostgreSQL-persisted checkpoint on the
+next pull. Only that subsequent first pull sends `X-CTI-Ack-Cursor` plus a
+purpose-separated HMAC of `web-access-ack:<cursor>` keyed by the existing sensor
+read token. The token therefore authorizes both reading and acknowledgement;
+treat it as an ingestion credential. Gateway validates the bearer token and
+signature before atomically compacting only events strictly before the committed
+offset. Unacknowledged events and absolute offsets remain intact; stale or
+beyond-end cursors return 409. A failed acknowledgement replays, not drops,
+evidence.
+
+`MAX_WEB_LOG_BYTES` (64 MiB by default) bounds new appends. When an
+unacknowledged backlog reaches capacity, loggable requests receive 503 with
+`Retry-After` until collection/acknowledgement frees space. Health, all three
+sensor reads, and external-feed read/publish are operational control-plane
+routes deliberately excluded from web-access logging and remain available to
+drain the backlog. A legacy file already above the cap is still readable.
+There is no age-only or blind oldest-first deletion.
+
 ## Backend processing
 
 All three streams map to the shared `RawRecord` contract. The backend stores raw evidence, builds 30-minute sessions, computes numeric features, runs Isolation Forest, retains every session, and promotes outlier sessions only to CTI events.

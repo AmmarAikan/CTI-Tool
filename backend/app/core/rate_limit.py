@@ -10,6 +10,8 @@ from collections.abc import Callable
 
 from fastapi import Request
 
+_DOCKER_PROXY_NETWORK = ipaddress.ip_network("172.16.0.0/12")
+
 
 class SlidingWindowRateLimiter:
     """Small bounded limiter for a single ACTIT backend process."""
@@ -67,7 +69,7 @@ def request_identity(request: Request) -> str:
 
     forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
     if forwarded and peer_address is not None and (
-        peer_address.is_private or peer_address.is_loopback
+        peer_address.is_loopback or peer_address in _DOCKER_PROXY_NETWORK
     ):
         try:
             candidate = str(ipaddress.ip_address(forwarded))

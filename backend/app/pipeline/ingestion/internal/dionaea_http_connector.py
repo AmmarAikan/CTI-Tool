@@ -36,6 +36,7 @@ class DionaeaAPIResult:
     response_bytes: int = 0
     duplicate_events: int = 0
     transport: str = "dionaea_https_json_api"
+    has_more: bool = False
 
     def details(self) -> dict[str, Any]:
         return {
@@ -45,6 +46,7 @@ class DionaeaAPIResult:
             "pages": self.pages,
             "response_bytes": self.response_bytes,
             "duplicate_events": self.duplicate_events,
+            "has_more": self.has_more,
         }
 
 
@@ -66,6 +68,7 @@ class DionaeaAPIConnector(InternalConnector):
         page_size: int = 500,
         checkpoint: str | None = None,
         session: requests.Session | None = None,
+        allow_partial: bool = False,
     ) -> None:
         self.url = url.strip()
         self.token = token
@@ -77,6 +80,7 @@ class DionaeaAPIConnector(InternalConnector):
         self.max_pages = max(1, min(max_pages, 100))
         self.page_size = max(1, min(page_size, 1000))
         self.checkpoint = checkpoint
+        self.allow_partial = allow_partial
         self.session = session or self._session()
         self.last_result: DionaeaAPIResult | None = None
         self._validate_url(allow_http)
@@ -95,16 +99,19 @@ class DionaeaAPIConnector(InternalConnector):
         for page_number in range(1, self.max_pages + 1):
             response = self.session.get(
                 self.url,
-                headers=self._headers(),
+                headers=self._request_headers(page_number),
                 params={"limit": self.page_size, **({"cursor": cursor} if cursor else {})},
                 timeout=self.timeout,
                 verify=self.verify_tls,
             )
             response.raise_for_status()
             body = self._response_body(response)
-            result.response_bytes += len(body)
-            if result.response_bytes > self.max_bytes:
+            if result.response_bytes + len(body) > self.max_bytes:
+                if self.allow_partial and result.pages:
+                    result.has_more = True
+                    return result
                 raise DionaeaAPIContractError("Paginated Dionaea response exceeds configured bytes")
+            result.response_bytes += len(body)
             self._verify_signature(body, response.headers.get(self.SIGNATURE_HEADER))
             envelope = self._validate_envelope(self._parse(body))
 
@@ -122,6 +129,7 @@ class DionaeaAPIConnector(InternalConnector):
             result.sensor_id = envelope["sensor_id"]
             result.generated_at = envelope["generated_at"]
             result.checkpoint = envelope.get("checkpoint") or result.checkpoint
+            result.has_more = envelope["has_more"]
             if not envelope["has_more"]:
                 return result
             next_cursor = envelope.get("next_cursor")
@@ -132,10 +140,15 @@ class DionaeaAPIConnector(InternalConnector):
             seen_cursors.add(next_cursor)
             cursor = next_cursor
 
+        if self.allow_partial and result.pages:
+            return result
         raise DionaeaAPIContractError(
             f"Dionaea API exceeded DIONAEA_API_MAX_PAGES={self.max_pages}"
         )
 
+
+    def _request_headers(self, _page_number: int) -> dict[str, str]:
+        return self._headers()
     def healthcheck(self) -> dict[str, Any]:
         try:
             response = self.session.get(

@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,9 @@ from starlette.middleware.gzip import GZipMiddleware
 
 SENSITIVE_KEY_PARTS = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
 STREAM_NAMES = frozenset({"dionaea", "host-auth", "web-access"})
+WEB_BASE_KEY = "_gateway_web_base_offset"
+WEB_LOG_RESERVATION_BYTES = 16 * 1024
+WEB_PAGE_MAX_BYTES = 8 * 1024 * 1024
 
 
 def utc_now() -> str:
@@ -41,6 +45,7 @@ class GatewaySettings:
     max_feed_snapshot_bytes: int = 100 * 1024 * 1024
     max_sensor_bytes: int = 50 * 1024 * 1024
     max_feed_items: int = 20_000
+    max_web_log_bytes: int = 64 * 1024 * 1024
 
     @classmethod
     def from_env(cls) -> GatewaySettings:
@@ -68,6 +73,7 @@ class GatewaySettings:
             ),
             max_sensor_bytes=int(os.getenv("MAX_SENSOR_BYTES", str(50 * 1024 * 1024))),
             max_feed_items=int(os.getenv("MAX_FEED_ITEMS", "20000")),
+            max_web_log_bytes=int(os.getenv("MAX_WEB_LOG_BYTES", str(64 * 1024 * 1024))),
         )
 
 
@@ -76,18 +82,40 @@ def create_app(settings: GatewaySettings) -> FastAPI:
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.state.settings = settings
     app.state.write_lock = threading.Lock()
+    app.state.web_reserved_bytes = 0
 
     @app.middleware("http")
     async def web_access_log(request: Request, call_next):
         started = time.perf_counter()
+        loggable = request.url.path not in {
+            "/health",
+            "/api/v1/sensors/web-access",
+            "/api/v1/sensors/dionaea",
+            "/api/v1/sensors/host-auth",
+            "/api/v1/external-feed",
+            "/api/v1/external-feed/publish",
+        }
+        if loggable:
+            with app.state.write_lock:
+                path = _web_path(settings)
+                size = path.stat().st_size if path.exists() else 0
+                if size + app.state.web_reserved_bytes + WEB_LOG_RESERVATION_BYTES > settings.max_web_log_bytes:
+                    return Response(status_code=503, headers={"Retry-After": "60"})
+                app.state.web_reserved_bytes += WEB_LOG_RESERVATION_BYTES
         try:
-            response = await call_next(request)
-        except Exception:
-            _append_web_event(settings, app.state.write_lock, request, 500, started)
-            raise
-        if request.url.path not in {"/health", "/api/v1/sensors/web-access"}:
-            _append_web_event(settings, app.state.write_lock, request, response.status_code, started)
-        return response
+            try:
+                response = await call_next(request)
+            except Exception:
+                if loggable:
+                    _append_web_event(settings, app.state.write_lock, request, 500, started)
+                raise
+            if loggable:
+                _append_web_event(settings, app.state.write_lock, request, response.status_code, started)
+            return response
+        finally:
+            if loggable:
+                with app.state.write_lock:
+                    app.state.web_reserved_bytes -= WEB_LOG_RESERVATION_BYTES
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -171,15 +199,30 @@ def create_app(settings: GatewaySettings) -> FastAPI:
         authorization: str | None = Header(default=None),
         limit: int = Query(500, ge=1, le=1000),
         cursor: str | None = None,
+        ack_cursor: str | None = Header(default=None, alias="X-CTI-Ack-Cursor"),
+        ack_signature: str | None = Header(default=None, alias="X-CTI-Ack-Signature"),
     ):
         _authorize(authorization, settings.sensor_read_token)
         if stream_name not in STREAM_NAMES:
             raise HTTPException(status_code=404, detail="sensor stream not found")
-        events = _load_sensor_events(_stream_path(settings, stream_name), settings.max_sensor_bytes, stream_name)
         start = _decode_cursor(cursor, stream_name, settings.cursor_secret) if cursor else 0
-        page = events[start : start + limit]
-        end = start + len(page)
-        has_more = end < len(events)
+        if stream_name == "web-access":
+            if bool(ack_cursor) != bool(ack_signature) or (ack_cursor and ack_cursor != cursor):
+                raise HTTPException(status_code=422, detail="web-access acknowledgement is invalid")
+            with app.state.write_lock:
+                if ack_cursor:
+                    expected = _web_ack_signature(ack_cursor, settings.sensor_read_token)
+                    if not hmac.compare_digest(ack_signature or "", expected):
+                        raise HTTPException(status_code=401, detail="web-access acknowledgement failed")
+                    _compact_web_log(_web_path(settings), start)
+                page, end, has_more = _web_page(_web_path(settings), start, limit)
+        else:
+            if ack_cursor or ack_signature:
+                raise HTTPException(status_code=422, detail="sensor acknowledgement is unsupported")
+            events = _load_sensor_events(_stream_path(settings, stream_name), settings.max_sensor_bytes, stream_name)
+            page = events[start : start + limit]
+            end = start + len(page)
+            has_more = end < len(events)
         payload = {
             "schema_version": "1.0",
             "sensor_id": f"{settings.sensor_id}:{stream_name}",
@@ -359,25 +402,135 @@ def _parse_json_records(text: str) -> list[dict[str, Any]]:
 
 
 def _append_web_event(settings: GatewaySettings, lock: threading.Lock, request: Request, code: int, started: float) -> None:
-    source_ip = request.client.host if request.client else "unknown"
+    source_ip = (request.client.host if request.client else "unknown")[:128]
+    method = request.method[:32]
+    path_text = request.url.path[:512]
     failure = code >= 400
     level = 7 if code in {401, 403} else 5 if code >= 500 else 3 if code == 404 else 1
     event = {
-        "id": f"web:{hashlib.sha256(f'{utc_now()}:{source_ip}:{request.method}:{request.url.path}:{code}'.encode()).hexdigest()[:24]}",
+        "id": f"web:{uuid.uuid4().hex}",
         "timestamp": utc_now(),
         "event": {"category": "web", "action": "http_request", "outcome": "failure" if failure else "success"},
         "source": {"ip": source_ip},
-        "http": {"request": {"method": request.method}, "response": {"status_code": code}},
-        "url": {"original": request.url.path},
+        "http": {"request": {"method": method}, "response": {"status_code": code}},
+        "url": {"original": path_text},
         "rule": {"id": f"gateway_http_{code}", "level": level},
-        "message": f"{request.method} {request.url.path} returned HTTP {code}",
+        "message": f"{method} {path_text} returned HTTP {code}",
         "duration_ms": round((time.perf_counter() - started) * 1000, 3),
     }
     encoded = _json_bytes(event)
+    if len(encoded) > WEB_LOG_RESERVATION_BYTES:
+        raise RuntimeError("web-access event exceeds reserved log size")
     with lock:
-        _web_path(settings).parent.mkdir(parents=True, exist_ok=True)
-        with _web_path(settings).open("ab") as handle:
+        path = _web_path(settings)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and path.stat().st_size + len(encoded) > settings.max_web_log_bytes:
+            raise HTTPException(status_code=503, detail="web-access log capacity reached")
+        with path.open("ab") as handle:
             handle.write(encoded)
+            handle.flush()
+
+            os.fsync(handle.fileno())
+
+def _web_ack_signature(cursor: str, secret: str) -> str:
+    return hmac.new(secret.encode("utf-8"), f"web-access-ack:{cursor}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _web_file_base(handle) -> int:
+    first = handle.readline()
+    if not first:
+        return 0
+    try:
+        value = json.loads(first)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        handle.seek(0)
+        return 0
+    if isinstance(value, dict) and WEB_BASE_KEY in value:
+        base = value.get(WEB_BASE_KEY)
+        if type(base) is not int or base < 0 or set(value) != {WEB_BASE_KEY}:
+            raise HTTPException(status_code=500, detail="web-access log header is invalid")
+        return base
+    handle.seek(0)
+    return 0
+
+
+def _web_record(raw: bytes) -> dict[str, Any]:
+    if len(raw) > WEB_PAGE_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="web-access event exceeds page limit")
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="web-access log contains malformed event") from exc
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=422, detail="web-access log contains malformed event")
+    return value
+
+
+def _web_page(path: Path, start: int, limit: int) -> tuple[list[dict[str, Any]], int, bool]:
+    if not path.exists():
+        if start:
+            raise HTTPException(status_code=409, detail="web-access cursor is outside retained log")
+        return [], 0, False
+    with path.open("rb") as handle:
+        base = _web_file_base(handle)
+        if start < base:
+            raise HTTPException(status_code=409, detail="web-access cursor is outside retained log")
+        index = base
+        page: list[dict[str, Any]] = []
+        page_bytes = 0
+        for raw in handle:
+            item = _web_record(raw)
+            if index >= start:
+                if len(page) == limit:
+                    return page, start + len(page), True
+                normalized = dict(item)
+                normalized.setdefault("id", _event_id("web-access", normalized))
+                item_bytes = len(_json_bytes(normalized))
+                if item_bytes > WEB_PAGE_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="web-access event exceeds page limit")
+                if page and page_bytes + item_bytes > WEB_PAGE_MAX_BYTES:
+                    return page, start + len(page), True
+                page_bytes += item_bytes
+                page.append(normalized)
+            index += 1
+        if start > index:
+            raise HTTPException(status_code=409, detail="web-access cursor is beyond log end")
+        return page, start + len(page), False
+
+
+def _compact_web_log(path: Path, acknowledged: int) -> None:
+    if not path.exists():
+        if acknowledged:
+            raise HTTPException(status_code=409, detail="web-access acknowledgement is beyond log end")
+        return
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with path.open("rb") as source:
+        base = _web_file_base(source)
+        if acknowledged < base:
+            raise HTTPException(status_code=409, detail="web-access acknowledgement is stale")
+        if acknowledged == base:
+            return
+        index = base
+        try:
+            with temporary.open("wb") as target:
+                target.write(_json_bytes({WEB_BASE_KEY: acknowledged}))
+                for raw in source:
+                    item = _web_record(raw)
+                    if index >= acknowledged:
+                        target.write(raw)
+                    index += 1
+                if acknowledged > index:
+                    raise HTTPException(status_code=409, detail="web-access acknowledgement is beyond log end")
+                target.flush()
+                os.fsync(target.fileno())
+            os.replace(temporary, path)
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _signed_json(payload: dict[str, Any], secret: str, headers: dict[str, str] | None = None) -> Response:

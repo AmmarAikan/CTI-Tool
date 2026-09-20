@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 from pathlib import Path
 from typing import Any
@@ -60,7 +61,20 @@ class SecuritySensorAPIConnector(DionaeaAPIConnector):
         if source_type not in {"linux_auth", "web_access"}:
             raise ValueError("source_type must be linux_auth or web_access")
         self.source_type = source_type
+        kwargs["allow_partial"] = source_type == "web_access"
         super().__init__(*args, **kwargs)
+
+    def _request_headers(self, page_number: int) -> dict[str, str]:
+        headers = super()._request_headers(page_number)
+        if self.source_type == "web_access" and page_number == 1 and self.checkpoint:
+            signature = hmac.new(
+                self.token.encode("utf-8"),
+                f"web-access-ack:{self.checkpoint}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            headers["X-CTI-Ack-Cursor"] = self.checkpoint
+            headers["X-CTI-Ack-Signature"] = signature
+        return headers
 
     def _normalizer(self) -> StructuredSecurityEventNormalizer:
         return StructuredSecurityEventNormalizer(
