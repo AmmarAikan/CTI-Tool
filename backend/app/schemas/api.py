@@ -71,6 +71,12 @@ class ExternalManualSourceRequest(BaseModel):
     force: bool = False
 
 
+class ExternalManualRecheckRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    root_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    force: bool = False
+
+
 class ExternalManualPreviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     url: HttpUrl
@@ -84,6 +90,34 @@ class ExternalManualPreviewApproveRequest(BaseModel):
 class ExternalManualPreviewRejectRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: Literal["not_relevant", "duplicate", "user_cancelled"]
+
+
+class ExternalReviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    decision: Literal["approved", "rejected"]
+    reason: Literal["not_relevant", "duplicate", "privacy_risk", "low_quality"] | None = None
+
+
+class ExternalReviewLifecycleItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    record_id: str = Field(min_length=16, max_length=100)
+    review_id: str = Field(min_length=16, max_length=100)
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    external_job_id: str | None = Field(default=None, max_length=100)
+    export_run_id: str | None = Field(default=None, max_length=200)
+    dataset_sha256: str | None = Field(default=None, pattern=r"^(?:sha256:)?[0-9a-f]{64}$")
+    central_run_id: str | None = Field(default=None, max_length=64)
+    state: Literal["pending_review", "approved_processing", "processed", "rejected", "processing_failed"]
+    stage: Literal["review", "export", "central_import", "processed"]
+    retryable: bool
+    updated_at: str = Field(max_length=40)
+
+
+class ExternalReviewLifecycleResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[ExternalReviewLifecycleItemResponse] = Field(max_length=1000)
 
 
 class ExternalManualPreviewItemResponse(BaseModel):
@@ -122,6 +156,11 @@ class ExternalManualPreviewResponse(BaseModel):
     items_preview_total: int = Field(ge=0)
     items_preview_truncated: bool
     counts: dict[str, int]
+    detected_type: Literal["json_collection"] | None = None
+    collection_path: list[str] | None = Field(default=None, max_length=4)
+    proposed_mapping: dict[str, str] | None = Field(default=None, max_length=9)
+    validation_warnings: list[Literal["explicit_approval_required", "empty_collection"]] | None = Field(default=None, max_length=4)
+    approval_required: bool | None = None
 
 
 class ExternalManualPreviewRejectedResponse(BaseModel):
@@ -137,6 +176,11 @@ class DarkWebWatchCreateRequest(BaseModel):
 class DarkWebWatchPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+
+class DarkWebSchedulePatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
+    interval_seconds: Literal[3600,21600,43200,86400]
 class DarkWebDiscoveryWatchCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     keywords: list[str] = Field(min_length=1,max_length=10)
@@ -146,6 +190,10 @@ class DarkWebDiscoveryWatchCreateRequest(BaseModel):
 class DarkWebDiscoveredSourcePatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+
+class DarkWebPromotionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class InternalEventResponse(BaseModel):
@@ -183,6 +231,25 @@ class InternalPullResponse(BaseModel):
     processed_count: int = Field(ge=0)
     stored_count: int = Field(ge=0)
     failed_count: int = Field(ge=0)
+
+
+class ExternalPullResponse(InternalPullResponse):
+    pipeline: Literal["external"] = "external"
+
+
+class ExternalAcceptedSyncResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: str = Field(max_length=36)
+    status: str = Field(max_length=30)
+    imported: int = Field(ge=0)
+    unchanged: int = Field(ge=0)
+    updated: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    total: int = Field(ge=0, le=10_000)
+
+class ExternalJobImportRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=8, max_length=100)
 
 
 class IntelligenceIndicatorResponse(BaseModel):
@@ -363,11 +430,86 @@ class IntelligenceRunResponse(BaseModel):
     duration_seconds: float | None = Field(default=None, ge=0)
 
 
+class PipelineRunEntityResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: str = Field(max_length=100)
+    value: str = Field(max_length=1000)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    event_id: str = Field(max_length=64)
+    record_title: str = Field(max_length=500)
+
+
+class PipelineRunIndicatorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: str = Field(max_length=50)
+    value: str = Field(max_length=2048)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    event_id: str = Field(max_length=64)
+    record_title: str = Field(max_length=500)
+
+
+class PipelineRunCorrelationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_event_id: str = Field(max_length=64)
+    target_event_id: str = Field(max_length=64)
+    type: str = Field(max_length=50)
+    score: float = Field(ge=0, le=1)
+    explanation: str = Field(max_length=500)
+
+
+class PipelineRunResultsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    run_id: str = Field(max_length=36)
+    status: str = Field(max_length=30)
+    imported_documents: int = Field(ge=0)
+    processed_documents: int = Field(ge=0)
+    entity_count: int = Field(ge=0)
+    indicator_count: int = Field(ge=0)
+    correlation_count: int = Field(ge=0)
+    review_count: int = Field(ge=0)
+    rejected_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    error_count: int = Field(ge=0)
+    entities: list[PipelineRunEntityResponse] = Field(max_length=200)
+    indicators: list[PipelineRunIndicatorResponse] = Field(max_length=200)
+    correlations: list[PipelineRunCorrelationResponse] = Field(max_length=200)
+
+
+class AcceptedRecordSummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    id: str = Field(max_length=64)
+    title: str = Field(max_length=500)
+    source: str = Field(max_length=200)
+    source_type: str = Field(max_length=50)
+    category: str | None = Field(default=None, max_length=80)
+    summary: str = Field(max_length=1000)
+    published: str | None = Field(default=None, max_length=40)
+    collected_at: str | None = Field(default=None, max_length=40)
+    accepted_at: str = Field(max_length=40)
+    processing_state: str = Field(max_length=30)
+    classification: str | None = Field(default=None, max_length=50)
+    privacy_status: str | None = Field(default=None, max_length=40)
+    entity_count: int = Field(ge=0)
+    indicator_count: int = Field(ge=0)
+    correlation_count: int = Field(ge=0)
+
+
+class AcceptedRecordDetailResponse(AcceptedRecordSummaryResponse):
+    content: str = Field(max_length=20000)
+    entities: list[PipelineRunEntityResponse] = Field(max_length=200)
+    indicators: list[PipelineRunIndicatorResponse] = Field(max_length=200)
+    correlations: list[PipelineRunCorrelationResponse] = Field(max_length=200)
+
+
 class IntelligencePageMeta(BaseModel):
     model_config = ConfigDict(extra="forbid")
     total: int = Field(ge=0)
     limit: int = Field(ge=1, le=100)
     offset: int = Field(ge=0)
+
+
+class AcceptedRecordPageResponse(IntelligencePageMeta):
+    items: list[AcceptedRecordSummaryResponse]
 
 
 class IntelligenceCorrelationPageResponse(IntelligencePageMeta):

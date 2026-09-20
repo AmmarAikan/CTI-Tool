@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import secrets
 import json
+from contextlib import asynccontextmanager
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
@@ -61,19 +62,25 @@ from backend.app.pipeline.ingestion.external.integration.schemas import (
     JobStatusResponse,
     LatestExportResponse,
     LatestExportSummaryResponse,
+    AcceptedExportPageResponse,
     LatestReviewResponse,
+    ReviewDecisionBody,
+    ReviewDecisionResponse, ReviewLifecycleResponse,
     ManualPreviewApproveBody,
     ManualPreviewRejectBody,
     ManualPreviewRejectedResponse,
     ManualPreviewRequestBody,
     ManualPreviewResponse,
     ManualURLRequestBody,
+    ManualRecheckRequestBody,
+    ManualTrackedRootsResponse,
     SourceCollectionRequestBody,
     SourceResponse,
     DarkWebWatchCreateBody, DarkWebWatchPatchBody, DarkWebWatchListResponse,
     DarkWebWatchResponse, DarkWebResultPageResponse,
     DiscoveryWatchCreateBody, DiscoveryWatchResponse, DiscoveryProviderStatusResponse,
-    DiscoveredSourceResponse, DiscoveredSourcePatchBody,
+    DiscoveredSourceResponse, DiscoveredSourcePatchBody, DiscoveredSourcePromoteBody,
+    DarkWebSchedulePatchBody, DarkWebAlertResponse, DarkWebAlertPageResponse,
 )
 
 API_PREFIX = "/api/v1/external-sources"
@@ -108,15 +115,28 @@ class AdapterServices:
     review_service: ReviewService | None = None
     manual_preview_service: ManualPreviewService | None = None
     dark_web_watch_service: DarkWebWatchService | None = None
+    dark_web_scheduler: Any | None = None
 
 
 def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> FastAPI:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        if services.dark_web_scheduler is not None: services.dark_web_scheduler.start()
+        try:
+            yield
+        finally:
+            if services.dark_web_scheduler is not None: services.dark_web_scheduler.stop()
+            shutdown=getattr(services.job_runner,"shutdown",None)
+            if callable(shutdown): shutdown(wait=True)
+
+    app_options = {"lifespan": lifespan} if services.dark_web_scheduler is not None else {}
     app = FastAPI(
         title="CTI Tool External Sources Internal API",
         version="1.0.0",
         docs_url="/docs" if docs_enabled else None,
         redoc_url=None,
         openapi_url="/openapi.json" if docs_enabled else None,
+        **app_options,
     )
     app.state.services = services
 
@@ -192,10 +212,19 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
                    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
         return _manual_job(services, current, str(body.url), body.force, idempotency_key)
 
+    @app.get(f"{API_PREFIX}/manual-sources/tracked", response_model=ManualTrackedRootsResponse)
+    def tracked_manual_sources(current: Principal = Depends(permitted("manual:create"))) -> ManualTrackedRootsResponse:
+        del current
+        return ManualTrackedRootsResponse(items=[value.safe_dict() for value in services.manual_source_service.list_tracked_roots()][:100])
+
     @app.post(f"{API_PREFIX}/manual-sources/recheck", response_model=JobStatusResponse, status_code=202)
-    def recheck_manual(body: ManualURLRequestBody, current: Principal = Depends(permitted("manual:create")),
+    def recheck_manual(body: ManualRecheckRequestBody, current: Principal = Depends(permitted("manual:create")),
                        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")) -> JobStatusResponse:
-        return _manual_job(services, current, str(body.url), True, idempotency_key, scope="recheck_url")
+        root = next((value for value in services.manual_source_service.list_tracked_roots()
+                     if value.root_id == body.root_id and value.active), None)
+        if root is None: raise APIError(404, "manual_source_not_found", "tracked manual source was not found")
+        return _manual_job(services, current, root.canonical_url, body.force, idempotency_key,
+                           scope=f"recheck:{body.root_id}", recheck=True)
 
     @app.post(f"{API_PREFIX}/manual-sources/previews", response_model=ManualPreviewResponse,
               response_model_exclude_none=True, status_code=201)
@@ -262,6 +291,17 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         try: return watches().store.set_enabled(watch_id,body.enabled)
         except WatchNotFound: raise APIError(404,"watch_not_found","watch was not found") from None
 
+    @app.get(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/schedule",response_model=DarkWebWatchResponse)
+    def get_dark_web_schedule(watch_id:str,_current:Principal=Depends(permitted("dark_web_watches:read"))):
+        try:return watches().store.get(watch_id)
+        except WatchNotFound:raise APIError(404,"watch_not_found","watch was not found") from None
+
+    @app.patch(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/schedule",response_model=DarkWebWatchResponse)
+    def patch_dark_web_schedule(watch_id:str,body:DarkWebSchedulePatchBody,_current:Principal=Depends(permitted("dark_web_watches:write"))):
+        try:return watches().store.configure_schedule(watch_id,body.enabled,body.interval_seconds)
+        except WatchNotFound:raise APIError(404,"watch_not_found","watch was not found") from None
+        except WatchValidationError:raise APIError(422,"invalid_schedule","schedule is not permitted") from None
+
     @app.post(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/scan", response_model=JobStatusResponse, status_code=202)
     def scan_dark_web_watch(watch_id: str, current: Principal = Depends(permitted("dark_web_watches:scan")), idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
         cached=_cached(services,current,f"scan_watch:{watch_id}",idempotency_key)
@@ -298,12 +338,13 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         except WatchConflict as exc: raise APIError(409,str(exc),"watch could not be created") from None
 
     @app.post(f"{API_PREFIX}/dark-web/watches/{{watch_id}}/results/{{result_id}}/promote", response_model=DiscoveredSourceResponse)
-    def promote_discovered_source(watch_id: str, result_id: str, current: Principal = Depends(permitted("dark_web_watches:write")), idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
+    def promote_discovered_source(watch_id: str, result_id: str, body: DiscoveredSourcePromoteBody, current: Principal = Depends(permitted("dark_web_watches:write")), idempotency_key: str | None = Header(default=None,alias="Idempotency-Key")):
         if not idempotency_key: raise APIError(422,"idempotency_required","an idempotency key is required")
         cached=_cached(services,current,f"promote_discovered:{watch_id}:{result_id}",idempotency_key)
         if cached: return cached
-        try: response=watches().store.promote(watch_id,result_id)
+        try: response=watches().store.promote(watch_id,result_id,body.expected_content_sha256)
         except WatchNotFound: raise APIError(404,"result_not_found","confirmed result was not found") from None
+        except WatchConflict: raise APIError(409,"stale_result_fingerprint","confirmed result changed; refresh before promotion") from None
         _remember(services,current,f"promote_discovered:{watch_id}:{result_id}",idempotency_key,response)
         return response
 
@@ -316,6 +357,19 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     def patch_discovered_source(source_id: str, body: DiscoveredSourcePatchBody, _current: Principal = Depends(permitted("dark_web_watches:write"))):
         try: return watches().store.set_discovered_enabled(source_id,body.enabled)
         except WatchNotFound: raise APIError(404,"discovered_source_not_found","discovered source was not found") from None
+
+    @app.get(f"{API_PREFIX}/dark-web/alerts",response_model=DarkWebAlertPageResponse)
+    def dark_web_alerts(watch_id:str|None=Query(None,min_length=10,max_length=40),limit:int=Query(25,ge=1,le=100),offset:int=Query(0,ge=0),_current:Principal=Depends(permitted("dark_web_watches:read"))):
+        page=watches().store.alerts(watch_id=watch_id,limit=limit,offset=offset)
+        page["items"]=[dict(item)|{"matched_keywords":json.loads(item["matched_keywords"] or "[]")} for item in page["items"]]
+        return {"schema_version":"1.0",**page}
+
+    @app.patch(f"{API_PREFIX}/dark-web/alerts/{{alert_id}}/read",response_model=DarkWebAlertResponse)
+    def mark_dark_web_alert_read(alert_id:str,_current:Principal=Depends(permitted("dark_web_watches:write"))):
+        try:
+            item=watches().store.mark_alert_read(alert_id)
+            return dict(item)|{"matched_keywords":json.loads(item["matched_keywords"] or "[]")}
+        except WatchNotFound:raise APIError(404,"alert_not_found","alert was not found") from None
 
     @app.get(f"{API_PREFIX}/sources/{{source_id}}", response_model=SourceResponse)
     def get_source(source_id: str, _current: Principal = Depends(permitted("sources:read"))) -> SourceResponse:
@@ -331,7 +385,7 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
             try: services.authorizer.require(current, "dark_web:approve")
             except AuthorizationError: raise APIError(403, "dark_web_approval_required", "dark-web source approval requires explicit authorization") from None
         value = services.source_service.request_source_enable(source_id, requested_by=current.subject)
-        if value.status not in {"pending_review", "disabled"}:
+        if value.status not in {"pending_review", "disabled", "enabled"}:
             raise APIError(409, "unsafe_source_state", "source enablement did not enter review")
         return _source(value)
 
@@ -339,6 +393,13 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     def disable_source(source_id: str, current: Principal = Depends(permitted("sources:disable"))) -> SourceResponse:
         _safe_source_id(source_id)
         return _source(services.source_service.disable_source(source_id, requested_by=current.subject))
+
+    @app.delete(f"{API_PREFIX}/sources/{{source_id}}")
+    def delete_source(source_id: str, current: Principal = Depends(permitted("sources:disable"))) -> dict[str, bool]:
+        try: services.source_service.delete_source(source_id, requested_by=current.subject)
+        except KeyError: raise APIError(404, "source_not_found", "source was not found") from None
+        except ValueError: raise APIError(409, "seeded_source", "seeded sources cannot be removed") from None
+        return {"deleted": True}
 
     @app.get(f"{API_PREFIX}/jobs/{{job_id}}", response_model=JobStatusResponse)
     def get_job(job_id: str, _current: Principal = Depends(permitted("jobs:read"))) -> JobStatusResponse:
@@ -391,6 +452,20 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         allowed = {key: value[key] for key in LatestExportSummaryResponse.model_fields if key in value}
         return LatestExportSummaryResponse.model_validate(allowed)
 
+    @app.get(f"{API_PREFIX}/exports/accepted", response_model=AcceptedExportPageResponse)
+    def accepted_exports(limit: int = Query(default=100, ge=1, le=250),
+                         offset: int = Query(default=0, ge=0),
+                         run_id: str | None = Query(default=None, min_length=8, max_length=200),
+                         _current: Principal = Depends(permitted("exports:read"))) -> AcceptedExportPageResponse:
+        reader = getattr(services.job_service, "export_reader", None)
+        if reader is None or not hasattr(reader, "historical_accepted"):
+            raise APIError(503, "export_unavailable", "accepted export synchronization is unavailable")
+        try: value = (reader.run_accepted(run_id, limit=limit, offset=offset) if run_id
+                      else reader.historical_accepted(limit=limit, offset=offset))
+        except ValueError: raise APIError(409, "export_too_large", "accepted export exceeds synchronization bounds") from None
+        if value is None: raise APIError(404, "export_not_found", "no validated export is available")
+        return AcceptedExportPageResponse.model_validate(value)
+
     @app.get(f"{API_PREFIX}/reviews/latest", response_model=LatestReviewResponse, responses={
         404: {"model": IntegrationErrorResponse, "description": "No validated External Sources review artifact is available."},
         503: {"model": IntegrationErrorResponse, "description": "The review read adapter is not configured."},
@@ -401,6 +476,29 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         value = services.review_service.latest()
         if value is None: raise APIError(404, "review_not_found", "no validated review artifact is available")
         return LatestReviewResponse.model_validate(value)
+
+    @app.get(f"{API_PREFIX}/reviews/lifecycle", response_model=ReviewLifecycleResponse)
+    def review_lifecycle(_current: Principal = Depends(permitted("reviews:read"))) -> ReviewLifecycleResponse:
+        if services.review_service is None or not hasattr(services.review_service, "lifecycle"):
+            raise APIError(503, "review_unavailable", "review lifecycle operation is unavailable")
+        return ReviewLifecycleResponse.model_validate(services.review_service.lifecycle())
+
+    @app.post(f"{API_PREFIX}/reviews/{{record_id}}/decision", response_model=ReviewDecisionResponse)
+    def decide_review(record_id: str, body: ReviewDecisionBody,
+                      current: Principal = Depends(permitted("reviews:decide"))) -> ReviewDecisionResponse:
+        if services.review_service is None:
+            raise APIError(503, "review_unavailable", "review decision operation is unavailable")
+        try:
+            value = services.review_service.decide(record_id, body.expected_content_sha256,
+                                                   body.decision, body.reason, requested_by=current.subject)
+        except KeyError: raise APIError(404, "review_not_found", "review record was not found") from None
+        except ValueError: raise APIError(422, "invalid_review_decision", "review decision is invalid") from None
+        except RuntimeError as exc:
+            code = str(exc) if str(exc) in {"review_already_decided", "review_content_changed"} else "review_conflict"
+            raise APIError(409, code, "review could not be decided because its state changed") from None
+        if value.get("processing_state") == "processing_failed":
+            raise APIError(503, "review_processing_failed", "review decision was saved but processing must be retried", retryable=True)
+        return ReviewDecisionResponse.model_validate(value)
 
     if docs_enabled:
         def secured_openapi() -> dict[str, Any]:
@@ -425,13 +523,13 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
     return app
 
 
-def _manual_job(services: AdapterServices, principal: Principal, url: str, force: bool, key: str | None, *, scope: str = "add_manual_source") -> JobStatusResponse:
+def _manual_job(services: AdapterServices, principal: Principal, url: str, force: bool, key: str | None, *, scope: str = "add_manual_source", recheck: bool = False) -> JobStatusResponse:
     cached = _cached(services, principal, scope, key)
     if cached: return JobStatusResponse.model_validate(cached)
     try: url = services.manual_source_service.validate_url(url)
     except Exception: raise APIError(422, "url_policy_rejected", "URL was rejected by source security policy") from None
     command_id = _id("cmd")
-    service_operation = (lambda: services.manual_source_service.recheck_url(url, requested_by=principal.subject, force=True)) if force else (lambda: services.manual_source_service.add_manual_source(url, requested_by=principal.subject))
+    service_operation = (lambda: services.manual_source_service.recheck_url(url, requested_by=principal.subject, force=force)) if recheck else (lambda: services.manual_source_service.add_manual_source(url, requested_by=principal.subject))
     operation = lambda: _require_successful_business_result(service_operation())
     job = services.job_runner.submit(command_id, operation)
     response = _queued(job.job_id, command_id)

@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from copy import deepcopy
+import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.parse import urlsplit
+from urllib.parse import urljoin
+from bs4 import BeautifulSoup
 
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_json, sha256_text
@@ -17,9 +20,13 @@ from backend.app.pipeline.ingestion.external.crawler.web_crawler import EXTRACTI
 from backend.app.pipeline.ingestion.external.crawler.page_type_detector import PAGE_DETECTION_IMPLEMENTATION_VERSION
 from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy, URLPolicyError
 from backend.app.pipeline.ingestion.external.manual_source.url_router import ManualURLRouter, URLRoute
+from backend.app.pipeline.ingestion.external.manual_source.json_ingestion import (
+    JSONFieldMapping, JSONIngestionError, adapt_records, approved_json_media_type, parse_document,
+)
 from backend.app.pipeline.ingestion.external.preprocessing.content_processor import ExternalContentProcessor
 from backend.app.pipeline.ingestion.external.preprocessing.text_preprocessor import TextPreprocessor
 from backend.app.pipeline.ingestion.external.privacy.privacy_filter import PrivacyFilter
+from backend.app.pipeline.ingestion.external.rss_connector import RSSConnector
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[6]
@@ -50,9 +57,15 @@ class ManualTrackedRoot:
     canonical_url: str = field(repr=False)
     active: bool = True
     origin: str = "explicit"
+    method: str = "web"
+    last_checked: str | None = None
 
     def safe_dict(self) -> dict[str, Any]:
-        return {"root_id": self.root_id, "active": self.active, "origin": self.origin}
+        host = (urlsplit(self.canonical_url).hostname or "").lower()
+        reference = ("onion-ref:" + hashlib.sha256(host.encode()).hexdigest()[:16]
+                     if host.endswith(".onion") else host[:200])
+        return {"root_id": self.root_id, "label": reference, "method": self.method,
+                "last_checked": self.last_checked, "active": self.active, "origin": self.origin}
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,7 +173,8 @@ class CanonicalManualSourceService(ManualSourceService):
             raise URLPolicyError("URL preview failed safely")
         route = self.router.route(validated.canonical_url)
         state = memory.load()
-        page_type = route.kind if route.kind != "generic_web" else (
+        transport = state.get("urls", {}).get(validated.canonical_url, {}).get("transport")
+        page_type = "json_collection" if state.get("json_mappings") else "discovered_rss_atom" if transport == "discovered_feed" else route.kind if route.kind != "generic_web" else (
             "listing" if state.get("urls", {}).get(validated.canonical_url, {}).get("known_sub_links") is not None else "article"
         )
         return ManualPreviewBundle(validated.canonical_url, page_type, tuple(captured), state, result)
@@ -171,20 +185,23 @@ class CanonicalManualSourceService(ManualSourceService):
         state.setdefault("urls", {}); state.setdefault("items", {}); state.setdefault("sources", {})
         self._migrate_tracked_roots(state)
         self._register_tracked_root(state, bundle.canonical_url)
-        for key in ("urls", "items", "sources"):
-            incoming = bundle.state.get(key, {})
-            if isinstance(incoming, dict): state[key].update(deepcopy(incoming))
-        for item, disposition in bundle.items:
-            self.record_sink(item, disposition)
+        # Approval registers a managed source.  The frozen preview is evidence for
+        # that decision, not a collection run, so do not checkpoint or export its
+        # advisory records here.  Preserve only the approved detector/mapping
+        # contract needed by the source's first explicit run.
+        incoming_mappings = bundle.state.get("json_mappings", {})
+        if isinstance(incoming_mappings, dict):
+            state.setdefault("json_mappings", {}).update(deepcopy(incoming_mappings))
+        root_id = self._root_id(bundle.canonical_url)
+        root = state["tracked_roots"][root_id]
+        root["method"] = bundle.page_type
+        root["approved_content_sha256"] = sha256_json(
+            [item.content_hash for item, _disposition in bundle.items]
+        )
         self.state_manager.save(state)
-        accepted = sum(disposition == "accepted" for _, disposition in bundle.items)
-        review = sum(disposition == "review" for _, disposition in bundle.items)
-        rejected = sum(disposition == "rejected" for _, disposition in bundle.items)
         return ManualSourceResult(
-            "stored" if accepted else ("review_required" if review else "ignored"),
-            "frozen manual preview committed", records_created=len(bundle.items),
-            canonical_url=bundle.canonical_url, accepted_records=accepted,
-            review_records=review, rejected_records=rejected,
+            "registered", "manual source registered; collection was not started",
+            canonical_url=bundle.canonical_url,
         )
 
     def list_tracked_roots(self) -> tuple[ManualTrackedRoot, ...]:
@@ -198,12 +215,29 @@ class CanonicalManualSourceService(ManualSourceService):
         result = []
         for root_id in sorted(roots):
             value = roots[root_id]
-            if not isinstance(value, dict) or value.get("active") is not True:
+            if not isinstance(value, dict) or value.get("removed_at"):
                 continue
             canonical = value.get("canonical_url")
             if isinstance(canonical, str) and canonical:
-                result.append(ManualTrackedRoot(root_id, canonical, True, str(value.get("origin") or "legacy_inferred")))
+                url_state = state.get("urls", {}).get(canonical, {}) if isinstance(state.get("urls"), dict) else {}
+                route = self.router.route(canonical)
+                result.append(ManualTrackedRoot(root_id, canonical, value.get("active") is True,
+                    str(value.get("origin") or "legacy_inferred"), str(value.get("method") or route.kind),
+                    str(url_state.get("last_checked")) if isinstance(url_state, dict) and url_state.get("last_checked") else None))
         return tuple(result)
+
+    def set_tracked_root_enabled(self, root_id: str, enabled: bool) -> ManualTrackedRoot:
+        state = deepcopy(self.state_manager.load()); self._migrate_tracked_roots(state)
+        root = state.get("tracked_roots", {}).get(root_id)
+        if not isinstance(root, dict) or root.get("removed_at"): raise KeyError(root_id)
+        root["active"] = enabled; root["updated_at"] = self._now(); self.state_manager.save(state)
+        return next(value for value in self.list_tracked_roots() if value.root_id == root_id)
+
+    def remove_tracked_root(self, root_id: str) -> None:
+        state = deepcopy(self.state_manager.load()); self._migrate_tracked_roots(state)
+        root = state.get("tracked_roots", {}).get(root_id)
+        if not isinstance(root, dict) or root.get("removed_at"): raise KeyError(root_id)
+        root["active"] = False; root["removed_at"] = self._now(); self.state_manager.save(state)
 
     def validate_url(self, url: str) -> str:
         return self.policy.validate(url).canonical_url
@@ -251,9 +285,20 @@ class CanonicalManualSourceService(ManualSourceService):
             return ManualSourceResult("unchanged", "source has not changed", canonical_url=canonical, skipped_records=1)
         if crawl.status != "success":
             media_type = str(crawl.response_metadata.get("content_type") or "").split(";", 1)[0].lower()
+            if approved_json_media_type({"Content-Type": media_type}) and crawl.response_body:
+                return self._run_json(canonical, crawl, state)
             if media_type in {"application/rss+xml", "application/atom+xml", "application/xml", "text/xml"}:
-                return self._run_adapter(URLRoute("rss"), canonical, state)
+                routed = self.router.route(canonical, detected_feed=True)
+                if routed.source_id or type(self.adapters.get("rss")).__name__ != "RegisteredConnectorManualAdapter":
+                    return self._run_adapter(routed, canonical, state)
+                return self._run_discovered_feed(canonical, state)
             return ManualSourceResult("error", "URL collection failed safely", canonical_url=canonical, error_count=1)
+        advertised = self._advertised_feed(canonical, crawl.response_body)
+        if advertised is not None:
+            routed = self.router.route(advertised, detected_feed=True)
+            if routed.source_id or type(self.adapters.get("rss")).__name__ != "RegisteredConnectorManualAdapter":
+                return self._run_adapter(routed, advertised, state)
+            return self._run_discovered_feed(advertised, state, parent_url=canonical)
         if crawl.page_type == "listing": return self._process_listing(canonical, crawl, state, stage_fingerprint)
         item, disposition, changed = self._process_article(canonical, crawl, state, stage_fingerprint)
         if item is None:
@@ -263,6 +308,122 @@ class CanonicalManualSourceService(ManualSourceService):
         return ManualSourceResult(status, "manual URL processed", int(changed == "created"), int(changed == "updated"), canonical,
             accepted_records=int(disposition == "accepted"), review_records=int(disposition == "review"),
             rejected_records=int(disposition == "rejected"))
+
+    def _run_discovered_feed(self, canonical: str, state: dict[str, Any], *, parent_url: str | None = None) -> ManualSourceResult:
+        try:
+            feed_url = self.policy.validate(canonical, allow_onion=False).canonical_url
+            connector = RSSConnector(feed_url, source_name=urlsplit(feed_url).hostname or "Discovered feed",
+                source_id="manual-feed-" + sha256_text(feed_url).split(":", 1)[1][:20], max_items=100,
+                http_client=self.crawler.http_client, crawler=self.crawler,
+                content_processor=self.content_processor, state=state)
+            outcome = connector.collect_result()
+        except Exception:
+            return ManualSourceResult("error", "advertised feed was unavailable", canonical_url=canonical, error_count=1)
+        result = self._run_adapter_result(outcome, feed_url, state, "discovered_feed")
+        if parent_url and parent_url != feed_url:
+            state.setdefault("urls", {}).setdefault(parent_url, {}).update({"last_checked": self._now(), "transport": "discovered_feed"})
+            self.state_manager.save(state)
+        return result
+
+    def _run_adapter_result(self, outcome: Any, canonical: str, state: dict[str, Any], method: str) -> ManualSourceResult:
+        accepted, review = tuple(getattr(outcome, "accepted_items", ())), tuple(getattr(outcome, "review_items", ()))
+        errors, skipped = len(getattr(outcome, "errors", ())), int(getattr(outcome, "skipped_items", 0))
+        created = updated = 0
+        for item, disposition in [*((value, "accepted") for value in accepted), *((value, "review") for value in review)]:
+            existed = item.record_id in state.setdefault("items", {})
+            self.record_sink(item, disposition); state["items"].setdefault(item.record_id, {})["record_hash"] = self._record_hash(item)
+            created += int(not existed); updated += int(existed)
+        state.setdefault("urls", {}).setdefault(canonical, {}).update({"last_checked": self._now(), "transport": method})
+        self.state_manager.save(state)
+        handled = len(accepted) + len(review) + skipped
+        status = "partial" if errors and handled else "error" if errors else "unchanged" if skipped and not (accepted or review) else "stored"
+        return ManualSourceResult(status, "advertised structured feed processed", created, updated, canonical,
+            accepted_records=len(accepted), review_records=len(review), skipped_records=skipped, error_count=errors)
+
+    def _advertised_feed(self, base_url: str, body: bytes) -> str | None:
+        if not body: return None
+        try: soup = BeautifulSoup(body, "html.parser")
+        except Exception: return None
+        for link in soup.find_all("link", href=True, limit=20):
+            rel = {str(value).lower() for value in link.get("rel", ())}
+            media = str(link.get("type") or "").split(";", 1)[0].lower()
+            if "alternate" not in rel or media not in {"application/rss+xml", "application/atom+xml"}: continue
+            try: return self.policy.validate(urljoin(base_url, str(link["href"])), allow_onion=False).canonical_url
+            except URLPolicyError: continue
+        return None
+
+    def _run_json(self, canonical: str, crawl: CrawlResult, state: dict[str, Any]) -> ManualSourceResult:
+        mappings = state.setdefault("json_mappings", {})
+        mapping_key = sha256_text(canonical)
+        try:
+            saved = mappings.get(mapping_key)
+            mapping = JSONFieldMapping.from_dict(saved["mapping"]) if isinstance(saved, dict) else None
+            document = parse_document(
+                crawl.response_body,
+                {"Content-Type": str(crawl.response_metadata.get("content_type") or "")},
+                max_bytes=getattr(getattr(self.crawler, "http_client", None), "settings", None).max_response_bytes
+                if getattr(getattr(self.crawler, "http_client", None), "settings", None) else 5 * 1024 * 1024,
+                mapping=mapping,
+            )
+        except JSONIngestionError:
+            return ManualSourceResult("error", "JSON source could not be validated safely", canonical_url=canonical, error_count=1)
+        mappings[mapping_key] = {
+            "mapping": document.mapping.to_dict(), "schema_hash": sha256_json(document.mapping.to_dict()),
+            "content_hash": document.content_hash,
+        }
+        accepted = review = rejected = skipped = errors = created = updated = 0
+        for raw, failure in adapt_records(document, document_url=canonical):
+            if failure or raw is None:
+                errors += 1
+                continue
+            link = raw.link
+            if link:
+                try: link = self.policy.validate(link, allow_onion=False).canonical_url
+                except URLPolicyError:
+                    errors += 1
+                    continue
+            processed = self.content_processor.process(raw.content)
+            summary = self.content_processor.process(raw.summary).export_content if raw.summary else ""
+            observed_at = self._now()
+            identity_material = canonical + "\n" + raw.identity
+            record_id = f"manual-json-{sha256_text(identity_material).split(':', 1)[1][:32]}"
+            item = ExternalCTIItem(
+                record_id=record_id, source_item_id=raw.identity,
+                source=document.mapping.fixed_source or (urlsplit(canonical).hostname or "Manual JSON"),
+                source_type="manual_json", category=document.mapping.fixed_category or "manual",
+                title=raw.title, link=link or canonical, content=processed.export_content,
+                summary=summary, published=raw.published, updated_at=raw.updated,
+                collected_at=observed_at, content_hash=sha256_text(processed.export_content), tags=raw.tags,
+                metadata={**raw.metadata, **processed.metadata},
+            )
+            classified = self.classification_service.classify_item(item)
+            final, disposition = classified.item, classified.disposition
+            if processed.review_required or not processed.export_content: disposition = "review"
+            previous = state.setdefault("items", {}).get(record_id, {}).get("record_hash")
+            stable = final.to_dict(); stable.pop("collected_at", None)
+            record_hash = sha256_json(stable)
+            state["items"].setdefault(record_id, {}).update({
+                "record_hash": record_hash, "last_checked": observed_at,
+                "active": disposition == "accepted", "json_mapping_hash": raw.metadata["json_mapping_hash"],
+            })
+            if previous == record_hash:
+                skipped += 1
+                continue
+            self.record_sink(final, disposition)
+            created += int(previous is None); updated += int(previous is not None)
+            accepted += int(disposition == "accepted")
+            review += int(disposition == "review")
+            rejected += int(disposition == "rejected")
+        state.setdefault("urls", {}).setdefault(canonical, {}).update({
+            "raw_content_hash": document.content_hash, "last_checked": self._now(),
+            "json_mapping_hash": sha256_json(document.mapping.to_dict()),
+        })
+        self.state_manager.save(state)
+        status = "partial" if errors and (accepted or review or rejected or skipped) else "error" if errors else "stored"
+        if not (accepted or review or rejected or errors) and skipped: status = "unchanged"
+        return ManualSourceResult(status, "JSON collection processed safely", created, updated, canonical,
+                                  accepted_records=accepted, review_records=review, rejected_records=rejected,
+                                  skipped_records=skipped, error_count=errors)
 
     def _process_listing(self, canonical: str, crawl: CrawlResult, state: dict[str, Any], fingerprint: str) -> ManualSourceResult:
         host = (urlsplit(canonical).hostname or "").lower()

@@ -19,6 +19,7 @@ from backend.app.pipeline.ingestion.external.application.manual_source_service i
 )
 from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
+from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlError, CrawlResult
 from backend.app.pipeline.ingestion.external.manual_source.url_policy import ManualURLPolicy
 from tests.external_sources.integration.test_manual_source_service import AcceptClassification, FakeCrawler, PUBLIC, crawl
 
@@ -69,7 +70,7 @@ class ManualPreviewWorkflowTests(unittest.TestCase):
                     calls_before = len(crawler.calls)
                     claimed = service.claim_approval(value["preview_id"], value["content_sha256"])
                     service.approve_claimed(claimed, requested_by="analyst")
-                    self.assertEqual(len(stored), count)
+                    self.assertEqual(len(stored), 0)
                     self.assertEqual(len(crawler.calls), calls_before)
 
     def test_single_empty_and_sensitive_item_previews_are_safe(self):
@@ -106,15 +107,57 @@ class ManualPreviewWorkflowTests(unittest.TestCase):
             database = root / "manual_previews.sqlite3"
             self.assertEqual(stat.S_IMODE(database.stat().st_mode), 0o600)
 
-    def test_approve_commits_frozen_content_without_refetch_and_prevents_replay(self):
+    def test_approve_registers_source_without_collection_and_prevents_replay(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); service, crawler, production, stored = self.build(root)
             value = service.create(URL, requested_by="analyst")
             claimed = service.claim_approval(value["preview_id"], value["content_sha256"])
             result = service.approve_claimed(claimed, requested_by="analyst")
-            self.assertEqual(len(crawler.calls), 1); self.assertEqual(result.accepted_records, 1)
-            self.assertTrue(production.path.exists()); self.assertEqual(len(stored), 1)
+            self.assertEqual(len(crawler.calls), 1); self.assertEqual(result.status, "registered")
+            self.assertEqual(result.accepted_records, 0)
+            self.assertTrue(production.path.exists()); self.assertEqual(len(stored), 0)
+            self.assertEqual(len(service.manual.list_tracked_roots()), 1)
             with self.assertRaises(PreviewConsumed): service.claim_approval(value["preview_id"], value["content_sha256"])
+
+    def test_json_collection_preview_is_sanitized_and_approval_persists_mapping_without_refetch(self):
+        body = json.dumps({"posts": [
+            {"id": "one", "title": "First advisory", "content": "security advisory " * 20},
+            {"id": "two", "title": "Second advisory", "content": "threat intelligence " * 20},
+            {"id": "bad", "title": "Missing content", "secret": "must-not-appear"},
+        ]}).encode()
+        response = CrawlResult(URL, URL, "error", response_metadata={"content_type": "application/json"},
+                               errors=(CrawlError("unsupported_content_type", "safe"),), response_body=body)
+        with tempfile.TemporaryDirectory() as folder:
+            service, crawler, production, stored = self.build(Path(folder), crawler=FakeCrawler([response]))
+            value = service.create(URL, requested_by="analyst")
+            self.assertEqual(value["detected_type"], "json_collection")
+            self.assertEqual(value["collection_path"], ["posts"])
+            self.assertTrue(value["approval_required"])
+            self.assertEqual(value["counts"], {"items": 2, "accepted": 2, "review": 0, "rejected": 0, "skipped": 0, "errors": 1})
+            self.assertNotIn("must-not-appear", str(value))
+            claimed = service.claim_approval(value["preview_id"], value["content_sha256"])
+            service.approve_claimed(claimed, requested_by="analyst")
+            self.assertEqual(len(crawler.calls), 1)
+            self.assertEqual(len(stored), 0)
+            state = production.load()
+            self.assertEqual(next(iter(state["json_mappings"].values()))["mapping"]["collection_path"], ["posts"])
+
+    def test_json_recheck_uses_approved_mapping_and_detects_schema_change(self):
+        first_body = json.dumps({"posts": [{"id": "one", "title": "Advisory", "content": "security advisory " * 20}]}).encode()
+        changed_body = json.dumps({"items": [{"id": "one", "title": "Advisory", "content": "changed"}]}).encode()
+        def response(body):
+            return CrawlResult(URL, URL, "error", response_metadata={"content_type": "application/json"},
+                               errors=(CrawlError("unsupported_content_type", "safe"),), response_body=body)
+        with tempfile.TemporaryDirectory() as folder:
+            service, crawler, _production, _stored = self.build(
+                Path(folder), crawler=FakeCrawler([response(first_body), response(first_body), response(changed_body)]))
+            preview = service.create(URL, requested_by="analyst")
+            service.approve_claimed(service.claim_approval(preview["preview_id"], preview["content_sha256"]), requested_by="analyst")
+            unchanged = service.manual.recheck_url(URL, requested_by="analyst", force=True)
+            schema_changed = service.manual.recheck_url(URL, requested_by="analyst", force=True)
+            self.assertEqual((unchanged.status, unchanged.accepted_records), ("stored", 1))
+            self.assertEqual((schema_changed.status, schema_changed.error_count), ("error", 1))
+            self.assertEqual(len(crawler.calls), 3)
 
     def test_reject_hash_mismatch_expiry_and_atomic_decision(self):
         current = [NOW]

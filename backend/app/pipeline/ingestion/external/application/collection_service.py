@@ -75,6 +75,7 @@ class SourceExecutionResult:
     failure_category: str | None = None
     retryable: bool = False
     collection_method: str | None = None
+    failure_categories: dict[str, int] = field(default_factory=dict)
 
 
 class SourceExecutor(Protocol):
@@ -113,9 +114,11 @@ class CanonicalCollectionService(CollectionService):
 
     def __init__(self, runner: CollectionJobRunner, registry: dict[str, RegisteredSource], executor: SourceExecutor,
                  exporter: CollectionExportCoordinator | None = None, manual_service: ManualSourceService | None = None,
-                 all_enabled_lock: threading.Lock | None = None) -> None:
+                 all_enabled_lock: threading.Lock | None = None,
+                 dynamic_source: Callable[[str],RegisteredSource|None] | None=None) -> None:
         self.runner, self.registry, self.executor, self.exporter = runner, dict(registry), executor, exporter
         self.manual_service = manual_service
+        self.dynamic_source=dynamic_source
         self.all_enabled_lock = all_enabled_lock or threading.Lock()
 
     def start_collection(self, request: CollectionRequest) -> JobAccepted:
@@ -153,7 +156,7 @@ class CanonicalCollectionService(CollectionService):
         try:
             for source_id in source_ids:
                 if cancellation.is_set(): cancelled = True; break
-                try: result = self.executor.execute(self.registry[source_id], force=force, command_id=command_id)
+                try: result = self.executor.execute(self._source(source_id), force=force, command_id=command_id)
                 except Exception:
                     result = SourceExecutionResult(source_id, "failed", error_count=1, errors=("source_execution_failed",))
                 registered.append(result)
@@ -164,6 +167,7 @@ class CanonicalCollectionService(CollectionService):
             if roots and self.exporter is not None and hasattr(self.exporter, "begin_manual_capture"):
                 self.exporter.begin_manual_capture(); capture_started = True
             for root in roots:
+                if not root.active: continue
                 if cancellation.is_set(): cancelled = True; break
                 try:
                     outcome = self.manual_service.recheck_url(root.canonical_url,
@@ -225,11 +229,22 @@ class CanonicalCollectionService(CollectionService):
             "sources": {value.source_id: {"status": value.status, "accepted_records": value.accepted_records,
                 "review_records": value.review_records, "rejected_records": value.rejected_records,
                 "skipped_records": value.skipped_records, "error_count": value.error_count,
-                **({"collection_method": value.collection_method} if value.collection_method else {})} for value in registered},
+                **({"collection_method": value.collection_method} if value.collection_method else {}),
+                **({"failure_categories": value.failure_categories} if value.failure_categories else {})} for value in registered},
             "manual_sources": manual,
         }
 
     def collect_source(self, source_id: str, *, requested_by: str, force: bool = False) -> JobAccepted:
+        if self.manual_service is not None:
+            root = next((value for value in self.manual_service.list_tracked_roots()
+                         if value.root_id == source_id), None)
+            if root is not None:
+                if not root.active: raise DisabledSourceError(source_id)
+                command_id = f"cmd-{secrets.token_hex(12)}"
+                job = self.runner.submit(command_id, lambda: self.manual_service.recheck_url(
+                    root.canonical_url, requested_by=requested_by, force=force),
+                    safe_context={"source_id": source_id})
+                return JobAccepted(job.job_id, command_id=command_id)
         del requested_by
         source_ids = self._validated_ids((source_id,))
         command_id = f"cmd-{secrets.token_hex(12)}"
@@ -249,6 +264,7 @@ class CanonicalCollectionService(CollectionService):
             if source_id.lower() in {"manual", "manual-url", "manual_url", "manual-sources"}:
                 raise ManualSourceCommandError("manual URLs require the manual-source operation")
             source = self.registry.get(source_id)
+            if source is None and self.dynamic_source is not None:source=self.dynamic_source(source_id)
             if source is None:
                 raise UnknownSourceError(source_id)
             if not source.enabled:
@@ -256,7 +272,7 @@ class CanonicalCollectionService(CollectionService):
         return source_ids
 
     def _run(self, source_ids: tuple[str, ...], *, force: bool, command_id: str, run_id: str, started_at: str) -> dict[str, Any]:
-        results = tuple(self.executor.execute(self.registry[source_id], force=force, command_id=command_id) for source_id in source_ids)
+        results = tuple(self.executor.execute(self._source(source_id), force=force, command_id=command_id) for source_id in source_ids)
         failed = sum(result.status == "failed" for result in results)
         overall = "failed" if failed == len(results) else "partial" if failed else "completed"
         aggregate = {
@@ -269,7 +285,8 @@ class CanonicalCollectionService(CollectionService):
             "error_count": sum(result.error_count for result in results),
             "sources": {result.source_id: {"status": result.status, "accepted_records": result.accepted_records,
                                             "review_records": result.review_records, "error_count": result.error_count,
-                                            **({"collection_method": result.collection_method} if result.collection_method else {})}
+                                            **({"collection_method": result.collection_method} if result.collection_method else {}),
+                                            **({"failure_categories": result.failure_categories} if result.failure_categories else {})}
                         for result in results},
             "force": force,
             "run_id": run_id,
@@ -288,3 +305,9 @@ class CanonicalCollectionService(CollectionService):
                 aggregate["export"] = {"status": "failed", "error": {"code": "export_failed",
                     "message": "collection completed but export generation failed safely", "retryable": True, "details": {}}}
         return aggregate
+
+    def _source(self,source_id:str)->RegisteredSource:
+        source=self.registry.get(source_id)
+        if source is None and self.dynamic_source is not None:source=self.dynamic_source(source_id)
+        if source is None:raise UnknownSourceError(source_id)
+        return source

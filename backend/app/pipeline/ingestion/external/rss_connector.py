@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import feedparser
+import requests
 
 from backend.app.pipeline.common.cti_schema import RawRecord
 from backend.app.pipeline.ingestion.base_connector import ExternalConnector
@@ -99,6 +100,11 @@ class RSSConnector(ExternalConnector):
         feed_state = self.state["sources"].setdefault(self.source.source_id, {})
         try:
             response = self.http_client.get(self.source.url, etag=feed_state.get("etag"), last_modified=feed_state.get("last_modified"))
+        except requests.HTTPError as exc:
+            status = exc.response.status_code if exc.response is not None else 0
+            retryable = status == 429 or status >= 500
+            result.status = "failed"; result.errors.append(RSSCollectionError(self.source.source_id, "feed_request_failed", retryable))
+            feed_state.update({"last_checked": checked_at, "last_status": "failed"}); return result
         except Exception:
             result.status = "failed"; result.errors.append(RSSCollectionError(self.source.source_id, "feed_request_failed", True))
             feed_state.update({"last_checked": checked_at, "last_status": "failed"}); return result

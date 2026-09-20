@@ -88,6 +88,8 @@ class AcceptedStructuredAdapter:
 
 
 class LocalManualSourceJobTests(unittest.TestCase):
+    def _client(self,app):
+        client=TestClient(app);self.addCleanup(client.close);return client
     @staticmethod
     def _wait(client: TestClient, job_id: str, headers: dict[str, str]) -> dict:
         deadline = time.monotonic() + 5
@@ -106,23 +108,27 @@ class LocalManualSourceJobTests(unittest.TestCase):
                 dark_web_config_path=root / "missing-dark-web.json",
                 manual_policy=ManualURLPolicy(resolver=PUBLIC), manual_crawler=crawler,
                 manual_classification_service=classification, manual_state_path=root / "state" / "manual_sources.json",
+                state_directory=root / "state",
                 processed_directory=root / "processed", review_directory=root / "review", log_path=root / "logs" / "cti_tool.log",
                 exports_directory=root / "exports", export_state_path=root / "state" / "exports.json",
                 manual_checkpoint_path=root / "state" / "manual_checkpoints.json",
                 manual_adapters=adapters,
             )
+        self.addCleanup(self._close,app,root)
         return app
 
     def _submit(self, client: TestClient, *, recheck: bool = False) -> dict:
         endpoint = f"{API_PREFIX}/manual-sources/recheck" if recheck else f"{API_PREFIX}/manual-sources"
         headers = {"Authorization": "Bearer manual-test-token"}
-        accepted = client.post(endpoint, json={"url": URL}, headers=headers)
+        payload = ({"root_id": client.get(f"{API_PREFIX}/manual-sources/tracked", headers=headers).json()["items"][0]["root_id"], "force": False}
+                   if recheck else {"url": URL})
+        accepted = client.post(endpoint, json=payload, headers=headers)
         self.assertEqual((accepted.status_code, accepted.json()["state"]), (202, "queued"))
         return self._wait(client, accepted.json()["job_id"], headers)
 
     def test_new_manual_url_is_stored_by_canonical_workflow(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE)]), AcceptClassification()); client = TestClient(app)
+            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE)]), AcceptClassification()); client = self._client(app)
             terminal = self._submit(client)
             self.assertEqual((terminal["state"], terminal["result"]["status"], terminal["result"]["records_created"]), ("completed", "stored", 1))
             self.assertTrue((root / "state" / "manual_sources.json").is_file())
@@ -139,8 +145,8 @@ class LocalManualSourceJobTests(unittest.TestCase):
 
     def test_preview_is_non_persistent_until_frozen_approval_exports_it(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE)]), AcceptClassification())
-            client = TestClient(app); headers = {"Authorization": "Bearer manual-test-token"}
+            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE),successful_crawl(CONTENT_ONE)]), AcceptClassification())
+            client = self._client(app); headers = {"Authorization": "Bearer manual-test-token"}
             preview = client.post(f"{API_PREFIX}/manual-sources/previews", json={"url": URL}, headers=headers)
             self.assertEqual((preview.status_code, preview.json()["state"]), (201, "pending"))
             self.assertFalse((root / "state" / "manual_sources.json").exists())
@@ -151,15 +157,17 @@ class LocalManualSourceJobTests(unittest.TestCase):
                 headers={**headers, "Idempotency-Key": "approve-preview-once"},
             )
             terminal = self._wait(client, approved.json()["job_id"], headers)
-            self.assertEqual((approved.status_code, terminal["state"]), (202, "completed"))
-            self.assertEqual(terminal["result"]["accepted_records"], 1)
+            self.assertEqual((approved.status_code, terminal["state"],terminal["result"]["status"]), (202, "completed","registered"))
+            self.assertEqual(terminal["result"]["accepted_records"],0)
+            terminal=self._submit(client,recheck=True)
+            self.assertEqual(terminal["result"]["accepted_records"],1)
             self.assertEqual(client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()["accepted_records"], 1)
             self._close(app, root)
 
     def test_unchanged_manual_url_completes_as_unchanged(self):
         values = [successful_crawl(CONTENT_ONE), CrawlResult(URL, URL, "unchanged")]
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, SequenceCrawler(values), AcceptClassification()); client = TestClient(app)
+            root = Path(folder); app = self._build(root, SequenceCrawler(values), AcceptClassification()); client = self._client(app)
             self.assertEqual(self._submit(client)["result"]["status"], "stored")
             headers = {"Authorization": "Bearer manual-test-token"}
             before = client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()
@@ -174,7 +182,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
 
     def test_changed_manual_url_reports_updated_record(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE), successful_crawl(CONTENT_TWO)]), AcceptClassification()); client = TestClient(app)
+            root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE), successful_crawl(CONTENT_TWO)]), AcceptClassification()); client = self._client(app)
             self._submit(client)
             changed = self._submit(client, recheck=True)
             self.assertEqual((changed["state"], changed["result"]["status"], changed["result"]["records_updated"]), ("completed", "stored", 1))
@@ -183,7 +191,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
     def test_rejected_manual_url_is_not_reported_as_stored(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, SequenceCrawler([successful_crawl(CONTENT_ONE)]), RejectClassification())
-            client = TestClient(app); terminal = self._submit(client)
+            client = self._client(app); terminal = self._submit(client)
             self.assertEqual((terminal["state"], terminal["result"]["status"]), ("completed", "ignored"))
             self.assertEqual(len(list((root / "review").glob("manual_*.json"))), 1)
             latest = client.get(f"{API_PREFIX}/exports/latest", headers={"Authorization": "Bearer manual-test-token"}).json()
@@ -194,7 +202,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
         failed_crawl = CrawlResult(URL, URL, "error", errors=())
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, SequenceCrawler([failed_crawl]), AcceptClassification())
-            terminal = self._submit(TestClient(app))
+            terminal = self._submit(self._client(app))
             self.assertEqual((terminal["state"], terminal["error"]["code"]), ("failed", "job_failed"))
             self.assertIsNone(terminal["result"])
             self._close(app, root)
@@ -202,7 +210,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
     def test_internal_failure_maps_to_safe_failed_job(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, SequenceCrawler([RuntimeError("token=do-not-return content=do-not-return")]), AcceptClassification())
-            terminal = self._submit(TestClient(app))
+            terminal = self._submit(self._client(app))
             self.assertEqual((terminal["state"], terminal["error"]["code"]), ("failed", "job_failed"))
             self.assertNotIn("do-not-return", str(terminal))
             self._close(app, root)
@@ -211,7 +219,7 @@ class LocalManualSourceJobTests(unittest.TestCase):
         crawler = SequenceCrawler([])
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, crawler, AcceptClassification(),
-                adapters={"github_advisory": AcceptedStructuredAdapter()}); client = TestClient(app)
+                adapters={"github_advisory": AcceptedStructuredAdapter()}); client = self._client(app)
             headers = {"Authorization": "Bearer manual-test-token"}
             queued = client.post(f"{API_PREFIX}/manual-sources", json={"url": GHSA_URL}, headers=headers).json()
             terminal = self._wait(client, queued["job_id"], headers)
@@ -246,10 +254,11 @@ class LocalManualSourceJobTests(unittest.TestCase):
                        "items": {old_record.record_id: {"record_hash": "sha256:legacy", "active": True}}},
                       root / "state" / "manual_sources.json")
             save_json(old_record.to_dict(), root / "processed" / f"manual_{old_record.record_id}.json")
-            app = self._build(root, SequenceCrawler([first_listing, active_page, second_listing, unchanged]), AcceptClassification()); client = TestClient(app)
+            app = self._build(root, SequenceCrawler([first_listing, active_page, second_listing, unchanged]), AcceptClassification()); client = self._client(app)
             headers = {"Authorization": "Bearer manual-test-token"}
             def recheck():
-                queued = client.post(f"{API_PREFIX}/manual-sources/recheck", json={"url": LISTING_URL}, headers=headers).json()
+                root_id = client.get(f"{API_PREFIX}/manual-sources/tracked", headers=headers).json()["items"][0]["root_id"]
+                queued = client.post(f"{API_PREFIX}/manual-sources/recheck", json={"root_id": root_id, "force": False}, headers=headers).json()
                 return self._wait(client, queued["job_id"], headers)
             first = recheck(); self.assertEqual(first["state"], "completed")
             latest = client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()
@@ -310,10 +319,11 @@ class LocalManualSourceJobTests(unittest.TestCase):
             save_json(article.to_dict(), root / "processed" / f"manual_{article.record_id}.json")
             save_json(standalone.to_dict(), root / "processed" / f"manual_{standalone.record_id}.json")
             crawler = SequenceCrawler([listing, unchanged, listing, unchanged])
-            app = self._build(root, crawler, AcceptClassification()); client = TestClient(app)
+            app = self._build(root, crawler, AcceptClassification()); client = self._client(app)
             headers = {"Authorization": "Bearer manual-test-token"}
             def recheck():
-                queued = client.post(f"{API_PREFIX}/manual-sources/recheck", json={"url": LISTING_URL}, headers=headers).json()
+                root_id = client.get(f"{API_PREFIX}/manual-sources/tracked", headers=headers).json()["items"][0]["root_id"]
+                queued = client.post(f"{API_PREFIX}/manual-sources/recheck", json={"root_id": root_id, "force": False}, headers=headers).json()
                 return self._wait(client, queued["job_id"], headers)
             first = recheck(); self.assertEqual(first["state"], "completed")
             latest = client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()

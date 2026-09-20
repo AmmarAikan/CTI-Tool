@@ -29,7 +29,7 @@ class Authorizer(Protocol):
 
 ROLE_PERMISSIONS = {
     "viewer": frozenset({"health:read", "sources:read", "jobs:read", "exports:read", "reviews:read", "dark_web_watches:read"}),
-    "operator": frozenset({"health:read", "sources:read", "jobs:read", "jobs:create", "jobs:cancel", "manual:create", "manual:preview", "manual:approve", "manual:reject", "exports:read", "reviews:read", "sources:disable", "sources:request_enable", "dark_web_watches:read", "dark_web_watches:write", "dark_web_watches:scan"}),
+    "operator": frozenset({"health:read", "sources:read", "jobs:read", "jobs:create", "jobs:cancel", "manual:create", "manual:preview", "manual:approve", "manual:reject", "exports:read", "reviews:read", "reviews:decide", "sources:disable", "sources:request_enable", "dark_web_watches:read", "dark_web_watches:write", "dark_web_watches:scan"}),
     "source_approver": frozenset({"health:read", "sources:read", "jobs:read", "sources:request_enable", "sources:disable"}),
     "dark_web_approver": frozenset({"health:read", "sources:read", "jobs:read", "sources:request_enable", "sources:disable", "dark_web:approve"}),
     "admin": frozenset({"*"}),

@@ -301,7 +301,11 @@ class BackendAPITests(unittest.TestCase):
             "result": None,
             "error": None,
         }
-        with patch("backend.app.api.v1.router.external_control_call", side_effect=[sources, job]):
+        completed = {**job, "job_id": "job-ff5864df424d2bba4a28727b", "state": "completed",
+                     "updated_at": "2026-09-16T18:17:21Z", "result": {"status": "completed",
+                     "accepted_records": 3, "review_records": 1, "rejected_records": 0,
+                     "skipped_records": 2, "error_count": 0}, "error": None}
+        with patch("backend.app.api.v1.router.external_control_call", side_effect=[sources, job, completed]):
             unauthorized = self.client.get("/api/v1/integrations/external-control/sources")
             listed = self.client.get(
                 "/api/v1/integrations/external-control/sources",
@@ -312,11 +316,48 @@ class BackendAPITests(unittest.TestCase):
                 headers=self.headers,
                 json={"scope": "all_enabled", "force": False},
             )
+            polled = self.client.get(
+                "/api/v1/integrations/external-control/jobs/job-ff5864df424d2bba4a28727b",
+                headers=self.headers,
+            )
 
         self.assertEqual(unauthorized.status_code, 401)
         self.assertEqual(listed.json()[0]["source_id"], "cisa-kev")
         self.assertEqual(started.status_code, 202)
         self.assertEqual(started.json()["state"], "queued")
+        self.assertEqual(polled.status_code, 200)
+        self.assertEqual(polled.json()["job_id"], "job-ff5864df424d2bba4a28727b")
+        self.assertEqual(polled.json()["result"]["accepted_records"], 3)
+
+    def test_review_decision_imports_only_the_exact_approved_export(self) -> None:
+        digest = "sha256:" + "a" * 64
+        approved_client = unittest.mock.Mock()
+        approved_client.decide_review.return_value = {
+            "schema_version": "1.0", "record_id": "record-1234567890", "content_sha256": digest,
+            "decision": "approved", "reason": None, "decided_at": "2026-09-20T00:00:00Z",
+            "export_run_id": "ext-run-1234567890", "processing_state": "completed", "retryable": False,
+        }
+        with patch("backend.app.api.v1.router.external_control_client", return_value=approved_client), \
+             patch("backend.app.api.v1.router.PipelineService.sync_external_run", return_value={"run_id": "central-run"}) as sync:
+            approved = self.client.post("/api/v1/integrations/external-control/reviews/record-1234567890/decision",
+                headers=self.headers, json={"expected_content_sha256": digest, "decision": "approved", "reason": None})
+        self.assertEqual(approved.status_code, 200, approved.text)
+        approved_client.decide_review.assert_called_once_with("record-1234567890", digest, "approved", None)
+        sync.assert_called_once_with(approved_client, "ext-run-1234567890")
+
+        rejected_client = unittest.mock.Mock()
+        rejected_client.decide_review.return_value = {
+            "schema_version": "1.0", "record_id": "record-1234567890", "content_sha256": digest,
+            "decision": "rejected", "reason": "duplicate", "decided_at": "2026-09-20T00:00:00Z",
+            "export_run_id": None, "processing_state": "completed", "retryable": False,
+        }
+        with patch("backend.app.api.v1.router.external_control_client", return_value=rejected_client), \
+             patch("backend.app.api.v1.router.PipelineService.sync_external_run") as sync:
+            rejected = self.client.post("/api/v1/integrations/external-control/reviews/record-1234567890/decision",
+                headers=self.headers, json={"expected_content_sha256": digest, "decision": "rejected", "reason": "duplicate"})
+        self.assertEqual(rejected.status_code, 200, rejected.text)
+        rejected_client.decide_review.assert_called_once_with("record-1234567890", digest, "rejected", "duplicate")
+        sync.assert_not_called()
 
     def test_correlation_projection_explains_safe_cross_source_evidence(self) -> None:
         with SessionLocal() as db:

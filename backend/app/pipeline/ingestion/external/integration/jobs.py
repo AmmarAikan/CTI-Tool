@@ -74,6 +74,10 @@ class InProcessJobRunner:
     def get(self, job_id: str) -> IntegrationJob | None:
         with self._lock: return self._jobs.get(job_id)
 
+    def has_active_source(self, source_id: str) -> bool:
+        with self._lock:
+            return any(job.source_id==source_id and job.state in {"queued","running","cancellation_requested"} for job in self._jobs.values())
+
     def cancel(self, job_id: str) -> IntegrationJob | None:
         callback = None
         with self._lock:

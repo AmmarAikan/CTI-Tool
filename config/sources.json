@@ -51,12 +51,15 @@
     {
       "source_id": "cisa-advisories",
       "name": "CISA",
-      "url": "https://www.cisa.gov/news-events/cybersecurity-advisories?feed=rss",
+      "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
       "category": "advisory",
       "method": "rss",
       "enabled": true,
       "max_items": 50,
-      "lookback_days": 30
+      "lookback_days": 30,
+      "csaf_catalog_url": "https://api.github.com/repos/cisagov/CSAF/git/trees/develop?recursive=1",
+      "csaf_document_base_url": "https://raw.githubusercontent.com/cisagov/CSAF/develop/",
+      "csaf_max_advisories": 50
     },
     {
       "source_id": "cert-eu-advisories",

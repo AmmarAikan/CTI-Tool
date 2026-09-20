@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,13 +55,21 @@ from backend.app.schemas.api import (
     CorrelationRequest,
     ExternalCollectionStartRequest,
     ExternalManualSourceRequest,
+    ExternalManualRecheckRequest,
     ExternalManualPreviewApproveRequest,
     ExternalManualPreviewRejectRequest,
     ExternalManualPreviewRequest,
-    DarkWebWatchCreateRequest, DarkWebWatchPatchRequest, DarkWebDiscoveryWatchCreateRequest, DarkWebDiscoveredSourcePatchRequest,
+    ExternalReviewDecisionRequest,
+    ExternalReviewLifecycleResponse,
+    DarkWebWatchCreateRequest, DarkWebWatchPatchRequest, DarkWebSchedulePatchRequest, DarkWebDiscoveryWatchCreateRequest, DarkWebDiscoveredSourcePatchRequest, DarkWebPromotionRequest,
     ExternalManualPreviewResponse,
     ExternalManualPreviewRejectedResponse,
     ExternalSourceRunRequest,
+    ExternalPullResponse,
+    ExternalAcceptedSyncResponse,
+    ExternalJobImportRequest,
+    AcceptedRecordDetailResponse,
+    AcceptedRecordPageResponse,
     IntelligenceCorrelationPageResponse,
     IntelligenceEventDetailResponse,
     IntelligenceEventPageResponse,
@@ -79,6 +88,7 @@ from backend.app.schemas.api import (
     IntelligenceOutlierPageResponse,
     IntelligenceRunPageResponse,
     IntelligenceRunResponse,
+    PipelineRunResultsResponse,
     IntelligenceStorylineResponse,
     InternalEventPageResponse,
     InternalPullResponse,
@@ -89,8 +99,11 @@ from backend.app.schemas.api import (
     RegisterRequest,
     UserCreate,
 )
+
 from backend.app.services.model_evidence_service import ModelEvidenceService
 from backend.app.pipeline.enrichment.observable_assessor import ObservableAssessor
+
+LOGGER = logging.getLogger(__name__)
 from backend.app.services.attack_mapping_service import AttackMappingService
 from backend.app.services.pipeline_service import PipelineService
 
@@ -667,6 +680,24 @@ def external_control_health(_: CurrentUser) -> dict[str, Any]:
 def external_control_sources(_: CurrentUser) -> list[dict[str, Any]]:
     return external_control_call(lambda client: client.list_sources())
 
+@router.post("/integrations/external-control/sources/{source_id}/enable", tags=["external-control"])
+def external_control_enable_source(source_id: str, db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.enable_source(source_id))
+    audit(db, user, "enable_external_source", "external_source", source_id); db.commit(); return result
+
+@router.post("/integrations/external-control/sources/{source_id}/disable", tags=["external-control"])
+def external_control_disable_source(source_id: str, db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.disable_source(source_id))
+    audit(db, user, "disable_external_source", "external_source", source_id); db.commit(); return result
+
+@router.delete("/integrations/external-control/sources/{source_id}", tags=["external-control"])
+def external_control_delete_source(source_id: str, db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin"))]) -> dict[str, bool]:
+    external_control_call(lambda client: client.delete_source(source_id))
+    audit(db, user, "delete_external_source", "external_source", source_id); db.commit(); return {"deleted": True}
+
 
 @router.post("/integrations/external-control/jobs", tags=["external-control"], status_code=202)
 def external_control_start_job(
@@ -749,14 +780,22 @@ def external_control_manual_source(
     status_code=202,
 )
 def external_control_manual_recheck(
-    payload: ExternalManualSourceRequest,
+    payload: ExternalManualRecheckRequest,
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
 ) -> dict[str, Any]:
-    result = external_control_call(lambda client: client.recheck_manual_source(str(payload.url)))
-    audit(db, user, "recheck_external_manual_source", "external_collection_job", result["job_id"])
+    result = external_control_call(lambda client: client.recheck_manual_source(payload.root_id, force=payload.force))
+    audit(db, user, "recheck_external_manual_source", "external_collection_job", result["job_id"],
+          root_id=payload.root_id, force=payload.force)
     db.commit()
     return result
+
+
+@router.get("/integrations/external-control/manual-sources/tracked", tags=["external-control"])
+def external_control_tracked_manual_sources(
+    _: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    return external_control_call(lambda client: client.tracked_manual_sources())
 
 
 @router.post("/integrations/external-control/manual-sources/previews", tags=["external-control"],
@@ -800,9 +839,98 @@ def external_control_latest_export(_: CurrentUser) -> dict[str, Any]:
     return external_control_call(lambda client: client.latest_export_summary())
 
 
+def _project_review_lifecycle(db: Session, external: dict[str, Any]) -> dict[str, Any]:
+    items = []
+    external_events = db.scalars(select(ThreatEvent).where(ThreatEvent.source_pipeline == "external")
+        .options(selectinload(ThreatEvent.raw_item)).order_by(desc(ThreatEvent.created_at)).limit(10_000)).all()
+    runs = db.scalars(select(PipelineRun).where(PipelineRun.pipeline == "external")
+        .order_by(desc(PipelineRun.started_at)).limit(1000)).all()
+    audits = db.scalars(select(AuditLog).where(AuditLog.action == "decide_external_review")
+        .order_by(desc(AuditLog.created_at)).limit(1000)).all()
+    latest_audit = {}
+    for value in audits:
+        if value.resource_id and value.resource_id not in latest_audit: latest_audit[value.resource_id] = value
+    for raw in external.get("items", [])[:1000]:
+        item = dict(raw); record_id = item["record_id"]; export_run_id = item.get("export_run_id")
+        event = next((value for value in external_events if value.source_record_id == record_id
+                      or value.raw_item is not None and isinstance(value.raw_item.raw_data, dict)
+                      and value.raw_item.raw_data.get("record_id") == record_id), None)
+        run = None
+        if export_run_id:
+            run = next((value for value in runs if isinstance(value.details, dict)
+                        and value.details.get("export_run_id") == export_run_id), None)
+        failed_audit = latest_audit.get(record_id)
+        details = failed_audit.details if failed_audit and isinstance(failed_audit.details, dict) else {}
+        if event is not None:
+            item.update({"state": "processed", "stage": "processed", "retryable": False,
+                         "central_run_id": run.id if run else None, "updated_at": iso(event.updated_at)})
+        elif details.get("processing_state") == "processing_failed":
+            item.update({"state": "processing_failed", "stage": "central_import", "retryable": True,
+                         "central_run_id": details.get("central_run_id")})
+        else:
+            item["central_run_id"] = run.id if run else None
+        items.append(item)
+    return {"schema_version": "1.0", "items": items}
+
+
+@router.get("/integrations/external-control/reviews/lifecycle", tags=["external-control"],
+            response_model=ExternalReviewLifecycleResponse)
+def external_control_review_lifecycle(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    external = external_control_call(lambda client: client.review_lifecycle())
+    return _project_review_lifecycle(db, external)
+
+
 @router.get("/integrations/external-control/reviews/latest", tags=["external-control"])
-def external_control_latest_reviews(_: CurrentUser) -> dict[str, Any]:
-    return external_control_call(lambda client: client.latest_reviews())
+def external_control_latest_reviews(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    bundle = external_control_call(lambda client: (client.latest_reviews(), client.review_lifecycle()))
+    reviews, lifecycle = bundle
+    states = {(item["record_id"], item["content_sha256"]): item
+              for item in _project_review_lifecycle(db, lifecycle)["items"]}
+    records = []
+    for record in reviews["records"]:
+        state = states.get((record["record_id"], record["content_sha256"]))
+        if state and state["state"] in {"processed", "rejected"}: continue
+        projected = dict(record)
+        if state and state["state"] in {"approved_processing", "processing_failed"}:
+            projected["status"] = state["state"]
+        records.append(projected)
+    return {"run_id": reviews["run_id"], "records": records}
+
+
+@router.post("/integrations/external-control/reviews/{record_id}/decision", tags=["external-control"])
+def external_control_review_decision(record_id: str, payload: ExternalReviewDecisionRequest, db: SessionDep,
+                                     user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    result = external_control_call(lambda client: client.decide_review(
+        record_id, payload.expected_content_sha256, payload.decision, payload.reason))
+    LOGGER.info("external lifecycle boundary stage=decision_persisted record_id=%s review_id=%s content_hash=%s export_run_id=%s",
+                record_id, record_id, payload.expected_content_sha256, result.get("export_run_id"))
+    central = None
+    if payload.decision == "approved":
+        export_run_id = result.get("export_run_id")
+        if isinstance(export_run_id, str) and export_run_id:
+            try:
+                LOGGER.info("external lifecycle boundary stage=central_importing record_id=%s review_id=%s content_hash=%s export_run_id=%s",
+                            record_id, record_id, payload.expected_content_sha256, export_run_id)
+                central = external_control_call(lambda client: PipelineService(db).sync_external_run(client, export_run_id))
+                LOGGER.info("external lifecycle boundary stage=processed record_id=%s review_id=%s content_hash=%s export_run_id=%s central_run_id=%s",
+                            record_id, record_id, payload.expected_content_sha256, export_run_id, central.get("run_id"))
+            except Exception as exc:
+                LOGGER.warning("external lifecycle boundary stage=central_import_failed record_id=%s review_id=%s content_hash=%s export_run_id=%s exception_class=%s",
+                               record_id, record_id, payload.expected_content_sha256, export_run_id, type(exc).__name__)
+                audit(db, user, "decide_external_review", "external_review", record_id,
+                      decision=payload.decision, reason=payload.reason,
+                      content_sha256=payload.expected_content_sha256,
+                      export_run_id=export_run_id, processing_state="processing_failed", retryable=True)
+                db.commit()
+                raise HTTPException(status_code=502, detail={"code": "review_import_failed",
+                    "message": "Review approval was saved but Central import must be retried", "retryable": True}) from None
+    audit(db, user, "decide_external_review", "external_review", record_id,
+          decision=payload.decision, reason=payload.reason, content_sha256=payload.expected_content_sha256,
+          export_run_id=result.get("export_run_id"),
+          central_run_id=central.get("run_id") if isinstance(central, dict) else None,
+          processing_state="completed", retryable=False)
+    db.commit()
+    return result
 
 @router.get("/dark-web/watches", tags=["dark-web"])
 def dark_web_watches(_: CurrentUser): return external_control_call(lambda c:c.list_dark_web_watches())
@@ -814,6 +942,13 @@ def dark_web_watch_create(payload: DarkWebWatchCreateRequest, db: SessionDep, us
 @router.patch("/dark-web/watches/{watch_id}", tags=["dark-web"])
 def dark_web_watch_patch(watch_id:str,payload:DarkWebWatchPatchRequest,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))]):
     result=external_control_call(lambda c:c.patch_dark_web_watch(watch_id,payload.enabled)); audit(db,user,"update_dark_web_watch","dark_web_watch",watch_id,enabled=payload.enabled); db.commit(); return result
+
+@router.get("/dark-web/watches/{watch_id}/schedule",tags=["dark-web"])
+def dark_web_schedule(watch_id:str,_:CurrentUser):return external_control_call(lambda c:c.get_dark_web_schedule(watch_id))
+
+@router.patch("/dark-web/watches/{watch_id}/schedule",tags=["dark-web"])
+def dark_web_schedule_patch(watch_id:str,payload:DarkWebSchedulePatchRequest,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))]):
+    result=external_control_call(lambda c:c.patch_dark_web_schedule(watch_id,payload.enabled,payload.interval_seconds));audit(db,user,"update_dark_web_schedule","dark_web_watch",watch_id,enabled=payload.enabled,interval_seconds=payload.interval_seconds);db.commit();return result
 
 @router.post("/dark-web/watches/{watch_id}/scan",tags=["dark-web"],status_code=202)
 def dark_web_watch_scan(watch_id:str,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))],idempotency_key:Annotated[str|None,Header(alias="Idempotency-Key")]=None):
@@ -831,8 +966,8 @@ def dark_web_discovery_watch_create(payload:DarkWebDiscoveryWatchCreateRequest,d
     result=external_control_call(lambda c:c.create_dark_web_discovery_watch(payload.model_dump()));audit(db,user,"create_dark_web_discovery_watch","dark_web_watch",result["watch_id"]);db.commit();return result
 
 @router.post("/dark-web/watches/{watch_id}/results/{result_id}/promote",tags=["dark-web"])
-def dark_web_result_promote(watch_id:str,result_id:str,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))],idempotency_key:Annotated[str|None,Header(alias="Idempotency-Key")]=None):
-    result=external_control_call(lambda c:c.promote_dark_web_result(watch_id,result_id,idempotency_key or str(uuid.uuid4())));audit(db,user,"promote_dark_web_source","dark_web_discovered_source",result["source_id"],watch_id=watch_id);db.commit();return result
+def dark_web_result_promote(watch_id:str,result_id:str,payload:DarkWebPromotionRequest,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))],idempotency_key:Annotated[str|None,Header(alias="Idempotency-Key")]=None):
+    result=external_control_call(lambda c:c.promote_dark_web_result(watch_id,result_id,payload.expected_content_sha256,idempotency_key or str(uuid.uuid4())));audit(db,user,"promote_dark_web_source","dark_web_discovered_source",result["source_id"],watch_id=watch_id);db.commit();return result
 
 @router.get("/dark-web/watches/{watch_id}/discovered-sources",tags=["dark-web"])
 def dark_web_discovered_sources(watch_id:str,_:CurrentUser): return external_control_call(lambda c:c.dark_web_discovered_sources(watch_id))
@@ -841,8 +976,16 @@ def dark_web_discovered_sources(watch_id:str,_:CurrentUser): return external_con
 def dark_web_discovered_source_patch(source_id:str,payload:DarkWebDiscoveredSourcePatchRequest,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))]):
     result=external_control_call(lambda c:c.patch_dark_web_discovered_source(source_id,payload.enabled));audit(db,user,"update_dark_web_discovered_source","dark_web_discovered_source",source_id,enabled=payload.enabled);db.commit();return result
 
+@router.get("/dark-web/alerts",tags=["dark-web"])
+def dark_web_alerts(_:CurrentUser,watch_id:str|None=None,limit:int=Query(25,ge=1,le=100),offset:int=Query(0,ge=0)):
+    return external_control_call(lambda c:c.dark_web_alerts(watch_id,limit,offset))
 
-@router.post("/integrations/external-feed/pull", tags=["integrations"])
+@router.patch("/dark-web/alerts/{alert_id}/read",tags=["dark-web"])
+def dark_web_alert_read(alert_id:str,db:SessionDep,user:Annotated[User,Depends(require_roles("admin","analyst"))]):
+    result=external_control_call(lambda c:c.mark_dark_web_alert_read(alert_id));audit(db,user,"read_dark_web_alert","dark_web_alert",alert_id);db.commit();return result
+
+
+@router.post("/integrations/external-feed/pull", tags=["integrations"], response_model=ExternalPullResponse)
 def pull_external_feed(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
@@ -853,7 +996,47 @@ def pull_external_feed(
         raise HTTPException(status_code=502, detail=f"External feed pull failed: {type(exc).__name__}") from exc
     audit(db, user, "pull_external_feed", "pipeline_run", result["run_id"], details=result["details"])
     db.commit()
-    return result
+    return {key: result[key] for key in ("run_id", "pipeline", "status", "collected_count",
+                                          "processed_count", "stored_count", "failed_count")}
+
+
+@router.post("/integrations/external-control/exports/sync", tags=["external-control"],
+             response_model=ExternalAcceptedSyncResponse)
+def sync_external_accepted(db: SessionDep,
+                           user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    try:
+        result = external_control_call(lambda client: PipelineService(db).sync_external_accepted(client))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="External accepted synchronization failed safely") from exc
+    details = result.get("details") if isinstance(result.get("details"), dict) else {}
+    response = {"run_id": result["run_id"], "status": result["status"],
+                "imported": int(details.get("created_items", 0)),
+                "unchanged": int(details.get("database_unchanged_items", 0)),
+                "updated": int(details.get("updated_items", 0)),
+                "failed": int(result["failed_count"]), "total": int(result["collected_count"])}
+    audit(db, user, "sync_external_accepted", "pipeline_run", result["run_id"], **response)
+    db.commit()
+    return response
+
+@router.post("/integrations/external-control/jobs/import", tags=["external-control"],
+             response_model=ExternalAcceptedSyncResponse)
+def import_external_job(payload: ExternalJobImportRequest, db: SessionDep,
+                        user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    try:
+        result = external_control_call(
+            lambda client: PipelineService(db).orchestrate_external_job(client, payload.job_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="External job is not ready for import") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail="External job import failed safely") from exc
+    details = result.get("details") if isinstance(result.get("details"), dict) else {}
+    response = {"run_id": result["run_id"], "status": result["status"],
+                "imported": int(details.get("created_items", 0)),
+                "unchanged": int(details.get("database_unchanged_items", 0)),
+                "updated": int(details.get("updated_items", 0)),
+                "failed": int(result["failed_count"]), "total": int(result["collected_count"])}
+    audit(db, user, "import_external_job", "pipeline_run", result["run_id"], external_job_id=payload.job_id)
+    db.commit(); return response
 
 
 @router.get("/integrations/wazuh/health", tags=["integrations"])
@@ -1783,6 +1966,103 @@ def intelligence_run_detail(run_id: str, db: SessionDep, _: CurrentUser) -> dict
     if item is None:
         raise HTTPException(status_code=404, detail="Pipeline run not found")
     return _intelligence_run_dict(item)
+
+
+@router.get("/intelligence/runs/{run_id}/results", tags=["intelligence"], response_model=PipelineRunResultsResponse)
+def intelligence_run_results(run_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    run = db.get(PipelineRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Pipeline run not found")
+    if run.status not in {"completed", "partial", "failed"}:
+        raise HTTPException(status_code=409, detail="Pipeline run is not terminal")
+    details = run.details if isinstance(run.details, dict) else {}
+    event_ids = details.get("event_ids", [])
+    if not isinstance(event_ids, list) or len(event_ids) > 500 or any(not isinstance(value, str) for value in event_ids):
+        raise HTTPException(status_code=409, detail="Pipeline run results are unavailable")
+    events = db.scalars(select(ThreatEvent).where(ThreatEvent.id.in_(event_ids)).options(
+        selectinload(ThreatEvent.entities), selectinload(ThreatEvent.indicators))).unique().all() if event_ids else []
+    by_id = {event.id: event for event in events}
+    entities = [{"type": entity.entity_type, "value": entity.value[:1000], "confidence": entity.confidence,
+                 "event_id": event.id, "record_title": event.title[:500]}
+                for event in events for entity in event.entities][:200]
+    indicators = [{"type": indicator.indicator_type, "value": indicator.value[:2048], "confidence": indicator.confidence,
+                   "event_id": event.id, "record_title": event.title[:500]}
+                  for event in events for indicator in event.indicators][:200]
+    correlation_rows = db.scalars(select(CorrelationRecord).where(or_(
+        CorrelationRecord.event_a_id.in_(event_ids), CorrelationRecord.event_b_id.in_(event_ids)
+    )).order_by(desc(CorrelationRecord.score), CorrelationRecord.id).limit(200)).all() if event_ids else []
+    correlations = [{"source_event_id": value.event_a_id, "target_event_id": value.event_b_id,
+                     "type": value.correlation_type, "score": value.score, "explanation": value.reason[:500]}
+                    for value in correlation_rows]
+    return {"run_id": run.id, "status": run.status, "imported_documents": run.collected_count,
+            "processed_documents": run.processed_count, "entity_count": len(entities),
+            "indicator_count": len(indicators), "correlation_count": len(correlations),
+            "review_count": int(details.get("review_count", 0)), "rejected_count": int(details.get("rejected_count", 0)),
+            "skipped_count": int(details.get("database_unchanged_items", 0)), "error_count": run.failed_count,
+            "entities": entities, "indicators": indicators, "correlations": correlations}
+
+
+def _accepted_record(event: ThreatEvent, source: Source | None, correlation_count: int) -> dict[str, Any]:
+    raw = event.raw_item.raw_data if event.raw_item and isinstance(event.raw_item.raw_data, dict) else {}
+    metadata = raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {}
+    privacy = metadata.get("privacy") if isinstance(metadata.get("privacy"), dict) else {}
+    return {"id": event.id, "title": event.title[:500], "source": (source.name if source else "Unknown")[:200],
+            "source_type": event.source_type[:50], "category": str(raw.get("category") or "")[:80] or None,
+            "summary": str(raw.get("summary") or event.description or "")[:1000],
+            "published": str(raw.get("published") or "")[:40] or None,
+            "collected_at": str(raw.get("collected_at") or "")[:40] or None,
+            "accepted_at": iso(event.created_at), "processing_state": event.processing_status[:30],
+            "classification": event.classification_label[:50] if event.classification_label else None,
+            "privacy_status": str(privacy.get("status") or "")[:40] or None,
+            "entity_count": len(event.entities), "indicator_count": len(event.indicators),
+            "correlation_count": correlation_count}
+
+
+@router.get("/intelligence/accepted-records", tags=["intelligence"], response_model=AcceptedRecordPageResponse)
+def accepted_records(db: SessionDep, _: CurrentUser, search: str | None = Query(default=None, min_length=2, max_length=100),
+                     source: str | None = Query(default=None, max_length=200),
+                     source_type: str | None = Query(default=None, max_length=50),
+                     processing_state: str | None = Query(default=None, max_length=30),
+                     limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0)) -> dict[str, Any]:
+    filters = [ThreatEvent.source_pipeline == "external", ThreatEvent.processing_status.notin_(("failed", "ignored"))]
+    if search: filters.append(or_(ThreatEvent.title.ilike(f"%{search}%"), ThreatEvent.normalized_text.ilike(f"%{search}%")))
+    if source: filters.append(Source.name == source)
+    if source_type: filters.append(ThreatEvent.source_type == source_type)
+    if processing_state: filters.append(ThreatEvent.processing_status == processing_state)
+    total = db.scalar(select(func.count()).select_from(ThreatEvent).outerjoin(Source).where(*filters)) or 0
+    rows = db.execute(select(ThreatEvent, Source).outerjoin(Source).where(*filters).options(
+        selectinload(ThreatEvent.raw_item), selectinload(ThreatEvent.entities), selectinload(ThreatEvent.indicators)
+    ).order_by(desc(ThreatEvent.created_at), ThreatEvent.id).limit(limit).offset(offset)).unique().all()
+    ids = [event.id for event, _source in rows]
+    correlations = db.scalars(select(CorrelationRecord).where(or_(CorrelationRecord.event_a_id.in_(ids),
+        CorrelationRecord.event_b_id.in_(ids)))).all() if ids else []
+    counts = {value: 0 for value in ids}
+    for correlation in correlations:
+        if correlation.event_a_id in counts: counts[correlation.event_a_id] += 1
+        if correlation.event_b_id in counts: counts[correlation.event_b_id] += 1
+    return {"items": [_accepted_record(event, source_row, counts[event.id]) for event, source_row in rows],
+            "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/intelligence/accepted-records/{record_id}", tags=["intelligence"], response_model=AcceptedRecordDetailResponse)
+def accepted_record_detail(record_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    row = db.execute(select(ThreatEvent, Source).outerjoin(Source).where(ThreatEvent.id == record_id,
+        ThreatEvent.source_pipeline == "external", ThreatEvent.processing_status.notin_(("failed", "ignored"))).options(
+        selectinload(ThreatEvent.raw_item), selectinload(ThreatEvent.entities), selectinload(ThreatEvent.indicators))).unique().first()
+    if row is None: raise HTTPException(status_code=404, detail="Accepted record not found")
+    event, source = row
+    correlations = db.scalars(select(CorrelationRecord).where(or_(CorrelationRecord.event_a_id == event.id,
+        CorrelationRecord.event_b_id == event.id)).order_by(desc(CorrelationRecord.score)).limit(200)).all()
+    result = _accepted_record(event, source, len(correlations))
+    result.update({"content": (event.normalized_text or event.description)[:20000],
+        "entities": [{"type": item.entity_type, "value": item.value[:1000], "confidence": item.confidence,
+                      "event_id": event.id, "record_title": event.title[:500]} for item in event.entities[:200]],
+        "indicators": [{"type": item.indicator_type, "value": item.value[:2048], "confidence": item.confidence,
+                        "event_id": event.id, "record_title": event.title[:500]} for item in event.indicators[:200]],
+        "correlations": [{"source_event_id": item.event_a_id, "target_event_id": item.event_b_id,
+                          "type": item.correlation_type, "score": item.score, "explanation": item.reason[:500]}
+                         for item in correlations]})
+    return result
 
 
 @router.get("/intelligence/ml/status", tags=["intelligence"], response_model=IntelligenceMLStatusResponse)

@@ -90,6 +90,7 @@ class CERTConnector(ExternalConnector):
         state: dict[str, Any] | None = None,
         clock: Callable[[], datetime] | None = None,
         rss_factory: Callable[..., RSSConnector] | None = None,
+        csaf_connector: Any | None = None,
     ) -> None:
         self.source, self.source_name = source, source.name
         self.http_client, self.crawler = http_client or ExternalHttpClient(), crawler or WebCrawler()
@@ -101,6 +102,7 @@ class CERTConnector(ExternalConnector):
         self.state.setdefault("sources", {}); self.state.setdefault("items", {})
         self.clock = clock or (lambda: datetime.now(timezone.utc))
         self.rss_factory = rss_factory or RSSConnector
+        self.csaf_connector = csaf_connector
 
     def collect(self) -> Iterable[RawRecord]:
         for item in self.collect_result().accepted_items:
@@ -126,6 +128,13 @@ class CERTConnector(ExternalConnector):
             clock=self.clock,
         )
         rss_result: RSSCollectionResult = connector.collect_result()
+        if (rss_result.status == "failed" and self.csaf_connector is not None
+                and rss_result.errors and all(error.category == "feed_request_failed" for error in rss_result.errors)):
+            csaf = self.csaf_connector.collect_result()
+            result = CERTCollectionResult(self.source.source_id, csaf.status, skipped_items=csaf.skipped_items)
+            result.accepted_items = list(csaf.accepted_items); result.review_items = list(csaf.review_items)
+            result.errors = [CERTCollectionError(error.source_id, error.category, error.retryable) for error in csaf.errors]
+            return result
         result = CERTCollectionResult(self.source.source_id, rss_result.status, skipped_items=rss_result.skipped_items)
         result.accepted_items = [self._as_cert_item(item, "official_rss") for item in rss_result.accepted_items]
         result.review_items = [self._as_cert_item(item, "official_rss") for item in rss_result.review_items]

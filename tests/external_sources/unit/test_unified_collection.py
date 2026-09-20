@@ -101,6 +101,15 @@ class UnifiedCollectionTests(unittest.TestCase):
         self.assertEqual(result["sources"]["dark-one"]["status"], "failed")
         self.assertEqual(result["manual_sources"][ROOT_ONE.root_id]["status"], "stored")
 
+    def test_unchanged_source_and_failed_source_are_partial(self):
+        values = {
+            "rss-one": SourceExecutionResult("rss-one", "completed", skipped_records=45),
+            "dark-one": SourceExecutionResult("dark-one", "failed", error_count=5),
+        }
+        result = self.run_unified(Executor(values), ManualService())
+        self.assertEqual((result["status"], result["skipped_records"], result["error_count"]),
+                         ("partial", 45, 5))
+
     def test_unexpected_registered_and_manual_failures_are_isolated_and_redacted(self):
         executor = Executor({"rss-one": RuntimeError("private URL"),
                              "dark-one": SourceExecutionResult("dark-one", "completed", accepted_records=1)})
@@ -148,6 +157,17 @@ class UnifiedCollectionTests(unittest.TestCase):
         result = self.run_unified(Executor(), ManualService(), exporter=exporter)
         self.assertEqual(len(exporter.calls), 1)
         self.assertEqual(exporter.calls[0][0], result["run_id"])
+
+    def test_promoted_and_manual_onion_runs_do_not_use_discovery(self):
+        runner=ImmediateRunner();executor=Executor();executor.runner=runner
+        discovery_calls=[]
+        promoted=RegisteredSource("dws-"+"a"*24,"dark_web",True,{"protected_url":"redacted"})
+        service=CanonicalCollectionService(runner,{},executor,manual_service=ManualService((ROOT_ONE,)),
+            dynamic_source=lambda source_id: promoted if source_id==promoted.source_id else discovery_calls.append(source_id))
+        service.collect_source(promoted.source_id,requested_by="tester")
+        self.assertEqual(executor.calls[0][0],promoted.source_id);self.assertEqual(discovery_calls,[])
+        service.collect_source(ROOT_ONE.root_id,requested_by="tester")
+        self.assertEqual(discovery_calls,[])
 
     def test_overlapping_all_enabled_runs_are_rejected_while_single_source_contract_is_unchanged(self):
         started, release = threading.Event(), threading.Event()

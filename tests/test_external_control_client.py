@@ -156,12 +156,30 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(summary["accepted_records"], 25)
         self.assertTrue(client.session.calls[0][1].endswith("/exports/latest/summary"))
 
+    def test_accepted_export_page_is_bounded_and_rejects_onion_leaks(self) -> None:
+        item = {"schema_version":"1.0","record_id":"ext-1234567890abcdef","source_item_id":"source-1",
+            "source":"Safe source","source_type":"rss","category":"advisory","title":"Safe title",
+            "link":"https://example.test/item","content":"Sanitized content","summary":"Summary",
+            "published":None,"updated_at":None,"author":None,"tags":[],"language":"en",
+            "collected_at":"2026-09-19T00:00:00Z","content_hash":"sha256:"+"a"*64,
+            "classification":{"status":"accepted","label":"cti_related","score":0.9,"model_version":"test"},
+            "metadata":{"export_run_id":"ext-run-1234567890"}}
+        page = {"schema_version":"1.0","export_run_id":"ext-run-1234567890",
+                "dataset_sha256":"b"*64,"items":[item],"total":1,"limit":100,"offset":0}
+        projected = self.client([FakeResponse(page)]).accepted_export_page()
+        self.assertEqual(projected["items"][0]["record_id"], item["record_id"])
+        leaked = json.loads(json.dumps(page)); leaked["items"][0]["link"] = "http://hiddenservice.onion/item"
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(leaked)]).accepted_export_page()
+
     def test_reviews_history_and_cancellation_use_bounded_contracts(self) -> None:
         review = {"run_id": "ext-run-1234567890", "records": [{
             "record_id": "rec-123", "canonical_url": "https://private.test/report", "title": "Safe",
             "source_type": "rss", "review_reason": "privacy_review", "review_reasons": ["privacy_review"],
             "stage_status": {"privacy": "review"}, "classification_label": "related",
             "privacy_status": "review_required", "collected_at": "2026-09-07T00:00:00Z", "published": None,
+            "content_sha256": "sha256:" + "a" * 64, "review_version":"external_review_v2", "summary":"Sanitized summary", "excerpt": "Sanitized review content",
+            "source": "Safe source", "category": "advisory", "status": "pending",
         }]}
         history = {"schema_version": "1.0", "persistence": "process_memory", "jobs": [{
             "schema_version": "1.0", "job_id": "job-1234567890", "source_id": "cisa-kev",
@@ -179,6 +197,31 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertEqual(client.cancel_job("job-1234567890")["state"], "cancellation_requested")
         self.assertTrue(client.session.calls[1][1].endswith("/jobs?limit=50"))
         self.assertEqual(client.session.calls[2][0], "POST")
+
+    def test_review_decision_requires_confirmed_processing_and_exact_export_identity(self) -> None:
+        digest = "sha256:" + "a" * 64
+        approved = {"schema_version": "1.0", "record_id": "record-1234567890", "content_sha256": digest,
+                    "decision": "approved", "reason": None, "decided_at": "2026-09-20T00:00:00Z",
+                    "export_run_id": "ext-run-1234567890", "processing_state": "completed", "retryable": False}
+        client = self.client([FakeResponse(approved)])
+        self.assertEqual(client.decide_review("record-1234567890", digest, "approved", None), approved)
+        failed = {**approved, "processing_state": "processing_failed", "retryable": True, "export_run_id": None}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(failed)]).decide_review("record-1234567890", digest, "approved", None)
+        rejected = {**approved, "decision": "rejected", "reason": "duplicate", "export_run_id": None}
+        self.assertEqual(self.client([FakeResponse(rejected)]).decide_review(
+            "record-1234567890", digest, "rejected", "duplicate"), rejected)
+
+    def test_review_lifecycle_projection_is_strict_and_bounded(self) -> None:
+        item = {"record_id":"record-1234567890", "review_id":"record-1234567890",
+                "content_sha256":"sha256:"+"d"*64, "external_job_id":None,
+                "export_run_id":"ext-run-1234567890", "dataset_sha256":"e"*64,
+                "state":"approved_processing", "stage":"central_import", "retryable":False,
+                "updated_at":"2026-09-20T00:00:00Z"}
+        payload = {"schema_version":"1.0", "items":[item]}
+        self.assertEqual(self.client([FakeResponse(payload)]).review_lifecycle(), payload)
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse({"schema_version":"1.0", "items":[{**item,"url":"https://private.invalid"}]})]).review_lifecycle()
 
     def test_history_rejects_extra_sensitive_fields(self) -> None:
         payload = {"schema_version": "1.0", "persistence": "process_memory", "jobs": [{
@@ -212,6 +255,61 @@ class ExternalControlClientTests(unittest.TestCase):
         projected = self.client([FakeResponse(private)]).get_job("job-1234567890")
         self.assertNotIn("canonical_url", str(projected))
         self.assertNotIn("dataset_file", str(projected))
+
+    def test_completed_live_shape_normalizes_prefixed_export_digest_without_leaking_details(self) -> None:
+        job_id = "job-ff5864df424d2bba4a28727b"
+        completed = {
+            "schema_version": "1.0", "job_id": job_id, "command_id": "cmd-sanitized-123456789012",
+            "state": "completed", "created_at": "2026-09-16T18:16:27Z",
+            "updated_at": "2026-09-16T18:17:21Z", "progress": {},
+            "result": {
+                "status": "completed", "source_count": 1, "accepted_records": 3,
+                "review_records": 1, "rejected_records": 0, "skipped_records": 2,
+                "error_count": 0, "source_id": "the-hacker-news", "force": False,
+                "run_id": "ext-run-sanitized-1234567890",
+                "sources": {"the-hacker-news": {"status": "completed", "accepted_records": 3,
+                    "review_records": 1, "rejected_records": 0, "skipped_records": 2, "error_count": 0}},
+                "export": {"status": "completed", "run_id": "ext-run-sanitized-1234567890",
+                    "dataset_sha256": "sha256:" + "a" * 64, "accepted_records": 3,
+                    "review_records": 1, "dataset_file": "final_dataset_safe.json",
+                    "manifest_file": "external_export_manifest_safe.json", "review_file": "external_review_safe.json"},
+                "message": "private collector detail", "canonical_url": "https://private.test/article",
+            }, "error": None,
+        }
+
+        projected = self.client([FakeResponse(completed)]).get_job(job_id)
+
+        self.assertEqual(projected["job_id"], job_id)
+        self.assertEqual(projected["state"], "completed")
+        self.assertEqual(projected["result"]["accepted_records"], 3)
+        self.assertEqual(projected["result"]["review_records"], 1)
+        self.assertEqual(projected["result"]["skipped_records"], 2)
+        self.assertEqual(projected["result"]["export"]["dataset_sha256"], "a" * 64)
+        serialized = json.dumps(projected)
+        self.assertNotIn("private.test", serialized)
+        self.assertNotIn("collector detail", serialized)
+        self.assertNotIn("dataset_file", serialized)
+
+        mismatched = {**completed, "job_id": "job-different-1234567890"}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(mismatched)]).get_job(job_id)
+        malformed = json.loads(json.dumps(completed))
+        malformed["result"]["export"]["dataset_sha256"] = "sha256:not-a-digest"
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(malformed)]).get_job(job_id)
+
+    def test_job_accepts_bounded_safe_per_source_failure_categories(self) -> None:
+        payload = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "failed", "created_at": "2026-09-17T00:00:00Z", "updated_at": "2026-09-17T00:00:01Z",
+            "progress": {}, "result": {"status": "failed", "sources": {"cisa-advisories": {
+                "status": "failed", "error_count": 50, "collection_method": "official_csaf",
+                "failure_categories": {"csaf_document_media_type": 50}}}}, "error": None}
+        projected = self.client([FakeResponse(payload)]).get_job("job-1234567890")
+        self.assertEqual(projected["result"]["sources"]["cisa-advisories"]["failure_categories"],
+                         {"csaf_document_media_type": 50})
+        payload["result"]["sources"]["cisa-advisories"]["failure_categories"] = {"unsafe-url": 1}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(payload)]).get_job("job-1234567890")
 
     def test_manual_preview_proxy_contract_and_decision_idempotency(self) -> None:
         preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
@@ -253,6 +351,24 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertIsNone(result["classification_label"])
         self.assertIsNone(result["classification_confidence"])
         self.assertNotIn("classification_label", result["items_preview"][0])
+
+    def test_manual_preview_strictly_projects_json_mapping_without_raw_values(self) -> None:
+        preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",
+            "created_at": "2026-09-07T00:00:00Z", "expires_at": "2026-09-07T00:15:00Z",
+            "display_url": "https://example.test/data", "page_type": "json_collection", "title": "Safe",
+            "excerpt": "", "disposition": "review", "privacy_status": "reviewed", "review_reasons": [],
+            "content_sha256": "sha256:" + "a" * 64, "items_preview": [], "items_preview_total": 0,
+            "items_preview_truncated": False,
+            "counts": {"items": 0, "accepted": 0, "review": 0, "rejected": 0, "skipped": 0, "errors": 0},
+            "detected_type": "json_collection", "collection_path": ["posts"],
+            "proposed_mapping": {"id_field": "id", "title_field": "title", "content_field": "content"},
+            "validation_warnings": ["explicit_approval_required"], "approval_required": True}
+        result = self.client([FakeResponse(preview)]).create_manual_preview("https://example.test/data")
+        self.assertEqual(result["collection_path"], ["posts"])
+        self.assertNotIn("raw_json", result)
+        malformed = {**preview, "proposed_mapping": {"content_field": "__class__"}}
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse(malformed)]).create_manual_preview("https://example.test/data")
 
     def test_manual_preview_proxy_rejects_malformed_or_leaking_item_contract(self) -> None:
         base = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",

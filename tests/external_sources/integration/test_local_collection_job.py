@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import logging
 import os
 import tempfile
@@ -88,18 +89,32 @@ class LocalCollectionJobTests(unittest.TestCase):
     def test_all_enabled_scope_is_accepted_without_changing_legacy_selection(self):
         scoped_executor, legacy_executor = RecordingExecutor(), RecordingExecutor()
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, scoped_executor); client = TestClient(app)
-            scoped = client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self._headers())
-            scoped_terminal = self._wait(client, scoped.json()["job_id"], self._headers())
-            self.assertEqual((scoped.status_code, scoped_terminal["state"]), (202, "completed"))
-            self.assertEqual(scoped_terminal["result"]["scope"], "all_enabled")
-            self.assertEqual(scoped_terminal["result"]["export"]["status"], "completed")
+            root = Path(folder); app = self._build(root, scoped_executor)
+            started = time.monotonic()
+            with TestClient(app) as client:
+                scoped = client.post(f"{API_PREFIX}/jobs", json={"scope": "all_enabled"}, headers=self._headers())
+                scoped_terminal = self._wait(client, scoped.json()["job_id"], self._headers())
+                self.assertEqual((scoped.status_code, scoped_terminal["state"]), (202, "completed"))
+                self.assertEqual(scoped_terminal["result"]["scope"], "all_enabled")
+                self.assertEqual(scoped_terminal["result"]["export"]["status"], "completed")
+            self.assertLess(time.monotonic() - started, 5, "all-enabled POST did not complete promptly")
+            scoped_workers = tuple(app.state.services.job_runner._executor._threads)
             self._close(app, root)
-            second_root = root / "legacy"; app = self._build(second_root, legacy_executor); client = TestClient(app)
-            legacy = client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers())
-            self._wait(client, legacy.json()["job_id"], self._headers())
+            self.assertTrue(scoped_workers)
+            self.assertTrue(all(not worker.is_alive() for worker in scoped_workers))
+
+            second_root = root / "legacy"; app = self._build(second_root, legacy_executor)
+            started = time.monotonic()
+            with TestClient(app) as client:
+                legacy = client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers())
+                legacy_terminal = self._wait(client, legacy.json()["job_id"], self._headers())
+                self.assertEqual((legacy.status_code, legacy_terminal["state"]), (202, "completed"))
+            self.assertLess(time.monotonic() - started, 5, "legacy-selection POST did not complete promptly")
             self.assertEqual([call[0] for call in legacy_executor.calls], ["the-hacker-news"])
+            legacy_workers = tuple(app.state.services.job_runner._executor._threads)
             self._close(app, second_root)
+            self.assertTrue(legacy_workers)
+            self.assertTrue(all(not worker.is_alive() for worker in legacy_workers))
 
     def test_all_enabled_scope_rejects_nonempty_source_ids(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -240,6 +255,60 @@ class LocalCollectionJobTests(unittest.TestCase):
             self.assertIn("collector_review", review_path.read_text(encoding="utf-8"))
             self.assertEqual(client.get(f"{API_PREFIX}/exports/latest", headers=self._headers()).json()["review_records"], 1)
             self._close(app, root)
+
+    def test_review_projection_skips_malformed_entries_and_empty_is_200(self):
+        review=export_item("guid-review-safe",classification="error")
+        executor=RecordingExecutor({"the-hacker-news":SourceExecutionResult("the-hacker-news","completed",review_records=1,review=(review,))})
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);app=self._build(root,executor);client=TestClient(app)
+            queued=client.post(f"{API_PREFIX}/jobs",json={"source_ids":["the-hacker-news"]},headers=self._headers()).json()
+            terminal=self._wait(client,queued["job_id"],self._headers());run_id=terminal["result"]["run_id"]
+            path=root/"review"/f"external_review_{run_id}.json";values=json.loads(path.read_text(encoding="utf-8"))
+            save_json([{"record":{"record_id":"broken"}},*values],path)
+            response=client.get(f"{API_PREFIX}/reviews/latest",headers=self._headers())
+            self.assertEqual(response.status_code,200);self.assertEqual(len(response.json()["records"]),1)
+            item=response.json()["records"][0]
+            self.assertIn("review_version",item);self.assertIn("summary",item);self.assertNotIn("content",item)
+            save_json([],path);empty=client.get(f"{API_PREFIX}/reviews/latest",headers=self._headers())
+            self.assertEqual((empty.status_code,empty.json()["records"]),(200,[]));self._close(app,root)
+
+    def test_review_approve_reject_and_stale_hash_are_atomic(self):
+        for decision in ("approved","rejected"):
+            with self.subTest(decision=decision),tempfile.TemporaryDirectory() as folder:
+                review=export_item("guid-review-"+decision,classification="error")
+                executor=RecordingExecutor({"the-hacker-news":SourceExecutionResult("the-hacker-news","completed",review_records=1,review=(review,))})
+                root=Path(folder);app=self._build(root,executor);self.addCleanup(self._close,app,root);client=TestClient(app)
+                queued=client.post(f"{API_PREFIX}/jobs",json={"source_ids":["the-hacker-news"]},headers=self._headers()).json();self._wait(client,queued["job_id"],self._headers())
+                record=client.get(f"{API_PREFIX}/reviews/latest",headers=self._headers()).json()["records"][0]
+                stale=client.post(f"{API_PREFIX}/reviews/{record['record_id']}/decision",headers=self._headers(),json={"expected_content_sha256":"sha256:"+"0"*64,"decision":decision,"reason":"not_relevant" if decision=="rejected" else None})
+                self.assertEqual((stale.status_code,stale.json()["code"]),(409,"review_content_changed"))
+                result=client.post(f"{API_PREFIX}/reviews/{record['record_id']}/decision",headers=self._headers(),json={"expected_content_sha256":record["content_sha256"],"decision":decision,"reason":"not_relevant" if decision=="rejected" else None})
+                self.assertEqual((result.status_code,result.json()["decision"]),(200,decision))
+                latest=client.get(f"{API_PREFIX}/reviews/latest",headers=self._headers()).json()
+                if decision == "approved":
+                    self.assertEqual((len(latest["records"]),latest["records"][0]["status"]),(1,"approved_processing"))
+                else:
+                    self.assertEqual(latest["records"],[])
+                accepted=client.get(f"{API_PREFIX}/exports/latest",headers=self._headers()).json()["accepted_records"]
+                self.assertEqual(accepted,1 if decision=="approved" else 0);self._close(app,root)
+
+    def test_seeded_source_operational_toggle_preserves_review_state(self):
+        with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "source-state-test-token"}):
+            local = importlib.import_module("backend.app.pipeline.ingestion.external.integration.local")
+        approved = local.DevelopmentSourceService({"approved-source": local.RegisteredSource(
+            "approved-source", "rss", True, {"name": "Approved", "origin": "seeded"})})
+        self.assertEqual(approved.disable_source("approved-source", requested_by="tester").status, "disabled")
+        self.assertEqual(approved.disable_source("approved-source", requested_by="tester").status, "disabled")
+        self.assertEqual(approved.request_source_enable("approved-source", requested_by="tester").status, "enabled")
+        self.assertEqual(approved.request_source_enable("approved-source", requested_by="tester").status, "enabled")
+
+        pending = local.DevelopmentSourceService({"pending-source": local.RegisteredSource(
+            "pending-source", "rss", False, {"name": "Pending", "origin": "seeded"})})
+        self.assertEqual(pending.request_source_enable("pending-source", requested_by="tester").status, "pending_review")
+        self.assertEqual(pending.disable_source("pending-source", requested_by="tester").status, "disabled")
+        self.assertEqual(pending.request_source_enable("pending-source", requested_by="tester").status, "pending_review")
+        with self.assertRaisesRegex(ValueError, "seeded_source"):
+            approved.delete_source("approved-source", requested_by="tester")
 
     def test_export_failure_keeps_collection_completed_and_returns_safe_export_error(self):
         with tempfile.TemporaryDirectory() as folder:

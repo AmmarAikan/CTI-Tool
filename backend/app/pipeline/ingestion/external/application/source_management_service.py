@@ -30,3 +30,7 @@ class SourceManagementService(ABC):
     @abstractmethod
     def disable_source(self, source_id: str, *, requested_by: str) -> SourceView:
         """Disable an External source through the application policy boundary."""
+
+    def delete_source(self, source_id: str, *, requested_by: str) -> None:
+        """Archive a removable user source; seeded sources are never deleted."""
+        raise KeyError(source_id)

@@ -92,9 +92,11 @@ class CrawlResult:
     author: str | None = None
     published: str | None = None
     extraction_version: str = EXTRACTION_IMPLEMENTATION_VERSION
+    response_body: bytes = field(default=b"", repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
+        value.pop("response_body", None)
         value["candidate_links"] = list(self.candidate_links)
         value["errors"] = [asdict(error) for error in self.errors]
         return value
@@ -149,6 +151,7 @@ class WebCrawler:
                 "unsupported_content_type",
                 f"expected HTML-compatible content, received {media_type or 'missing content type'}",
                 response_metadata=response_metadata,
+                response_body=response.body,
             )
 
         raw_hash = sha256_bytes(response.body)
@@ -413,6 +416,7 @@ class WebCrawler:
         retryable: bool = False,
         response_metadata: dict[str, Any] | None = None,
         raw_content_hash: str | None = None,
+        response_body: bytes = b"",
     ) -> CrawlResult:
         return CrawlResult(
             requested_url=requested_url,
@@ -420,5 +424,6 @@ class WebCrawler:
             status="error",
             response_metadata=response_metadata or {},
             raw_content_hash=raw_content_hash,
+            response_body=response_body,
             errors=(CrawlError(category, message, retryable),),
         )

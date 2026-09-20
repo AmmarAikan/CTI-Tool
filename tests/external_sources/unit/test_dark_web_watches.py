@@ -1,5 +1,6 @@
 from __future__ import annotations
 import stat, tempfile, unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from backend.app.pipeline.ingestion.external.application.dark_web_watch_service import SQLiteDarkWebWatchStore, WatchConflict, WatchValidationError, normalize_keyword
 
@@ -27,5 +28,27 @@ class DarkWebWatchTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,"unsafe"): SQLiteDarkWebWatchStore(link)
             unsafe=root/"unsafe.sqlite3"; unsafe.write_bytes(b""); unsafe.chmod(0o644)
             with self.assertRaisesRegex(RuntimeError,"permissions"): SQLiteDarkWebWatchStore(unsafe)
+
+    def test_scheduler_leader_expiry_atomic_claim_and_allowed_intervals(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=SQLiteDarkWebWatchStore(Path(folder)/"watches.sqlite3"); watch=store.create("Acme")
+            with self.assertRaises(WatchValidationError): store.configure_schedule(watch["watch_id"],True,7200)
+            store.configure_schedule(watch["watch_id"],True,3600)
+            now=datetime.now(timezone.utc)+timedelta(hours=2)
+            self.assertTrue(store.acquire_leader("one",now=now))
+            self.assertFalse(store.acquire_leader("two",now=now))
+            claimed=store.claim_due("one",now=now); self.assertEqual(len(claimed),1)
+            self.assertEqual(store.claim_due("one",now=now),[])
+            self.assertTrue(store.acquire_leader("two",now=now+timedelta(seconds=31)))
+
+    def test_alerts_new_changed_deduplicated_and_read(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=SQLiteDarkWebWatchStore(Path(folder)/"watches.sqlite3"); watch=store.create("Acme")
+            item={"result_id":"dwr-"+"a"*32,"canonical_hash":"b"*64,"content_sha256":"c"*64,"onion_reference":"onion-ref:bbbbbbbbbbbb","title":"Acme report","excerpt":"Acme context","provider":"Approved","privacy_status":"reviewed","review_reasons":[],"matched_keywords":["Acme"]}
+            store.commit_scan(watch["watch_id"],[item],partial=False);store.commit_scan(watch["watch_id"],[item],partial=False)
+            page=store.alerts(watch_id=watch["watch_id"]);self.assertEqual((page["total"],page["unread"]),(1,1))
+            changed={**item,"content_sha256":"d"*64,"excerpt":"changed"};store.commit_scan(watch["watch_id"],[changed],partial=False)
+            page=store.alerts(watch_id=watch["watch_id"]);self.assertEqual((page["total"],page["unread"]),(2,2))
+            alert=store.mark_alert_read(page["items"][0]["alert_id"]);self.assertIsNotNone(alert["read_at"])
 
 if __name__ == "__main__": unittest.main()
