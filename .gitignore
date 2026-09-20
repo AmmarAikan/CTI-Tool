@@ -53,10 +53,12 @@ ml/models/**/checkpoint-*/
 
 # External Sources local runtime and secrets
 .env.external.local
+.env.external-test
 .vps-client.env
 .vps-publisher.env
 .misp-client.env
 config/dark_web_sources.local.json
+config/dark_web_discovery_providers.external-test.local.json
 data/external/raw/*
 data/external/processed/*
 data/external/review/*

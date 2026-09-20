@@ -1,0 +1,5 @@
+{
+  "schema_version": "1.0",
+  "proxy": {"host": "tor", "port": 9050},
+  "sources": []
+}
