@@ -6,8 +6,8 @@ import unittest
 from types import SimpleNamespace
 
 from backend.app.pipeline.ingestion.external.application.collection_service import (
-    AllEnabledRunActiveError, CanonicalCollectionService, CollectionRequest, RegisteredSource,
-    SourceExecutionResult,
+    AllEnabledRunActiveError, CanonicalCollectionService, CollectionRequest, DisabledSourceError,
+    RegisteredSource, SourceExecutionResult, UnknownSourceError,
 )
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     ManualSourceResult, ManualTrackedRoot,
@@ -168,6 +168,22 @@ class UnifiedCollectionTests(unittest.TestCase):
         self.assertEqual(executor.calls[0][0],promoted.source_id);self.assertEqual(discovery_calls,[])
         service.collect_source(ROOT_ONE.root_id,requested_by="tester")
         self.assertEqual(discovery_calls,[])
+
+    def test_manual_and_promoted_sources_work_without_enabled_static_sources(self):
+        runner=ImmediateRunner();executor=Executor();executor.runner=runner
+        promoted=RegisteredSource("dws-"+"b"*24,"dark_web",True,{"protected_url":"redacted"})
+        disabled=RegisteredSource("static-disabled","dark_web",False,{})
+        service=CanonicalCollectionService(runner,{disabled.source_id:disabled},executor,
+            manual_service=ManualService((ROOT_ONE,)),
+            dynamic_source=lambda source_id: promoted if source_id==promoted.source_id else None)
+
+        service.collect_source(ROOT_ONE.root_id,requested_by="tester")
+        service.collect_source(promoted.source_id,requested_by="tester")
+        self.assertEqual(executor.calls[0][0],promoted.source_id)
+        with self.assertRaises(DisabledSourceError):
+            service.collect_source(disabled.source_id,requested_by="tester")
+        with self.assertRaises(UnknownSourceError):
+            service.collect_source("static-missing",requested_by="tester")
 
     def test_overlapping_all_enabled_runs_are_rejected_while_single_source_contract_is_unchanged(self):
         started, release = threading.Event(), threading.Event()

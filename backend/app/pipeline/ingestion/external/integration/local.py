@@ -880,6 +880,9 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     roles = frozenset(value.strip() for value in os.environ.get("EXTERNAL_API_ROLES", "operator").split(",") if value.strip())
     if docs_enabled is None:
         docs_enabled = os.environ.get("EXTERNAL_API_DOCS_ENABLED", "").strip().lower() == "true"
+    # Static Onion sources are optional. Manual roots and promoted discoveries
+    # are resolved independently and must continue to work with this tuple empty
+    # or containing only disabled definitions.
     dark_proxy, dark_sources = (load_dark_web_config(dark_web_config_path)
                                 if dark_web_config_path.exists() else (None, ()))
     resolved_dark_client = dark_web_client or (TorHttpClient(dark_proxy) if dark_proxy is not None else None)
