@@ -13,6 +13,11 @@ os.environ["DATABASE_URL"] = f"sqlite:///{(TEST_DIRECTORY / 'test.db').as_posix(
 os.environ["UPLOAD_DIR"] = str(TEST_DIRECTORY / "uploads")
 os.environ["JWT_SECRET"] = "test-only-secret-that-is-long-enough"
 os.environ["ACCESS_TOKEN_MINUTES"] = "120"
+TEST_DATABASE_URL = os.environ["DATABASE_URL"]
+
+from backend.app.db.database import configure_test_database, dispose_test_database
+
+configure_test_database(TEST_DATABASE_URL)
 
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
@@ -56,8 +61,11 @@ class BackendAPITests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls) -> None:
-        cls.client_context.__exit__(None, None, None)
-        shutil.rmtree(TEST_DIRECTORY, ignore_errors=True)
+        try:
+            cls.client_context.__exit__(None, None, None)
+        finally:
+            dispose_test_database(TEST_DATABASE_URL)
+            shutil.rmtree(TEST_DIRECTORY, ignore_errors=True)
 
     def test_health_and_authentication(self) -> None:
         health = self.client.get("/api/v1/health")
