@@ -59,6 +59,16 @@ describe('single external source job', () => {
     expect(window.confirm).toHaveBeenCalled(); expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/jobs'))).toBe(false);
   });
 
+  it('keeps approved state distinct from repeated operational disable and enable actions', async () => {
+    sessionStorage.setItem('cti_language','en');sessionStorage.setItem('cti_access_token','token');
+    let current={...enabled};
+    const fetchMock=vi.spyOn(globalThis,'fetch').mockImplementation((input,init)=>{const path=String(input);if(path.endsWith('/auth/me'))return response(users.analyst);if(path.endsWith('/integrations/external-control/sources'))return response([current]);if(path.endsWith(`/sources/${current.source_id}/disable`)&&init?.method==='POST'){current={...current,status:'disabled'};return response(current)}if(path.endsWith(`/sources/${current.source_id}/enable`)&&init?.method==='POST'){current={...current,status:'enabled'};return response(current)}return response({},404)});
+    vi.spyOn(window,'confirm').mockReturnValue(true);renderWithProviders(<Sources/>);const actor=userEvent.setup();await screen.findByText(current.name);
+    await actor.click(screen.getByRole('button',{name:'Disable'}));const enableButton=await screen.findByRole('button',{name:'Enable'});expect(screen.getByLabelText('Status: disabled')).toBeInTheDocument();
+    await actor.click(enableButton);await waitFor(()=>expect(screen.getByLabelText('Status: enabled')).toBeInTheDocument());const row=screen.getByText(current.name).closest('tr')!;expect(within(row).queryByText('pending_review')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input])=>String(input).endsWith(`/sources/${current.source_id}/disable`))).toHaveLength(1);expect(fetchMock.mock.calls.filter(([input])=>String(input).endsWith(`/sources/${current.source_id}/enable`))).toHaveLength(1);
+  });
+
   it('starts only the selected source and prevents duplicate submissions', async () => {
     let resolveStart!: (value: Response) => void;
     const pending = new Promise<Response>((resolve) => { resolveStart = resolve; });
@@ -70,7 +80,7 @@ describe('single external source job', () => {
     resolveStart(await response(job('queued'))); await screen.findByText(/في الانتظار/);
   });
 
-  it('keeps job state and result counts on the selected source row only', async () => {    let resolveStart!: (value: Response) => void; const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? pendingStart : response(job('completed', { accepted_records: 7 }))); vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />);    const selectedButton = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` }); const otherButton = screen.getByRole('button', { name: `تشغيل ${otherEnabled.name}` });    await userEvent.setup().click(selectedButton); expect(selectedButton).toBeDisabled(); expect(selectedButton).toHaveTextContent('جار الإرسال'); expect(otherButton).toBeEnabled(); expect(otherButton).toHaveTextContent('تشغيل');    resolveStart(await response(job('completed', { accepted_records: 7 }))); await waitFor(() => { const selectedRow = screen.getAllByText(enabled.name)[0].closest('tr')!; const detailRow = selectedRow.nextElementSibling as HTMLElement; expect(within(detailRow).getByText(/مكتملة/)).toBeInTheDocument(); expect(within(detailRow).getByText('7')).toBeInTheDocument(); }); const otherRow = screen.getByText(otherEnabled.name).closest('tr')!; expect(within(otherRow).queryByText(/مكتملة|قيد التشغيل/)).not.toBeInTheDocument(); expect(within(otherRow).getByRole('button')).toBeEnabled();  });
+  it('keeps job state and result counts on the selected source row only', async () => {    let resolveStart!: (value: Response) => void; const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? pendingStart : response(job('completed', { accepted_records: 7 }))); vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />);    const selectedButton = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` }); const otherButton = screen.getByRole('button', { name: `تشغيل ${otherEnabled.name}` });    await userEvent.setup().click(selectedButton); expect(selectedButton).toBeDisabled(); expect(selectedButton).toHaveTextContent('جار الإرسال'); expect(otherButton).toBeEnabled(); expect(otherButton).toHaveTextContent('تشغيل');    resolveStart(await response(job('completed', { accepted_records: 7 }))); await waitFor(() => { const selectedRow = screen.getAllByText(enabled.name)[0].closest('tr')!; const detailRow = selectedRow.nextElementSibling as HTMLElement; expect(within(detailRow).getByText(/مكتملة/)).toBeInTheDocument(); expect(within(detailRow).getByText('7')).toBeInTheDocument(); }); const otherRow = screen.getByText(otherEnabled.name).closest('tr')!; expect(within(otherRow).queryByText(/مكتملة|قيد التشغيل/)).not.toBeInTheDocument(); expect(within(otherRow).getByRole('button',{name:`تشغيل ${otherEnabled.name}`})).toBeEnabled();  });
   it('polls queued to running to completed and displays returned counts', async () => {
     let poll = 0;
     mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('queued')) : response(++poll === 1 ? job('running') : job('completed', { accepted_records: 3, review_records: 1, rejected_records: 2, skipped_records: 4, error_count: 0 })));
@@ -83,6 +93,33 @@ describe('single external source job', () => {
     const failure = { code: 'job_failed', message: 'failure at http://private.local token=secret', retryable: false, details: {} };
     mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('failed', { error_count: 1 }, failure)) : response(job('failed', { error_count: 1 }, failure)));
     vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />); await userEvent.setup().click(await screen.findByRole('button', { name: `تشغيل ${enabled.name}` })); await screen.findByText(/فشلت/); expect(document.body).not.toHaveTextContent('private.local'); expect(document.body).not.toHaveTextContent('token=secret');
+  });
+
+  it('shows provider temporary unavailability for a valid failed provider job', async () => {
+    sessionStorage.setItem('cti_language', 'en');
+    const failure = { code: 'provider_temporarily_unavailable', message: 'discovery provider is temporarily unavailable', retryable: true, details: {} };
+    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('failed', {}, failure)) : response(job('failed', {}, failure)));
+    vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />);
+    await userEvent.setup().click(await screen.findByRole('button', { name: `Run ${enabled.name}` }));
+    expect(await screen.findByText('The discovery provider is unavailable')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('Connection temporarily interrupted');
+  });
+
+  it('shows a valid failed CISA result as source failure rather than interrupted transport', async () => {
+    sessionStorage.setItem('cti_language', 'en'); sessionStorage.setItem('cti_access_token', 'token');
+    const cisa = { source_id: 'cisa-advisories', name: 'CISA', source_type: 'cert', status: 'enabled', metadata: {} };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path=String(input);
+      if(path.endsWith('/auth/me')) return response(users.analyst);
+      if(path.endsWith('/integrations/external-control/sources')) return response([cisa]);
+      return response(job('failed', { status:'failed', error_count:50, sources:{'cisa-advisories':{
+        status:'failed', error_count:50, collection_method:'official_csaf',
+        failure_categories:{csaf_document_media_type:50}}}}));
+    });
+    vi.spyOn(window,'confirm').mockReturnValue(true); renderWithProviders(<Sources />);
+    await userEvent.setup().click(await screen.findByRole('button',{name:'Run CISA'}));
+    expect(await screen.findByText('CISA is currently unavailable.')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('Connection temporarily interrupted');
   });
 
   it('runs all enabled sources once for analysts, monitors aggregate results, and hides it from viewers', async () => {

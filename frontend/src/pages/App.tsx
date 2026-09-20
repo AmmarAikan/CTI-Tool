@@ -21,6 +21,7 @@ import { AdminGuard, AdminPage } from './Admin';
 import { AppErrorBoundary, NotFound } from '../components/AppErrorBoundary';
 import { DarkWebWatches } from './DarkWebWatches';
 import { ProcessingCenter } from './ProcessingCenter';
+import { AcceptedRecords } from './AcceptedRecords';
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } } });
 
@@ -44,6 +45,7 @@ export function App() {
                   <Route path="/manual" element={<Manual />} />
                   <Route path="/exports" element={<Exports />} />
                   <Route path="/reviews" element={<Reviews />} />
+                  <Route path="/accepted-records" element={<AcceptedRecords />} />
                   <Route path="/internal-sources" element={<InternalOverview />} />
                   <Route path="/internal-sources/dionaea" element={<InternalSourcePage integration="dionaea" />} />
                   <Route path="/internal-sources/host-auth" element={<InternalSourcePage integration="host-auth" />} />
