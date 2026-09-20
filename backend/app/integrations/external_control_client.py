@@ -37,7 +37,7 @@ class ExternalControlClient:
     SOURCE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
     JOB_STATES = frozenset({"queued", "running", "completed", "partial", "failed", "cancellation_requested", "cancelled"})
     COUNT_KEYS = frozenset({"accepted_records", "review_records", "rejected_records", "skipped_records", "error_count"})
-    SOURCE_METADATA_KEYS = frozenset({"category", "method", "transport", "limitation"})
+    SOURCE_METADATA_KEYS = frozenset({"category", "method", "transport", "limitation", "origin"})
 
     def __init__(
         self,
@@ -121,6 +121,19 @@ class ExternalControlClient:
             )
         )
 
+    def enable_source(self, source_id: str) -> dict[str, Any]:
+        self._validate_source_id(source_id)
+        return self._source_response(self._request("POST", f"/sources/{quote(source_id, safe='')}/enable-requests"))
+
+    def disable_source(self, source_id: str) -> dict[str, Any]:
+        self._validate_source_id(source_id)
+        return self._source_response(self._request("POST", f"/sources/{quote(source_id, safe='')}/disable"))
+
+    def delete_source(self, source_id: str) -> None:
+        self._validate_source_id(source_id)
+        value = self._request("DELETE", f"/sources/{quote(source_id, safe='')}")
+        if value != {"deleted": True}: raise ExternalControlTransportError("External source deletion contract is invalid")
+
     def add_manual_source(self, url: str, *, force: bool = False) -> dict[str, Any]:
         self._validate_manual_url(url)
         return self._job_response(
@@ -132,13 +145,25 @@ class ExternalControlClient:
             )
         )
 
-    def recheck_manual_source(self, url: str) -> dict[str, Any]:
-        self._validate_manual_url(url)
+    def tracked_manual_sources(self) -> dict[str, Any]:
+        value = self._request("GET", "/manual-sources/tracked")
+        if not isinstance(value, dict) or set(value) != {"schema_version", "items"} or value.get("schema_version") != "1.0" or not isinstance(value.get("items"), list) or len(value["items"]) > 100:
+            raise ExternalControlTransportError("Tracked manual source contract is invalid")
+        allowed = {"root_id", "label", "method", "last_checked", "active", "origin"}
+        for item in value["items"]:
+            if (not isinstance(item, dict) or set(item) != allowed or not self._safe_id(item.get("root_id"), minimum=16)
+                    or not self._safe_text(item.get("label"), 200) or not self._safe_text(item.get("method"), 40)
+                    or type(item.get("active")) is not bool or "onion" in str(item.get("label", "")).lower() and not str(item["label"]).startswith("onion-ref:")):
+                raise ExternalControlTransportError("Tracked manual source contract is invalid")
+        return value
+
+    def recheck_manual_source(self, root_id: str, *, force: bool = False) -> dict[str, Any]:
+        self._validate_source_id(root_id)
         return self._job_response(
             self._request(
                 "POST",
                 "/manual-sources/recheck",
-                payload={"url": url, "force": True},
+                payload={"root_id": root_id, "force": bool(force)},
                 idempotency_key=str(uuid.uuid4()),
             )
         )
@@ -166,7 +191,10 @@ class ExternalControlClient:
 
     def get_job(self, job_id: str) -> dict[str, Any]:
         self._validate_job_id(job_id)
-        return self._job_response(self._request("GET", f"/jobs/{quote(job_id, safe='')}"))
+        result = self._job_response(self._request("GET", f"/jobs/{quote(job_id, safe='')}"))
+        if result["job_id"] != job_id:
+            raise ExternalControlTransportError("External job identity does not match request")
+        return result
 
     def list_jobs(self, *, limit: int = 50) -> dict[str, Any]:
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -194,6 +222,12 @@ class ExternalControlClient:
         return self._dark_web_payload(self._request("POST","/dark-web/watches",payload={"keyword":keyword}), "watch")
     def patch_dark_web_watch(self, watch_id: str, enabled: bool) -> dict[str, Any]:
         self._validate_source_id(watch_id); return self._dark_web_payload(self._request("PATCH",f"/dark-web/watches/{quote(watch_id,safe='')}",payload={"enabled":enabled}),"watch")
+    def get_dark_web_schedule(self, watch_id: str) -> dict[str, Any]:
+        self._validate_source_id(watch_id); return self._dark_web_payload(self._request("GET",f"/dark-web/watches/{quote(watch_id,safe='')}/schedule"),"watch")
+    def patch_dark_web_schedule(self, watch_id: str, enabled: bool, interval_seconds: int) -> dict[str, Any]:
+        self._validate_source_id(watch_id)
+        if interval_seconds not in {3600,21600,43200,86400}: raise ValueError("Invalid dark web schedule interval")
+        return self._dark_web_payload(self._request("PATCH",f"/dark-web/watches/{quote(watch_id,safe='')}/schedule",payload={"enabled":enabled,"interval_seconds":interval_seconds}),"watch")
     def scan_dark_web_watch(self, watch_id: str, idempotency_key: str) -> dict[str, Any]:
         self._validate_source_id(watch_id); return self._job_response(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/scan",idempotency_key=idempotency_key))
     def dark_web_watch_results(self, watch_id: str, limit: int, offset: int) -> dict[str, Any]:
@@ -206,15 +240,26 @@ class ExternalControlClient:
         return value
     def create_dark_web_discovery_watch(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._dark_web_payload(self._request("POST","/dark-web/discovery/watches",payload=payload),"watch")
-    def promote_dark_web_result(self, watch_id: str, result_id: str, idempotency_key: str) -> dict[str, Any]:
+    def promote_dark_web_result(self, watch_id: str, result_id: str, content_sha256: str, idempotency_key: str) -> dict[str, Any]:
         self._validate_source_id(watch_id); self._validate_source_id(result_id)
-        return self._dark_web_payload(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/results/{quote(result_id,safe='')}/promote",idempotency_key=idempotency_key),"source")
+        if not re.fullmatch(r"[0-9a-f]{64}", content_sha256): raise ValueError("Invalid dark web result fingerprint")
+        return self._dark_web_payload(self._request("POST",f"/dark-web/watches/{quote(watch_id,safe='')}/results/{quote(result_id,safe='')}/promote",payload={"expected_content_sha256":content_sha256},idempotency_key=idempotency_key),"source")
     def dark_web_discovered_sources(self, watch_id: str) -> list[dict[str, Any]]:
         self._validate_source_id(watch_id); value=self._request("GET",f"/dark-web/watches/{quote(watch_id,safe='')}/discovered-sources")
         if not isinstance(value,list) or len(value)>100: raise ExternalControlTransportError("Dark web source contract is invalid")
         return [self._discovered_source(item) for item in value]
     def patch_dark_web_discovered_source(self, source_id: str, enabled: bool) -> dict[str, Any]:
         self._validate_source_id(source_id); return self._discovered_source(self._request("PATCH",f"/dark-web/discovered-sources/{quote(source_id,safe='')}",payload={"enabled":enabled}))
+    def dark_web_alerts(self, watch_id: str | None, limit: int, offset: int) -> dict[str, Any]:
+        if watch_id is not None:self._validate_source_id(watch_id)
+        if not 1<=limit<=100 or offset<0:raise ValueError("Invalid dark web alert page")
+        suffix=f"?limit={limit}&offset={offset}"+(f"&watch_id={quote(watch_id,safe='')}" if watch_id else "")
+        value=self._dark_web_payload(self._request("GET","/dark-web/alerts"+suffix),"list")
+        if not isinstance(value.get("unread"),int):raise ExternalControlTransportError("Dark web alert contract is invalid")
+        return value
+    def mark_dark_web_alert_read(self, alert_id: str) -> dict[str, Any]:
+        self._validate_source_id(alert_id)
+        return self._dark_web_payload(self._request("PATCH",f"/dark-web/alerts/{quote(alert_id,safe='')}/read"),"alert")
 
     @classmethod
     def _discovered_source(cls, value: Any) -> dict[str, Any]:
@@ -237,13 +282,52 @@ class ExternalControlClient:
         payload = self._request("GET", "/reviews/latest")
         if not isinstance(payload, dict) or set(payload) != {"run_id", "records"} or not isinstance(payload.get("run_id"), str) or not isinstance(payload.get("records"), list):
             raise ExternalControlTransportError("External review contract is invalid")
-        allowed = {"record_id", "canonical_url", "title", "source_type", "review_reason", "review_reasons", "stage_status", "classification_label", "privacy_status", "collected_at", "published"}
+        allowed = {"record_id", "canonical_url", "title", "source_type", "review_reason", "review_reasons", "stage_status", "classification_label", "privacy_status", "collected_at", "published", "content_sha256", "review_version", "summary", "excerpt", "source", "category", "status"}
         safe_records = []
         for item in payload["records"]:
-            if not isinstance(item, dict) or set(item) != allowed or not isinstance(item.get("record_id"), str) or not isinstance(item.get("review_reasons"), list):
+            if (not isinstance(item, dict) or set(item) != allowed or not isinstance(item.get("record_id"), str)
+                    or not isinstance(item.get("review_reasons"), list)
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(item.get("content_sha256")))
+                    or not self._safe_text(item.get("review_version"),40)
+                    or not isinstance(item.get("summary"),str) or len(item["summary"])>500
+                    or not self._safe_text(item.get("excerpt"), 2000)
+                    or item.get("status") not in {"pending", "approved_processing", "processing_failed"}):
                 raise ExternalControlTransportError("External review contract is invalid")
             safe_records.append({key: item.get(key) for key in allowed if key != "canonical_url" and key != "stage_status"})
         return {"run_id": payload["run_id"], "records": safe_records}
+
+    def review_lifecycle(self) -> dict[str, Any]:
+        payload = self._request("GET", "/reviews/lifecycle")
+        if not isinstance(payload, dict) or set(payload) != {"schema_version", "items"} or payload.get("schema_version") != "1.0" or not isinstance(payload.get("items"), list) or len(payload["items"]) > 1000:
+            raise ExternalControlTransportError("External review lifecycle contract is invalid")
+        allowed = {"record_id", "review_id", "content_sha256", "external_job_id", "export_run_id", "dataset_sha256", "state", "stage", "retryable", "updated_at"}
+        states = {"pending_review", "approved_processing", "processed", "rejected", "processing_failed"}
+        stages = {"review", "export", "central_import", "processed"}
+        for item in payload["items"]:
+            if (not isinstance(item, dict) or set(item) != allowed or not self._safe_id(item.get("record_id"), minimum=16)
+                    or item.get("review_id") != item.get("record_id") or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(item.get("content_sha256")))
+                    or item.get("state") not in states or item.get("stage") not in stages or type(item.get("retryable")) is not bool
+                    or not self._timestamp(item.get("updated_at"))):
+                raise ExternalControlTransportError("External review lifecycle contract is invalid")
+        return payload
+
+    def decide_review(self, record_id: str, content_sha256: str, decision: str, reason: str | None) -> dict[str, Any]:
+        self._validate_source_id(record_id); self._validate_sha256(content_sha256)
+        if decision not in {"approved", "rejected"}: raise ValueError("invalid review decision")
+        if reason not in {None, "not_relevant", "duplicate", "privacy_risk", "low_quality"}:
+            raise ValueError("invalid review reason")
+        value = self._request("POST", f"/reviews/{quote(record_id, safe='')}/decision",
+                              payload={"expected_content_sha256": content_sha256,
+                                       "decision": decision, "reason": reason}, idempotency_key=str(uuid.uuid4()))
+        allowed = {"schema_version", "record_id", "content_sha256", "decision", "reason", "decided_at", "export_run_id", "processing_state", "retryable"}
+        if (not isinstance(value, dict) or set(value) != allowed or value.get("schema_version") != "1.0"
+                or value.get("record_id") != record_id or value.get("content_sha256") != content_sha256
+                or value.get("decision") != decision or not self._timestamp(value.get("decided_at"))
+                or value.get("processing_state") != "completed" or value.get("retryable") is not False
+                or (decision == "approved" and not self._safe_id(value.get("export_run_id"), minimum=8))
+                or (decision == "rejected" and value.get("export_run_id") is not None)):
+            raise ExternalControlTransportError("External review decision contract is invalid")
+        return value
 
     def latest_export_summary(self) -> dict[str, Any]:
         payload = self._request("GET", "/exports/latest/summary")
@@ -260,6 +344,34 @@ class ExternalControlClient:
                 "completed_at",
             )
         }
+
+    def accepted_export_page(self, *, limit: int = 100, offset: int = 0, run_id: str | None = None) -> dict[str, Any]:
+        if not 1 <= limit <= 250 or offset < 0:
+            raise ValueError("External accepted export page is out of bounds")
+        suffix = f"&run_id={quote(run_id, safe='')}" if run_id else ""
+        payload = self._request("GET", f"/exports/accepted?limit={limit}&offset={offset}{suffix}")
+        allowed = {"schema_version", "export_run_id", "dataset_sha256", "items", "total", "limit", "offset"}
+        if (not isinstance(payload, dict) or set(payload) != allowed or payload.get("schema_version") != "1.0"
+                or not self._safe_id(payload.get("export_run_id"), minimum=8)
+                or not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", str(payload.get("dataset_sha256")))
+                or type(payload.get("total")) is not int or not 0 <= payload["total"] <= 10_000
+                or payload.get("limit") != limit or payload.get("offset") != offset
+                or not isinstance(payload.get("items"), list) or len(payload["items"]) > limit):
+            raise ExternalControlTransportError("External accepted export contract is invalid")
+        required = {"schema_version", "record_id", "source_item_id", "source", "source_type", "category",
+                    "title", "link", "content", "summary", "published", "updated_at", "author", "tags",
+                    "language", "collected_at", "content_hash", "classification", "metadata"}
+        for item in payload["items"]:
+            if (not isinstance(item, dict) or set(item) != required or item.get("schema_version") != "1.0"
+                    or not self._safe_id(item.get("record_id"), minimum=16)
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(item.get("content_hash")))
+                    or not self._safe_text(item.get("source"), 200) or not self._safe_text(item.get("source_type"), 50)
+                    or not self._safe_text(item.get("title"), 500) or not self._safe_text(item.get("content"), 100_000)
+                    or not isinstance(item.get("metadata"), dict) or not isinstance(item.get("classification"), dict)
+                    or not isinstance(item.get("tags"), list) or len(item["tags"]) > 100
+                    or (isinstance(item.get("link"), str) and ".onion" in item["link"].lower())):
+                raise ExternalControlTransportError("External accepted export item is invalid")
+        return payload
 
     def _request(
         self,
@@ -398,16 +510,27 @@ class ExternalControlClient:
         for source_id, summary in value.items():
             if not cls._safe_id(source_id, minimum=1) or not isinstance(summary, dict):
                 raise ExternalControlTransportError("External source result contract is invalid")
-            allowed = cls.COUNT_KEYS | {"status", "collection_method"}
+            allowed = cls.COUNT_KEYS | {"status", "collection_method", "failure_categories"}
             if not set(summary) <= allowed or not cls._safe_text(summary.get("status"), 40):
                 raise ExternalControlTransportError("External source result contract is invalid")
             projected[source_id] = {"status": summary["status"], **cls._counts(
                 {key: summary[key] for key in cls.COUNT_KEYS if key in summary}, "External source result contract is invalid")}
             if "collection_method" in summary:
-                if summary["collection_method"] not in {"reddit_public_rss", "reddit_browser_fallback", "reddit_oauth"}:
+                if summary["collection_method"] not in {"reddit_public_rss", "reddit_browser_fallback", "reddit_oauth",
+                                                         "official_csaf", "official_rss", "official_listing"}:
                     raise ExternalControlTransportError("External source result contract is invalid")
                 projected[source_id]["collection_method"] = summary["collection_method"]
+            if "failure_categories" in summary:
+                projected[source_id]["failure_categories"] = cls._failure_categories(summary["failure_categories"])
         return projected
+
+    @staticmethod
+    def _failure_categories(value: Any) -> dict[str, int]:
+        if (not isinstance(value, dict) or len(value) > 20
+                or any(not isinstance(key, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", key)
+                       or type(count) is not int or not 1 <= count <= 10000 for key, count in value.items())):
+            raise ExternalControlTransportError("External source failure categories contract is invalid")
+        return dict(value)
 
     @classmethod
     def _export_result(cls, value: Any) -> dict[str, Any]:
@@ -422,8 +545,10 @@ class ExternalControlClient:
             result[key] = value[key]
         if "dataset_sha256" in value:
             digest = value["dataset_sha256"]
-            if digest is not None and (not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
-                raise ExternalControlTransportError("External export result contract is invalid")
+            if digest is not None:
+                if not isinstance(digest, str) or not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", digest):
+                    raise ExternalControlTransportError("External export result contract is invalid")
+                digest = digest.removeprefix("sha256:")
             result["dataset_sha256"] = digest
         result.update(cls._counts({key: value[key] for key in ("accepted_records", "review_records") if key in value},
                                   "External export result contract is invalid"))
@@ -475,10 +600,11 @@ class ExternalControlClient:
     @staticmethod
     def _preview_response(payload: Any) -> dict[str, Any]:
         nullable = {"classification_label", "classification_confidence"}
+        json_keys = {"detected_type", "collection_path", "proposed_mapping", "validation_warnings", "approval_required"}
         required = {"schema_version", "preview_id", "state", "created_at", "expires_at", "display_url", "page_type",
                     "title", "excerpt", "disposition", "privacy_status", "review_reasons", "content_sha256", "counts",
                     "items_preview", "items_preview_total", "items_preview_truncated"}
-        if (not isinstance(payload, dict) or not required <= set(payload) or not set(payload) <= required | nullable
+        if (not isinstance(payload, dict) or not required <= set(payload) or not set(payload) <= required | nullable | json_keys
                 or payload.get("schema_version") != "1.0" or payload.get("state") != "pending"):
             raise ExternalControlTransportError("External preview contract is invalid")
         if not isinstance(payload.get("preview_id"), str) or not isinstance(payload.get("counts"), dict):
@@ -514,7 +640,22 @@ class ExternalControlClient:
                     or (published is not None and (not isinstance(published, str) or len(published) > 40 or not published.endswith("Z")))
                     or ((item["privacy_status"] == "review_required" or item["disposition"] == "rejected") and item["excerpt"])):
                 raise ExternalControlTransportError("External preview item contract is invalid")
-        return {key: payload.get(key) for key in required | nullable}
+        present_json = set(payload) & json_keys
+        if present_json:
+            mapping = payload.get("proposed_mapping")
+            path = payload.get("collection_path")
+            warnings = payload.get("validation_warnings")
+            allowed_fields = {"id_field", "title_field", "content_field", "summary_field", "published_field", "updated_field", "link_field"}
+            if (present_json != json_keys or payload.get("detected_type") != "json_collection"
+                    or payload.get("approval_required") is not True
+                    or not isinstance(path, list) or len(path) > 4
+                    or any(not isinstance(part, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", part) for part in path)
+                    or not isinstance(mapping, dict) or not set(mapping) <= allowed_fields
+                    or any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", value) for value in mapping.values())
+                    or not isinstance(warnings, list) or len(warnings) > 4
+                    or any(value not in {"explicit_approval_required", "empty_collection"} for value in warnings)):
+                raise ExternalControlTransportError("External JSON preview contract is invalid")
+        return {key: payload.get(key) for key in required | nullable | present_json}
 
     @classmethod
     def _validate_source_id(cls, source_id: str) -> None:

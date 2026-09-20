@@ -43,6 +43,38 @@ class FakeArticleCrawler:
 
 
 class LocalSourceJobTests(unittest.TestCase):
+    def test_canonical_incremental_terminal_status_counts_skipped_as_handled(self) -> None:
+        with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "status-regression-token"}):
+            from backend.app.pipeline.ingestion.external.integration.local import LocalCanonicalSourceExecutor
+        status = LocalCanonicalSourceExecutor._terminal_status
+        self.assertEqual(status("failed", 45, 5), "partial")
+        self.assertEqual(status("unchanged", 45, 0), "completed")
+        self.assertEqual(status("failed", 0, 5), "failed")
+        self.assertEqual(status("partial", 1, 5), "partial")
+        self.assertEqual(status("completed", 0, 0), "completed")
+        self.assertEqual(status("cancelled", 45, 5), "cancelled")
+
+    def test_executor_stage_log_is_sanitized_and_identifies_exception_class(self) -> None:
+        from backend.app.pipeline.ingestion.external.application.collection_service import RegisteredSource
+        with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "logging-regression-token",
+                                    "EXTERNAL_API_ROLES": "operator"}):
+            from backend.app.pipeline.ingestion.external.integration.local import LocalCanonicalSourceExecutor
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            executor = LocalCanonicalSourceExecutor(state_directory=root / "state",
+                processed_directory=root / "processed", review_directory=root / "review")
+            source = RegisteredSource("safe-source", "unsupported", True,
+                                      {"url": "https://private.test/?token=secret"})
+            with self.assertLogs("backend.app.pipeline.ingestion.external.integration.local", level="ERROR") as captured:
+                with self.assertRaises(ValueError):
+                    executor.execute(source, force=False, command_id="cmd-sanitized")
+            message = " ".join(captured.output)
+            self.assertIn("stage=connector_composition", message)
+            self.assertIn("exception_type=ValueError", message)
+            self.assertNotIn("private.test", message)
+            self.assertNotIn("secret", message)
+
     def test_real_canonical_rss_source_job_completes_through_local_adapter(self) -> None:
         feed = (FIXTURES / "rss_feed.xml").read_bytes()
 

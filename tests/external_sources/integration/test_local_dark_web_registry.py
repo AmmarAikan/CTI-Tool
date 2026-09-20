@@ -43,6 +43,8 @@ class CompletedRSSConnector:
 
 
 class LocalDarkWebRegistryTests(unittest.TestCase):
+    def _client(self,app):
+        client=TestClient(app);self.addCleanup(client.close);return client
     @staticmethod
     def _config(path: Path, *, duplicate=False):
         sources = [{"id": "darkweb-source-test", "name": "Approved test source", "url": FAKE_ONION,
@@ -80,7 +82,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
 
     def test_sources_are_unified_redacted_and_execute_only_requested_definition(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, AvailableTorClient()); client = TestClient(app)
+            root = Path(folder); app = self._build(root, AvailableTorClient()); client = self._client(app)
             headers = {"Authorization": "Bearer dark-registry-token"}
             response = client.get(f"{API_PREFIX}/sources", headers=headers)
             dark = {value["source_id"]: value for value in response.json() if value["source_type"] == "dark_web"}
@@ -105,7 +107,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
     def test_tor_failure_is_isolated_from_registered_public_source(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, UnavailableTorClient(),
-                connector_factory=lambda _source, _state: CompletedRSSConnector()); client = TestClient(app)
+                connector_factory=lambda _source, _state: CompletedRSSConnector()); client = self._client(app)
             headers = {"Authorization": "Bearer dark-registry-token"}
             queued = client.post(f"{API_PREFIX}/jobs", json={
                 "source_ids": ["darkweb-source-test", "the-hacker-news"]}, headers=headers).json()
@@ -117,7 +119,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
 
     def test_single_source_force_reprocesses_unchanged_record_and_preserves_identity(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder); app = self._build(root, AvailableTorClient()); client = TestClient(app)
+            root = Path(folder); app = self._build(root, AvailableTorClient()); client = self._client(app)
             headers = {"Authorization": "Bearer dark-registry-token"}
             first_job = client.post(f"{API_PREFIX}/sources/darkweb-source-test/jobs", json={"force": False}, headers=headers).json()
             first = self._wait(client, first_job["job_id"], headers)
@@ -137,7 +139,7 @@ class LocalDarkWebRegistryTests(unittest.TestCase):
     def test_multi_source_force_reprocesses_dark_web_record(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, AvailableTorClient(),
-                connector_factory=lambda _source, _state: CompletedRSSConnector()); client = TestClient(app)
+                connector_factory=lambda _source, _state: CompletedRSSConnector()); client = self._client(app)
             headers = {"Authorization": "Bearer dark-registry-token"}
             initial_job = client.post(f"{API_PREFIX}/sources/darkweb-source-test/jobs", headers=headers).json()
             self._wait(client, initial_job["job_id"], headers)

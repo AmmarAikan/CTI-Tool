@@ -82,7 +82,18 @@ class FakeReviews:
             "stage_status": {"privacy": "review_required", "classification": "accepted"},
             "classification_label": "cti_related", "privacy_status": "review_required",
             "collected_at": "2026-08-27T00:00:00Z", "published": None,
+            "content_sha256": "sha256:" + "a" * 64,
+            "review_version":"external_review_v2","summary":"Sanitized summary",
+            "excerpt": "Sanitized review content", "source": "Example source",
+            "category": "advisory", "status": "pending",
         }]}
+
+    def decide(self, record_id, expected_content_sha256, decision, reason, *, requested_by):
+        return {"schema_version": "1.0", "record_id": record_id,
+                "content_sha256": expected_content_sha256, "decision": decision,
+                "reason": reason, "decided_at": "2026-08-27T01:00:00Z",
+                "export_run_id": "ext-review-decision-0001" if decision == "approved" else None,
+                "processing_state": "completed", "retryable": False}
 
 
 class RestIntegrationAdapterTests(unittest.TestCase):
@@ -105,7 +116,7 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         self.previews.reject.return_value = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890",
             "state": "rejected", "decided_at": "2026-09-06T00:01:00Z"}
         self.services = AdapterServices(TokenAuth(), RoleAuthorizer(), self.collection, self.manual, self.sources, self.job_service, self.runner, InMemoryIdempotencyStore(), FakeReviews(), self.previews)
-        self.client = TestClient(create_app(self.services))
+        self.client = TestClient(create_app(self.services));self.addCleanup(self.client.close)
 
     @staticmethod
     def auth(token="operator-token"): return {"Authorization": f"Bearer {token}"}
@@ -123,7 +134,7 @@ class RestIntegrationAdapterTests(unittest.TestCase):
         self.assertEqual(self.client.get("/openapi.json").status_code, 404)
 
     def test_enabled_openapi_describes_bearer_auth_without_bypassing_it(self):
-        client = TestClient(create_app(self.services, docs_enabled=True))
+        client = TestClient(create_app(self.services, docs_enabled=True));self.addCleanup(client.close)
         self.assertEqual(client.get("/docs").status_code, 200)
         schema_response = client.get("/openapi.json")
         self.assertEqual(schema_response.status_code, 200)

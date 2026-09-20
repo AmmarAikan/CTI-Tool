@@ -88,7 +88,7 @@ class RedditPublicRSSClient:
         except requests.HTTPError as exc:raise _status_error(exc.response.status_code if exc.response is not None else 500) from exc
         except requests.RequestException as exc:raise RedditAccessError("rss_network_failure",retryable=True) from exc
         except Exception as exc:raise RedditAccessError("rss_http_failure",retryable=False) from exc
-        parts=urlsplit(response.url);expected=f"/r/{self.source.subreddit}/.rss";media=response.headers.get("Content-Type","").split(";",1)[0].strip().lower()
+        parts=urlsplit(response.url);expected=f"/r/{self.source.subreddit}/.rss";media=next((str(value) for key,value in response.headers.items() if str(key).lower()=="content-type"),"").split(";",1)[0].strip().lower()
         if parts.scheme!="https" or parts.hostname!="www.reddit.com" or parts.port is not None or parts.path.lower()!=expected.lower():raise RedditAccessError("rss_http_failure",retryable=False)
         if media not in XML_TYPES or b"<!DOCTYPE" in response.body.upper() or b"<!ENTITY" in response.body.upper():raise RedditAccessError("rss_parsing_failure",retryable=False)
         return response
@@ -124,7 +124,8 @@ class RedditConnector(SocialConnector):
         if not self.source.enabled:result.status="disabled";return result
         state=self.processor.state["sources"].setdefault(self.source.source_id,{})
         try:
-            posts,raw_hash,method,warning=self._collect_posts();state.update({"raw_content_hash":raw_hash,"collection_method":method})
+            posts,raw_hash,method,warning,invalid_entries=self._collect_posts();state.update({"raw_content_hash":raw_hash,"collection_method":method})
+            result.skipped_items+=invalid_entries
             for post in posts[:self.source.limit]:
                 try:self.add(result,self.processor.process(self._candidate(post,method)))
                 except Exception:result.errors.append(SocialError(self.source.source_id,"internal_failure"))
@@ -135,11 +136,12 @@ class RedditConnector(SocialConnector):
         if result.errors and result.all_items:result.status="partial"
         state["last_status"]=result.status;return result
     def _collect_posts(self):
-        if self.source.transport=="reddit_oauth":posts,raw_hash=self._oauth();return posts,raw_hash,"reddit_oauth",None
+        if self.source.transport=="reddit_oauth":posts,raw_hash=self._oauth();return posts,raw_hash,"reddit_oauth",None,0
         rss_error=None
         try:
-            posts,raw_hash=self._public()
-            if len(posts)>=self.source.minimum_usable_posts:return posts,raw_hash,"reddit_public_rss",None
+            posts,raw_hash,invalid_entries=self._public()
+            warning=SocialError(self.source.source_id,"rss_entry_contract_invalid") if invalid_entries else None
+            if len(posts)>=self.source.minimum_usable_posts:return posts,raw_hash,"reddit_public_rss",warning,invalid_entries
             rss_error=RedditAccessError("rss_insufficient_results",retryable=True)
         except RedditAccessError as error:rss_error=error;posts,raw_hash=[],sha256_json({"rss":"unavailable"})
         if not self.source.fallback_enabled or self.source.transport!="rss_with_browser_fallback":raise rss_error
@@ -150,14 +152,25 @@ class RedditConnector(SocialConnector):
         browser_posts=[post for value in browser.collect() if (post:=self._validated_post(value))]
         if not browser_posts:raise RedditAccessError("browser_insufficient_results",retryable=True)
         combined={post.post_id:post for post in posts};combined.update({post.post_id:post for post in browser_posts});selected=list(combined.values())[:self.source.target_count]
-        return selected,sha256_json([asdict(post) for post in selected]),"reddit_browser_fallback",None
+        return selected,sha256_json([asdict(post) for post in selected]),"reddit_browser_fallback",warning if 'warning' in locals() else None,invalid_entries if 'invalid_entries' in locals() else 0
     def _public(self):
         response=(self.rss_client or RedditPublicRSSClient(self.source)).listing();parsed=feedparser.parse(response.body)
         if getattr(parsed,"bozo",False) and not parsed.entries:raise RedditAccessError("rss_parsing_failure",retryable=False)
-        return [post for entry in list(parsed.entries)[:self.source.limit] if (post:=self._rss_post(entry))],sha256_bytes(response.body)
+        posts=[];invalid_entries=0
+        for entry in list(parsed.entries)[:self.source.limit]:
+            try:post=self._rss_post(entry)
+            except (AttributeError,IndexError,TypeError,ValueError):post=None
+            if post is None:invalid_entries+=1
+            else:posts.append(post)
+        return posts,sha256_bytes(response.body),invalid_entries
     def _rss_post(self,entry):
-        title,item_id=str(entry.get("title") or "").strip(),str(entry.get("id") or "").strip();links=entry.get("links") or [];post=next((str(link.get("href")) for link in links if urlsplit(str(link.get("href"))).hostname=="www.reddit.com"),"")
-        raw=str(entry.get("content",[{}])[0].get("value") if entry.get("content") else entry.get("summary") or "");soup=BeautifulSoup(raw,"lxml");body=soup.get_text("\n",strip=True);external=next((str(link.get("href")) for link in links if urlsplit(str(link.get("href"))).hostname!="www.reddit.com"),None)
+        if not isinstance(entry,dict):return None
+        title,item_id=str(entry.get("title") or "").strip(),str(entry.get("id") or "").strip();links=entry.get("links") or []
+        if not isinstance(links,list) or any(not isinstance(link,dict) for link in links):return None
+        content=entry.get("content") or []
+        if content and (not isinstance(content,list) or not isinstance(content[0],dict)):return None
+        post=next((str(link.get("href")) for link in links if urlsplit(str(link.get("href"))).hostname=="www.reddit.com"),"")
+        raw=str(content[0].get("value") if content else entry.get("summary") or "");soup=BeautifulSoup(raw,"lxml");body=soup.get_text("\n",strip=True);external=next((str(link.get("href")) for link in links if urlsplit(str(link.get("href"))).hostname!="www.reddit.com"),None)
         if external is None:external=next((str(anchor.get("href")) for anchor in soup.select("a[href]") if urlsplit(str(anchor.get("href"))).hostname!="www.reddit.com"),None)
         return self._validated_post(RedditPost(item_id,title,post,body,external,str(entry.get("published") or entry.get("updated") or "") or None))
     def _candidate(self,post:RedditPost,method:str)->SocialCandidate:

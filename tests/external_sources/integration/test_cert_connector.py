@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -80,7 +81,77 @@ def cisa_source(**overrides) -> CERTSource:
     return CERTSource.from_mapping(values)
 
 
+def cisa_rss_source() -> CERTSource:
+    return CERTSource.from_mapping({
+        "source_id": "cisa-advisories", "name": "CISA",
+        "url": "https://www.cisa.gov/cybersecurity-advisories/all.xml",
+        "category": "advisory", "method": "rss", "enabled": True,
+        "max_items": 50, "lookback_days": 30,
+    })
+
+
 class CERTConnectorTests(unittest.TestCase):
+    def test_cisa_supported_rss_success_empty_and_bounded_failures(self) -> None:
+        source = cisa_rss_source()
+        valid = HttpResponse(source.url, 200, {"Content-Type": "application/rss+xml"},
+                             (FIXTURES / "rss_feed.xml").read_bytes())
+        success = CERTConnector(source, http_client=StubHttpClient(valid), crawler=StubCrawler(),
+                                clock=lambda: NOW).collect_result()
+        self.assertEqual((success.status, len(success.all_items)), ("completed", 2))
+
+        empty = HttpResponse(source.url, 200, {"Content-Type": "application/rss+xml"},
+                             b'<?xml version="1.0"?><rss version="2.0"><channel><title>CISA</title></channel></rss>')
+        valid_empty = CERTConnector(source, http_client=StubHttpClient(empty), crawler=StubCrawler(),
+                                    clock=lambda: NOW).collect_result()
+        self.assertEqual((valid_empty.status, valid_empty.all_items, valid_empty.errors), ("completed", [], []))
+
+        class RaisingClient:
+            def __init__(self, error): self.error = error
+            def get(self, *_args, **_kwargs): raise self.error
+
+        for status in (403, 404):
+            response = requests.Response(); response.status_code = status
+            result = CERTConnector(source, http_client=RaisingClient(requests.HTTPError(response=response)),
+                                   crawler=StubCrawler(), clock=lambda: NOW).collect_result()
+            self.assertEqual((result.status, result.errors[0].category, result.errors[0].retryable),
+                             ("failed", "feed_request_failed", False))
+
+        malformed = HttpResponse(source.url, 200, {"Content-Type": "application/rss+xml"}, b"<broken")
+        invalid = CERTConnector(source, http_client=StubHttpClient(malformed), crawler=StubCrawler(),
+                                clock=lambda: NOW).collect_result()
+        self.assertEqual((invalid.status, invalid.errors[0].category), ("failed", "invalid_feed"))
+        timed_out = CERTConnector(source, http_client=RaisingClient(requests.Timeout()),
+                                  crawler=StubCrawler(), clock=lambda: NOW).collect_result()
+        self.assertEqual((timed_out.status, timed_out.errors[0].category), ("failed", "feed_request_failed"))
+
+    def test_csaf_fallback_runs_only_for_explicit_rss_request_failure(self) -> None:
+        source = cisa_rss_source()
+        class Fallback:
+            def __init__(self): self.calls = 0
+            def collect_result(self):
+                self.calls += 1
+                return type("Result", (), {"status": "completed", "accepted_items": [], "review_items": [],
+                    "errors": [], "skipped_items": 0})()
+        class FailedClient:
+            def get(self, *_args, **_kwargs): raise requests.Timeout()
+        fallback = Fallback()
+        result = CERTConnector(source, http_client=FailedClient(), crawler=StubCrawler(), clock=lambda: NOW,
+                               csaf_connector=fallback).collect_result()
+        self.assertEqual((result.status, fallback.calls), ("completed", 1))
+
+        valid = HttpResponse(source.url, 200, {"Content-Type": "application/rss+xml"},
+                             (FIXTURES / "rss_feed.xml").read_bytes())
+        fallback = Fallback()
+        CERTConnector(source, http_client=StubHttpClient(valid), crawler=StubCrawler(), clock=lambda: NOW,
+                      csaf_connector=fallback).collect_result()
+        self.assertEqual(fallback.calls, 0)
+
+        malformed = HttpResponse(source.url, 200, {"Content-Type": "application/rss+xml"}, b"<broken")
+        fallback = Fallback()
+        CERTConnector(source, http_client=StubHttpClient(malformed), crawler=StubCrawler(), clock=lambda: NOW,
+                      csaf_connector=fallback).collect_result()
+        self.assertEqual(fallback.calls, 0)
+
     def test_listing_extracts_full_text_and_routes_unavailable_detail_to_review(self) -> None:
         state = {"sources": {}, "items": {}}
         connector = CERTConnector(

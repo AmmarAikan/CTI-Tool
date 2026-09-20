@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassificationService
 from backend.app.pipeline.ingestion.external.classification.classifier import ClassificationResult, MODEL_SHA256, MODEL_VERSION
 from backend.app.pipeline.ingestion.external.common.http_client import HttpResponse, ResponseTooLargeError
+from backend.app.pipeline.ingestion.external.common.run_manifest import RunManifest
+from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
 from backend.app.pipeline.ingestion.external.crawler.web_crawler import CrawlResult
 from backend.app.pipeline.ingestion.external.hackernews_connector import HackerNewsConnector, HackerNewsSource
 from backend.app.pipeline.ingestion.external.reddit_connector import RedditAccessError, RedditConnector, RedditPost, RedditPublicRSSClient, RedditSource
 from backend.app.pipeline.ingestion.external.reddit_playwright import RedditPlaywrightCollector
+from backend.app.pipeline.ingestion.external.export.final_dataset import ExternalDatasetExporter, RunSourceOutput
 from backend.app.pipeline.ingestion.external.social_common import ConfiguredSocialCollector, SocialCollectionResult, SocialItemProcessor
 from backend.app.pipeline.ingestion.external.telegram_connector import TelegramConnector, TelegramSource
 
@@ -103,6 +108,30 @@ def processor(*, state=None, classification="accepted"):
 
 
 class SocialConnectorTests(unittest.TestCase):
+    def test_reddit_representative_entries_isolate_malformed_contract_and_export_once(self) -> None:
+        source=fallback_source(minimum_usable_posts=2)
+        browser=StubRedditBrowser()
+        entries=[
+            {"id":"t3_self123","title":"Self text security report","links":[{"href":"https://www.reddit.com/r/netsec/comments/self123/report/"}],"content":[{"value":"Detailed defensive self text about malware detection and remediation."}],"updated":"2026-09-14T08:00:00Z"},
+            {"id":"t3_link123","title":"Linked security report","links":[{"href":"https://www.reddit.com/r/netsec/comments/link123/report/"},{"href":"https://example.test/advisory"}],"content":[{"value":"Public caption describing vulnerability mitigations."}],"updated":"2026-09-14T09:00:00Z"},
+            {"id":"t3_bad123","title":"Malformed entry","links":{"href":"https://www.reddit.com/r/netsec/comments/bad123/report/"},"content":"wrong-type"},
+        ]
+        parsed=type("Parsed",(),{"bozo":False,"entries":entries})()
+        with patch("backend.app.pipeline.ingestion.external.reddit_connector.feedparser.parse",return_value=parsed):
+            result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=StubRedditFeed()),browser=browser,processor=processor()).collect_result()
+        self.assertEqual((result.status,len(result.accepted_items),result.skipped_items,browser.calls),('partial',2,1,0))
+        self.assertEqual([error.category for error in result.errors],["rss_entry_contract_invalid"])
+        self.assertEqual({item.source_item_id for item in result.accepted_items},{"t3_self123","t3_link123"})
+
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);run_id="ext-reddit-read-only-reproduction"
+            exporter=ExternalDatasetExporter(exports_dir=root/"exports",review_dir=root/"review",
+                state_manager=JsonStateManager(root/"state.json"),clock=lambda:NOW)
+            exported=exporter.export(RunManifest(run_id=run_id,started_at="2026-09-14T10:00:00Z"),(
+                RunSourceOutput(run_id,source.source_id,result.status,tuple(result.accepted_items),tuple(result.review_items),tuple(error.category for error in result.errors)),))
+            self.assertEqual(exported.manifest["accepted_records"],2)
+            self.assertEqual(exported.manifest["duplicates_removed"],0)
+
     def test_reddit_public_rss_self_text_link_empty_dedup_and_disabled(self) -> None:
         source=RedditSource.from_mapping({"source_id":"reddit-netsec","name":"Reddit netsec","source_type":"reddit","transport":"reddit_public_rss","enabled":True,"subreddit":"netsec","max_items":10,"request_timeout_seconds":10,"rate_limit_delay_seconds":0,"fetch_linked_articles":True,"max_response_bytes":100000,"max_redirects":2})
         client=StubRedditFeed();state={"sources":{},"items":{}}
@@ -135,6 +164,14 @@ class SocialConnectorTests(unittest.TestCase):
         malformed.get=lambda url,**kwargs:HttpResponse(url,200,{"Content-Type":"application/xml"},b"<broken")
         result=RedditConnector(source,rss_client=RedditPublicRSSClient(source,http_client=malformed),processor=processor()).collect_result()
         self.assertEqual(result.errors[0].category,"rss_parsing_failure")
+
+    def test_reddit_public_rss_accepts_lowercase_content_type_header(self) -> None:
+        source=RedditSource("reddit-asknetsec","Reddit","AskNetsec",True,transport="reddit_public_rss")
+        client=StubRedditFeed(url="https://www.reddit.com/r/AskNetsec/.rss")
+        original=client.get
+        client.get=lambda url,**kwargs:HttpResponse(client.url,200,{"content-type":"application/atom+xml; charset=UTF-8"},original(url,**kwargs).body)
+        listing=RedditPublicRSSClient(source,http_client=client).listing()
+        self.assertGreater(len(listing.body),0)
 
     def test_reddit_fallback_quality_merge_dedup_and_safe_failure(self) -> None:
         browser_posts=[RedditPost("t3_public1","Browser duplicate","/r/netsec/comments/public1/browser/",body="Browser body with sufficient security context."),RedditPost("t3_browser2","Browser link","/r/netsec/comments/browser2/link/",external_url="https://example.test/report")]

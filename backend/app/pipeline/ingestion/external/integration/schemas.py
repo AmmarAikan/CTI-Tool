@@ -34,6 +34,25 @@ class ManualURLRequestBody(StrictModel):
     force: bool = False
 
 
+class ManualRecheckRequestBody(StrictModel):
+    root_id: str = Field(min_length=16, max_length=80, pattern=r"^[A-Za-z0-9_.:-]+$")
+    force: bool = False
+
+
+class ManualTrackedRootResponse(StrictModel):
+    root_id: str = Field(min_length=16, max_length=80)
+    label: str = Field(min_length=1, max_length=200)
+    method: str = Field(min_length=1, max_length=40)
+    last_checked: str | None = Field(default=None, max_length=40)
+    active: bool
+    origin: str = Field(max_length=40)
+
+
+class ManualTrackedRootsResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[ManualTrackedRootResponse] = Field(default_factory=list, max_length=100)
+
+
 class ManualPreviewRequestBody(StrictModel):
     url: HttpUrl
 
@@ -80,6 +99,11 @@ class ManualPreviewResponse(StrictModel):
     items_preview_total: int = Field(ge=0)
     items_preview_truncated: bool
     counts: dict[Literal["items", "accepted", "review", "rejected", "skipped", "errors"], int]
+    detected_type: Literal["json_collection"] | None = None
+    collection_path: list[str] | None = Field(default=None, max_length=4)
+    proposed_mapping: dict[str, str] | None = Field(default=None, max_length=9)
+    validation_warnings: list[Literal["explicit_approval_required", "empty_collection"]] | None = Field(default=None, max_length=4)
+    approval_required: bool | None = None
 
 
 class ManualPreviewRejectedResponse(StrictModel):
@@ -93,6 +117,10 @@ class DarkWebWatchCreateBody(StrictModel):
 
 class DarkWebWatchPatchBody(StrictModel):
     enabled: bool
+
+class DarkWebSchedulePatchBody(StrictModel):
+    enabled: bool
+    interval_seconds: Literal[3600,21600,43200,86400]
 
 class DarkWebWatchResponse(StrictModel):
     watch_id: str
@@ -109,6 +137,11 @@ class DarkWebWatchResponse(StrictModel):
     match_mode: Literal["any","all"] | None = None
     provider_id: str | None = Field(default=None,max_length=64)
     scan_interval_seconds: int | None = Field(default=None,ge=300,le=604800)
+    schedule_enabled: bool = False
+    next_run_at: str | None = None
+    last_scheduled_run_at: str | None = None
+    last_attempt_at: str | None = None
+    schedule_failure_category: str | None = Field(default=None,max_length=64,pattern=r"^[a-z][a-z0-9_]*$")
 
 class DarkWebWatchListResponse(StrictModel):
     schema_version: Literal["1.0"] = "1.0"
@@ -166,6 +199,27 @@ class DiscoveredSourceResponse(StrictModel):
     updated_at: str
 
 class DiscoveredSourcePatchBody(StrictModel): enabled: bool
+class DiscoveredSourcePromoteBody(StrictModel):
+    expected_content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+class DarkWebAlertResponse(StrictModel):
+    alert_id: str = Field(pattern=r"^dwa-[0-9a-f]{32}$")
+    watch_id: str
+    result_id: str = Field(pattern=r"^dwr-[0-9a-f]{32}$")
+    onion_reference: str = Field(pattern=r"^onion-ref:[0-9a-f]{12,64}$")
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    alert_type: Literal["new_match","content_changed"]
+    matched_keywords: list[str] = Field(max_length=10)
+    created_at: str
+    read_at: str | None = None
+
+class DarkWebAlertPageResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[DarkWebAlertResponse] = Field(max_length=100)
+    total: int = Field(ge=0)
+    unread: int = Field(ge=0)
+    limit: int = Field(ge=1,le=100)
+    offset: int = Field(ge=0)
 
 
 class JobStatusResponse(StrictModel):
@@ -246,8 +300,61 @@ class ReviewRecordResponse(StrictModel):
     privacy_status: str | None = None
     collected_at: str | None = None
     published: str | None = None
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    review_version: str = Field(max_length=40)
+    summary: str = Field(max_length=500)
+    excerpt: str = Field(max_length=2000)
+    source: str = Field(max_length=200)
+    category: str = Field(max_length=80)
+    status: Literal["pending", "approved_processing", "processing_failed"] = "pending"
 
 
 class LatestReviewResponse(StrictModel):
     run_id: str
-    records: list[ReviewRecordResponse] = Field(default_factory=list)
+    records: list[ReviewRecordResponse] = Field(default_factory=list, max_length=100)
+
+
+class ReviewLifecycleItem(StrictModel):
+    record_id: str = Field(min_length=16, max_length=100)
+    review_id: str = Field(min_length=16, max_length=100)
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    external_job_id: str | None = Field(default=None, max_length=100)
+    export_run_id: str | None = Field(default=None, max_length=200)
+    dataset_sha256: str | None = Field(default=None, pattern=r"^(?:sha256:)?[0-9a-f]{64}$")
+    state: Literal["pending_review", "approved_processing", "processed", "rejected", "processing_failed"]
+    stage: Literal["review", "export", "central_import", "processed"]
+    retryable: bool = False
+    updated_at: str
+
+
+class ReviewLifecycleResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    items: list[ReviewLifecycleItem] = Field(default_factory=list, max_length=1000)
+
+
+class AcceptedExportPageResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    export_run_id: str
+    dataset_sha256: str = Field(pattern=r"^(?:sha256:)?[0-9a-f]{64}$")
+    items: list[dict[str, Any]] = Field(default_factory=list, max_length=250)
+    total: int = Field(ge=0, le=10_000)
+    limit: int = Field(ge=1, le=250)
+    offset: int = Field(ge=0)
+
+
+class ReviewDecisionBody(StrictModel):
+    expected_content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    decision: Literal["approved", "rejected"]
+    reason: Literal["not_relevant", "duplicate", "privacy_risk", "low_quality"] | None = None
+
+
+class ReviewDecisionResponse(StrictModel):
+    schema_version: Literal["1.0"] = "1.0"
+    record_id: str = Field(min_length=16, max_length=100)
+    content_sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    decision: Literal["approved", "rejected"]
+    reason: str | None = Field(default=None, max_length=40)
+    decided_at: str
+    export_run_id: str | None = None
+    processing_state: Literal["completed", "processing_failed"]
+    retryable: bool = False

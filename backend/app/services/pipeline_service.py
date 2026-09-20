@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import get_settings
-from backend.app.db.models import CorrelationRecord, IndicatorRecord, ThreatEvent
+from backend.app.db.models import CorrelationRecord, IndicatorRecord, PipelineRun, ThreatEvent
 from backend.app.pipeline.correlation.correlator import (
     SimilarityCorrelator,
     SimpleCorrelator,
@@ -230,6 +230,61 @@ class PipelineService:
         self.session.commit()
         return summary
 
+    def sync_external_accepted(self, client: Any) -> dict[str, Any]:
+        return self._sync_external_export(client)
+
+    def orchestrate_external_job(self, client: Any, job_id: str) -> dict[str, Any]:
+        job = client.get_job(job_id)
+        if job.get("state") not in {"completed", "partial"}: raise ValueError("external_job_not_terminal")
+        result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        export = result.get("export") if isinstance(result.get("export"), dict) else {}
+        export_run_id = export.get("run_id")
+        digest = str(export.get("dataset_sha256") or "").removeprefix("sha256:")
+        if not isinstance(export_run_id, str) or not export_run_id or len(digest) != 64:
+            raise ValueError("external_job_export_invalid")
+        existing = self.session.scalars(select(PipelineRun).where(PipelineRun.pipeline == "external")).all()
+        match = next((run for run in existing if isinstance(run.details, dict)
+                      and run.details.get("external_job_id") == job_id
+                      and run.details.get("export_run_id") == export_run_id
+                      and str(run.details.get("dataset_sha256") or "").removeprefix("sha256:") == digest), None)
+        if match is not None: return self._run_summary(match)
+        return self._sync_external_export(client, run_id=export_run_id, expected_digest=digest,
+            extra_details={"external_job_id": job_id})
+
+    def sync_external_run(self, client: Any, run_id: str) -> dict[str, Any]:
+        existing = self.session.scalars(select(PipelineRun).where(PipelineRun.pipeline == "external")).all()
+        match = next((run for run in existing if isinstance(run.details, dict)
+                      and run.details.get("export_run_id") == run_id), None)
+        return self._run_summary(match) if match is not None else self._sync_external_export(client, run_id=run_id)
+
+    def _sync_external_export(self, client: Any, *, run_id: str | None = None,
+                              expected_digest: str | None = None,
+                              extra_details: dict[str, Any] | None = None) -> dict[str, Any]:
+        records, offset, identity, total = [], 0, None, None
+        normalizer = ExternalJsonFileConnector([])
+        while True:
+            page = (client.accepted_export_page(limit=250, offset=offset, run_id=run_id) if run_id
+                    else client.accepted_export_page(limit=250, offset=offset))
+            current_identity = (page["export_run_id"], page["dataset_sha256"], page["total"])
+            if identity is None:
+                identity, total = current_identity, page["total"]
+            elif current_identity != identity:
+                raise RuntimeError("External accepted export changed during synchronization")
+            for item in page["items"]:
+                records.append(normalizer.normalize_item(item, Path("external-accepted.json")))
+            offset += len(page["items"])
+            if offset >= page["total"]:
+                break
+            if not page["items"] or offset > 10_000:
+                raise RuntimeError("External accepted export pagination is invalid")
+        if run_id is not None and (identity is None or identity[0] != run_id):
+            raise RuntimeError("External export identity does not match job")
+        if expected_digest is not None and (identity is None or str(identity[1]).removeprefix("sha256:") != expected_digest):
+            raise RuntimeError("External export digest does not match job")
+        return self._run_external_records(records, details={"transport": "external_control_export", **(extra_details or {}),
+            "export_run_id": identity[0] if identity else None,
+            "dataset_sha256": identity[1] if identity else None, "export_total": total or 0})
+
     def _run_external_records(
         self,
         records,
@@ -239,7 +294,8 @@ class PipelineService:
     ) -> dict[str, Any]:
         records = list(records)
         run = self.repository.create_run("external", run_source, details=details)
-        stored = failed = unchanged = 0
+        stored = failed = unchanged = created = updated = 0
+        event_ids: list[str] = []
         try:
             raw_context = []
             processable_records = []
@@ -271,6 +327,8 @@ class PipelineService:
                 ):
                     unchanged += 1
                     continue
+                if raw_item is None: created += 1
+                else: updated += 1
                 raw_item = self.repository.upsert_raw_record(
                     source, record, raw_item, flush=False
                 )
@@ -287,12 +345,14 @@ class PipelineService:
                 risk = self.risk_scorer.score(cti_object)
                 cti_object.severity = risk.severity
                 cti_object.raw_reference["risk_factors"] = risk.factors
-                self.repository.upsert_cti_object(source, cti_object, raw_item, risk.score)
+                event = self.repository.upsert_cti_object(source, cti_object, raw_item, risk.score)
+                event_ids.append(event.id)
                 if cti_object.processing_status == "failed":
                     failed += 1
                 else:
                     stored += 1
-            status = "completed_with_errors" if failed else "completed"
+            correlation_counts = self.run_correlations(commit=False) if event_ids else {"total": 0, "risk_recalculated": 0}
+            status = "partial" if failed and stored else "failed" if failed else "completed"
             self.repository.finish_run(
                 run,
                 status=status,
@@ -301,10 +361,15 @@ class PipelineService:
                 stored=stored,
                 failed=failed,
                 details={
+                    **details,
                     "connector_duplicate_items": int(details.get("duplicate_items", 0)),
                     "database_unchanged_items": unchanged,
                     "changed_or_new_items": len(processable_records),
+                    "created_items": created,
+                    "updated_items": updated,
                     "duplicate_items": int(details.get("duplicate_items", 0)) + unchanged,
+                    "event_ids": event_ids[:500],
+                    "correlation_count": correlation_counts["total"],
                 },
             )
             self.session.commit()
@@ -545,7 +610,7 @@ class PipelineService:
             self.session.rollback()
             raise RuntimeError(f"Internal {source_name} pipeline failed: {exc}") from exc
 
-    def run_correlations(self, similarity_threshold: float = 0.35) -> dict[str, int]:
+    def run_correlations(self, similarity_threshold: float = 0.35, *, commit: bool = True) -> dict[str, int]:
         events = list(
             self.session.scalars(
                 select(ThreatEvent).options(selectinload(ThreatEvent.indicators))
@@ -564,7 +629,8 @@ class PipelineService:
             )
         self.session.flush()
         recalculated = self._recalculate_risk_scores()
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return {
             "simple": len(simple),
             "similarity": len(similarity),

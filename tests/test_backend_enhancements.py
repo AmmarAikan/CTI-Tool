@@ -7,7 +7,7 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from sqlalchemy import create_engine, func, select
@@ -311,6 +311,89 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertIn("Updated analysis", event.description)
         self.assertEqual(raw_count, 1)
         self.assertEqual(event_count, 1)
+
+    def test_historical_accepted_sync_is_idempotent_and_updates_once(self) -> None:
+        def item(content: str) -> dict:
+            return {"schema_version":"1.0","record_id":"ext-1234567890abcdef","source_item_id":"source-1",
+                "source":"Historical External","source_type":"rss","category":"advisory","title":"CVE-2026-12345 report",
+                "link":"https://example.test/item","content":content,"summary":"Summary","published":"2026-09-01T00:00:00Z",
+                "updated_at":None,"author":None,"tags":[],"language":"en","collected_at":"2026-09-19T00:00:00Z",
+                "content_hash":"sha256:"+hashlib.sha256(content.encode()).hexdigest(),
+                "classification":{"status":"accepted","label":"cti_related","score":0.9,"model_version":"test"},
+                "metadata":{"export_run_id":"ext-run-1234567890"}}
+        class Client:
+            def __init__(self, value): self.value=value
+            def accepted_export_page(self, *, limit, offset):
+                values=[] if offset else [self.value]
+                return {"schema_version":"1.0","export_run_id":"ext-run-1234567890","dataset_sha256":"a"*64,
+                        "items":values,"total":1,"limit":limit,"offset":offset}
+        engine = temporary_database_engine(); fake_ner = SimpleNamespace(backend="fake", extract_entities=lambda _text: [])
+        with Session(engine) as session, patch("backend.app.pipeline.orchestrator.get_runtime_ner_extractor", return_value=fake_ner):
+            first=PipelineService(session).sync_external_accepted(Client(item("Malware exploited CVE-2026-12345.")))
+            repeated=PipelineService(session).sync_external_accepted(Client(item("Malware exploited CVE-2026-12345.")))
+            updated=PipelineService(session).sync_external_accepted(Client(item("Malware exploited CVE-2026-12345. Updated.")))
+            event_count=session.scalar(select(func.count()).select_from(ThreatEvent))
+        self.assertEqual(first["details"]["created_items"],1)
+        self.assertEqual(repeated["details"]["database_unchanged_items"],1)
+        self.assertEqual(updated["details"]["updated_items"],1)
+        self.assertEqual(event_count,1)
+
+    def test_exact_review_export_sync_is_idempotent_and_projects_as_accepted(self) -> None:
+        content = "Approved malware analysis for CVE-2026-12345."
+        item = {"schema_version":"1.0","record_id":"ext-review-1234567890abcdef","source_item_id":"review-source-1",
+            "source":"Reviewed External","source_type":"rss","category":"advisory","title":"Reviewed advisory",
+            "link":"https://example.test/reviewed","content":content,"summary":"Approved summary","published":"2026-09-01T00:00:00Z",
+            "updated_at":None,"author":None,"tags":[],"language":"en","collected_at":"2026-09-19T00:00:00Z",
+            "content_hash":"sha256:"+hashlib.sha256(content.encode()).hexdigest(),
+            "classification":{"status":"accepted","label":"cti_related","score":0.9,"model_version":"review-approval"},
+            "metadata":{"export_run_id":"ext-review-run-1234567890","review_approval":{"decision":"approved"}}}
+        class Client:
+            def accepted_export_page(self, *, limit, offset, run_id=None):
+                self.requested_run_id = run_id
+                return {"schema_version":"1.0","export_run_id":"ext-review-run-1234567890","dataset_sha256":"b"*64,
+                        "items":[] if offset else [item],"total":1,"limit":limit,"offset":offset}
+        engine = temporary_database_engine(); client = Client()
+        fake_ner = SimpleNamespace(backend="fake", extract_entities=lambda _text: [])
+        with Session(engine) as session, patch("backend.app.pipeline.orchestrator.get_runtime_ner_extractor", return_value=fake_ner):
+            first = PipelineService(session).sync_external_run(client, "ext-review-run-1234567890")
+            repeated = PipelineService(session).sync_external_run(client, "ext-review-run-1234567890")
+            from backend.app.api.v1.router import accepted_records, _project_review_lifecycle
+            page = accepted_records(session, SimpleNamespace(), search=None, source=None, source_type=None,
+                                    processing_state=None, limit=25, offset=0)
+            lifecycle = _project_review_lifecycle(session, {"schema_version":"1.0","items":[{
+                "record_id":item["record_id"],"review_id":item["record_id"],"content_sha256":item["content_hash"],
+                "external_job_id":None,"export_run_id":"ext-review-run-1234567890","dataset_sha256":"b"*64,
+                "state":"approved_processing","stage":"central_import","retryable":False,"updated_at":"2026-09-20T00:00:00Z"}]})
+            event_count = session.scalar(select(func.count()).select_from(ThreatEvent))
+        self.assertEqual((client.requested_run_id, first["details"]["created_items"], repeated["run_id"], event_count),
+                         ("ext-review-run-1234567890", 1, first["run_id"], 1))
+        self.assertEqual((page["total"], page["items"][0]["source"]), (1, "Reviewed External"))
+        self.assertEqual((lifecycle["items"][0]["state"], lifecycle["items"][0]["central_run_id"]),
+                         ("processed", first["run_id"]))
+
+    def test_review_import_failure_is_retryable_without_redeciding_external_state(self) -> None:
+        from fastapi import HTTPException
+        from backend.app.api.v1.router import external_control_review_decision
+        from backend.app.schemas.api import ExternalReviewDecisionRequest
+        digest = "sha256:" + "c" * 64
+        confirmed = {"schema_version":"1.0","record_id":"record-1234567890","content_sha256":digest,
+                     "decision":"approved","reason":None,"decided_at":"2026-09-20T00:00:00Z",
+                     "export_run_id":"ext-review-run-1234567890","processing_state":"completed","retryable":False}
+        client, db, user = Mock(), Mock(), SimpleNamespace(id="user-1", username="analyst")
+        client.decide_review.return_value = confirmed
+        payload = ExternalReviewDecisionRequest(expected_content_sha256=digest, decision="approved", reason=None)
+        with patch("backend.app.api.v1.router.external_control_client", return_value=client), \
+             patch("backend.app.api.v1.router.PipelineService.sync_external_run",
+                   side_effect=[RuntimeError("sanitized import failure"), {"run_id":"central-run"}]) as sync, \
+             patch("backend.app.api.v1.router.audit") as audit:
+            with self.assertRaises(HTTPException) as failed:
+                external_control_review_decision("record-1234567890", payload, db, user)
+            retried = external_control_review_decision("record-1234567890", payload, db, user)
+        self.assertEqual((failed.exception.status_code, failed.exception.detail["code"], failed.exception.detail["retryable"]),
+                         (502, "review_import_failed", True))
+        self.assertEqual((retried, client.decide_review.call_count, sync.call_count), (confirmed, 2, 2))
+        self.assertEqual([call.kwargs["processing_state"] for call in audit.call_args_list],
+                         ["processing_failed", "completed"])
 
     def test_remote_connectors_require_https_by_default(self) -> None:
         with self.assertRaisesRegex(ValueError, "must use HTTPS"):

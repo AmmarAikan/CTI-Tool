@@ -67,7 +67,7 @@ The former top-level prototype has been retired. Do not create a parallel implem
 
 ## Capabilities
 
-The canonical package provides bounded connectors for RSS, CERT advisories, vulnerability databases, Reddit, Hacker News, Telegram public previews, and operator-approved onion sources. It also provides generic crawling, manual URL routing, cleaning, privacy review, relevance classification, incremental SHA-256 state, run-scoped export, and an internal FastAPI integration adapter.
+The canonical package provides bounded connectors for RSS, CERT advisories, CISA CSAF JSON, vulnerability databases, Reddit, Hacker News, Telegram public previews, and operator-approved onion sources. It also provides generic HTML crawling, strict JSON collection adaptation, manual URL routing, cleaning, privacy review, relevance classification, incremental SHA-256 state, run-scoped export, and an internal FastAPI integration adapter.
 
 In the implemented VPS-only deployment, this canonical package runs as a hardened loopback service on `127.0.0.1:8090`. A systemd timer collects enabled sources and publishes validated JSON to the CTI Gateway every two hours. The same-host Central Backend reaches Gateway, External Control, and MISP over dedicated pairwise internal Docker networks. The production frontend uses only authenticated Central Backend routes and is exposed privately through Tailscale Serve. SSH forwarding remains a diagnostic recovery path. See `docs/operations/vps_external_sources.md`.
 
@@ -178,6 +178,10 @@ Accepted Manual Source records are atomically persisted in the processed area an
 
 Manual URL detection uses the canonical source registry from `config/sources.json` and returns an explicit structured route with a matched source ID where available. Exact canonical host/path rules cover vulnerability, GitHub, RSS/CERT, Telegram, Reddit, onion, and other registered URLs. Thin dependency-injected adapters reuse the existing canonical connectors and run only the matched configured source or bounded identifier. Unsupported public GitHub/CERT item routes, missing credentials, unavailable Tor, disabled sources, and unconfigured structured routes fail closed and are never silently sent through the generic crawler.
 
+Manual JSON uses the same SSRF-validated, redirect-checked, size-bounded request as HTML preview. Only `application/json` and `application/*+json` are accepted. Root arrays and a single allowlisted collection key (`posts`, `items`, `results`, `entries`, or `data`) can produce a bounded mapping proposal; raw JSON is never returned to the browser. Analyst/Admin approval freezes the items and binds the declarative mapping to the preview hash before it is persisted in canonical Manual state. Rechecks reuse that exact mapping and fail closed on schema changes. Each valid object then enters the existing preprocessing, privacy, classification, deduplication, review, and export path once; malformed objects are isolated.
+
+The CISA CERT source remains RSS-first. Only an eligible RSS request failure invokes its configured bounded CSAF fallback. The committed configuration allowlists the official `cisagov/CSAF` catalog and raw document path exactly; catalog bytes, advisory count, redirects, and per-response bytes remain bounded. Malformed advisories are isolated and CISA KEV retains its separate connector and identity space.
+
 ## Authorized maintenance and testing
 
 Direct Python/module access is limited to development, automated testing, diagnostics, emergency recovery, and authorized maintenance. It is not an end-user interface.
@@ -191,6 +195,36 @@ python -m compileall backend/app/pipeline/ingestion/external
 ```
 
 Canonical deterministic tests use sanitized fixtures and mocks; ordinary test runs do not require live NVD, GitHub, Reddit, Telegram, RSS, CERT, Tor, or onion access.
+
+Run the Docker-free External Sources quality gate from the repository root:
+
+```bash
+bash scripts/run_external_tests.sh
+```
+
+The runner executes the canonical External unittest suite, related Central integration tests, an External package compile check with bytecode redirected to `/tmp`, and the frontend install, lint, test, and build gates. Each stage has a bounded timeout. It does not invoke Docker or contact live collectors.
+
+An isolated four-service readiness stack is defined in `compose.external-test.yml`. Its database and service-to-service networks are internal. A project-scoped non-internal ingress network is attached only to the frontend, which is the sole published service at `127.0.0.1:19080`; Backend and External Sources have no host publications. A separate project-scoped egress network is attached only to External Sources. Backend, frontend, and PostgreSQL do not join that network. The test-only `config/sources.external-test.json` registry exactly mirrors the reviewed public source definitions in `config/sources.json`; Reddit remains credential-free public RSS with bounded Playwright fallback, Telegram remains limited to configured public previews, and Dark Web/Tor remains absent. The stack contains no production networks, host paths, Gateway, MISP, honeypot, or Tailscale service. Before a separately authorized Docker test, create the ignored synthetic environment file:
+
+```bash
+cp .env.external-test.example .env.external-test
+docker compose --project-name cti-ext-readiness --env-file .env.external-test -f compose.external-test.yml config
+```
+
+Rendering or starting this stack is a separate Docker-authorized step; the Docker-free runner does neither. After an authorized start, validate Backend only through the frontend proxy:
+
+```bash
+curl --fail http://127.0.0.1:19080/api/v1/health
+```
+
+Validate External Sources through the authenticated Central proxy. Obtain a Central JWT by signing in through the frontend with the synthetic test administrator, then call:
+
+```bash
+curl --fail -H "Authorization: Bearer ${CTI_TEST_JWT}" \
+  http://127.0.0.1:19080/api/v1/integrations/external-control/health
+```
+
+The External control API must not be called through a direct host port.
 
 ## Export handoff
 

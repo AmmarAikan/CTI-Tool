@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlsplit, urlunsplit
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     CanonicalManualSourceService, ManualPreviewBundle, ManualSourceResult,
 )
-from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
+from backend.app.pipeline.ingestion.external.common.hashing import sha256_json
 from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
 
 MAX_PREVIEW_BYTES = 1024 * 1024
@@ -152,7 +152,10 @@ class ManualPreviewService:
     def create(self, url: str, *, requested_by: str) -> dict[str, Any]:
         bundle = self.manual.preview_url(url, requested_by=requested_by)
         payload = _bundle_dict(bundle)
-        digest = sha256_text("\n".join(item.content for item, _ in bundle.items))
+        digest = sha256_json({
+            "items": [item.content_hash for item, _ in bundle.items],
+            "json_mappings": bundle.state.get("json_mappings", {}),
+        })
         record = self.store.create(payload, digest)
         return _safe_preview(record, bundle)
 
@@ -206,7 +209,7 @@ def _safe_preview(record: PreviewRecord, bundle: ManualPreviewBundle) -> dict[st
     result = bundle.result
     items_preview = [_safe_item_preview(index, value, item_disposition)
                      for index, (value, item_disposition) in enumerate(bundle.items[:MAX_ITEMS_PREVIEW], start=1)]
-    return {"schema_version": "1.0", "preview_id": record.preview_id, "state": record.state,
+    response = {"schema_version": "1.0", "preview_id": record.preview_id, "state": record.state,
             "created_at": record.created_at, "expires_at": record.expires_at, "display_url": display,
             "page_type": bundle.page_type, "title": title[:300], "excerpt": excerpt[:500],
             "disposition": disposition, "classification_label": _clean(classification.label or "")[:80] or None,
@@ -217,6 +220,17 @@ def _safe_preview(record: PreviewRecord, bundle: ManualPreviewBundle) -> dict[st
             "items_preview_truncated": len(bundle.items) > MAX_ITEMS_PREVIEW,
             "counts": {"items": len(bundle.items), "accepted": result.accepted_records, "review": result.review_records,
                        "rejected": result.rejected_records, "skipped": result.skipped_records, "errors": result.error_count}}
+    if bundle.page_type == "json_collection":
+        mappings = bundle.state.get("json_mappings", {})
+        entry = next(iter(mappings.values()), {}) if isinstance(mappings, dict) else {}
+        mapping = entry.get("mapping", {}) if isinstance(entry, dict) else {}
+        response.update({
+            "detected_type": "json_collection", "collection_path": mapping.get("collection_path", []),
+            "proposed_mapping": {key: value for key, value in mapping.items()
+                                 if key.endswith("_field") and value is not None},
+            "validation_warnings": ["explicit_approval_required"], "approval_required": True,
+        })
+    return response
 
 
 def _safe_item_preview(index: int, item: ExternalCTIItem, disposition: str) -> dict[str, Any]:

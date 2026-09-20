@@ -89,6 +89,19 @@ class ManualSourceServiceTests(unittest.TestCase):
                                   adapters={"rss": adapter}).add_manual_source(url, requested_by="tester")
         self.assertEqual(result.status, "stored"); adapter.collect_url.assert_called_once()
 
+    def test_declared_html_alternate_uses_rss_adapter(self):
+        url = "https://example.test/news"
+        html = b'<html><head><link rel="alternate" type="application/rss+xml" href="/feed.xml"></head><body></body></html>'
+        page = CrawlResult(url, url, "success", title="News", extracted_text="safe " * 40,
+                           page_type="article", response_metadata={"content_type": "text/html"},
+                           response_body=html)
+        adapter = Mock(); adapter.collect_url.return_value = AdapterResult("stored", (), "feed adapter processed")
+        with tempfile.TemporaryDirectory() as folder:
+            result = self.service(FakeCrawler([page]), JsonStateManager(Path(folder) / "state.json"),
+                                  adapters={"rss": adapter}).add_manual_source(url, requested_by="tester")
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(adapter.collect_url.call_args.args[0], "https://example.test/feed.xml")
+
     def test_article_pipeline_stores_contract_and_skips_unchanged(self):
         stored = []
         url = "https://example.test/report"
@@ -130,7 +143,7 @@ class ManualSourceServiceTests(unittest.TestCase):
             roots = service.list_tracked_roots()
         self.assertEqual([root.canonical_url for root in roots], [listing])
 
-    def test_legacy_root_migration_excludes_children_and_inactive_roots_idempotently(self):
+    def test_legacy_root_migration_excludes_children_and_preserves_disabled_roots_idempotently(self):
         listing = "https://example.test/index"
         child = "https://example.test/article-one"
         standalone = "https://example.test/standalone"
@@ -147,7 +160,8 @@ class ManualSourceServiceTests(unittest.TestCase):
             service = self.service(FakeCrawler([]), JsonStateManager(path))
             first = service.list_tracked_roots(); migrated = JsonStateManager(path).load()
             second = service.list_tracked_roots(); repeated = JsonStateManager(path).load()
-        self.assertEqual({root.canonical_url for root in first}, {listing, standalone})
+        self.assertEqual({root.canonical_url for root in first}, {listing, standalone, inactive})
+        self.assertFalse(next(root for root in first if root.canonical_url == inactive).active)
         self.assertEqual(first, second)
         self.assertEqual(migrated, repeated)
         self.assertEqual(migrated["urls"][standalone]["custom_history"], historical["custom_history"])

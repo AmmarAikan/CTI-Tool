@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQueries, useQuery } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type ExternalJob, type InternalIntegration, type ManualPreview } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 import { useI18n, type TranslationKey } from '../i18n/I18nContext';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { JobMonitor, TERMINAL_STATES } from './Sources';
+import {externalQueryKeys} from '../api/externalQueryKeys';
 
 type InputKind = 'external' | 'manual' | 'internal' | 'dark';
 type PullResult = { run_id: string; status: string };
@@ -23,6 +24,7 @@ function validPublicUrl(value: string) {
 
 export function ProcessingCenter() {
   const { can } = useAuth();
+  const queryClient = useQueryClient();
   const { t, number } = useI18n();
   const [kind, setKind] = useState<InputKind>('external');
   const [selection, setSelection] = useState('');
@@ -36,7 +38,8 @@ export function ProcessingCenter() {
   const operationGeneration = useRef(0);
   const submissionController = useRef<AbortController | undefined>(undefined);
   const refreshedTerminalJob = useRef('');
-  const sources = useQuery({ queryKey: ['center-sources'], queryFn: api.externalSources, retry: false });
+  const importedTerminalJob = useRef('');
+  const sources = useQuery({ queryKey: externalQueryKeys.sources(), queryFn: api.externalSources, retry: false });
   const watches = useQuery({ queryKey: ['center-watches'], queryFn: api.darkWebWatches, retry: false });
   const providers = useQuery({ queryKey: ['center-dark-web-providers'], queryFn: api.darkWebDiscoveryProviders, retry: false });
   const snapshot = useQueries({ queries: [
@@ -46,6 +49,7 @@ export function ProcessingCenter() {
     { queryKey: ['center-correlations'], queryFn: () => api.intelligenceCorrelations(1), retry: false },
     { queryKey: ['center-outliers'], queryFn: () => api.intelligenceOutliers(1, 0, true), retry: false },
   ] });
+  const analysis=useQuery({queryKey:externalQueryKeys.processingRun(pullResult?.run_id||''),queryFn:({signal})=>api.analysisRunResults(pullResult!.run_id,signal),enabled:Boolean(pullResult?.run_id&&['completed','partial','failed'].includes(pullResult.status)),retry:2});
   const run = useMutation({
     mutationFn: async (request: OperationRequest) => {
       if (request.kind === 'external') return api.startExternalSourceJob(request.selection, request.signal);
@@ -79,7 +83,6 @@ export function ProcessingCenter() {
   const correlations = snapshot[3].data;
   const outliers = snapshot[4].data;
   const state = job?.state || pullResult?.status;
-  const completed = state === 'completed';
   const stages: TranslationKey[] = ['selectInput', 'collectStage', 'privacyStage', 'classifyStage', 'extractStage', 'saveStage', 'correlateStage', 'snapshot'];
   const statusKey = state && ['queued', 'processing', 'completed', 'partial', 'failed', 'cancelled', 'cancellation_requested'].includes(state) ? state as TranslationKey : undefined;
   const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 401 ? t('sessionExpired') : error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 404 ? t('jobNotFound') : error instanceof ApiError && error.status === 408 ? t('timeout') : error instanceof ApiError && error.status === 409 ? t('previewConflict') : error instanceof ApiError && error.status === 410 ? t('previewExpired') : error instanceof ApiError && error.status === 503 ? t('externalControlUnavailable') : error instanceof ApiError && error.code === 'invalid_response' ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
@@ -88,6 +91,12 @@ export function ProcessingCenter() {
     operationGeneration.current += 1;
     submissionController.current?.abort();
   }, []);
+  useEffect(()=>{
+    if(kind!=='external'||!job||!['completed','partial'].includes(job.state)||importedTerminalJob.current===job.job_id)return;
+    importedTerminalJob.current=job.job_id;const generation=operationGeneration.current;const controller=new AbortController();submissionController.current=controller;
+    void api.importExternalJob(job.job_id,controller.signal).then(value=>{if(generation===operationGeneration.current){setPullResult(value);void queryClient.invalidateQueries({queryKey:['external','accepted-records']});void queryClient.invalidateQueries({queryKey:externalQueryKeys.reviews()});void queryClient.invalidateQueries({queryKey:externalQueryKeys.processingRun(value.run_id)})}}).catch(error=>{if(generation===operationGeneration.current)setDecisionError(error)});
+    return()=>controller.abort();
+  },[job,kind,queryClient]);
 
   function submit() {
     if (run.isPending || !can('analyst')) return;
@@ -138,17 +147,20 @@ export function ProcessingCenter() {
       {kind === 'dark' && watches.data && choices.length === 0 && <p role="status">{t('noConfiguredWatches')}</p>}
       {run.isError && <div className="state-panel error-panel" role="alert"><strong>{safeMutationError(run.error)}</strong><button className="button button-secondary" onClick={submit}>{t('retry')}</button></div>}
     </section>
-    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => <li className={index === 0 || completed ? 'confirmed' : ''} key={key}><span>{index + 1}</span>{t(key)}</li>)}</ol></section>
+    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => {const confirmed=index===0||(index===1&&Boolean(job&&['completed','partial'].includes(job.state)))||(index>1&&Boolean(analysis.data&&['completed','partial'].includes(analysis.data.status)));return <li className={confirmed?'confirmed':''} key={key}><span>{index + 1}</span>{t(key)}</li>})}</ol></section>
     <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
       {job && <JobMonitor key={job.job_id} sourceId="processing-center" label={selectedLabel} job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => { setJob((current) => current?.job_id === value.job_id ? value : current); if (TERMINAL_STATES.includes(value.state) && refreshedTerminalJob.current !== value.job_id) { refreshedTerminalJob.current = value.job_id; snapshot.forEach((query) => void query.refetch()); } }} />}
-      {pullResult && <p role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong> · {t('runId')}: <code dir="ltr">{pullResult.run_id}</code></p>}
+      {pullResult && <div className="job-panel" role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{pullResult.run_id}</code></details>}</div>}
+      {job&&TERMINAL_STATES.includes(job.state)&&<p role="status">{t('collectionCompleted')}</p>}
+      {kind==='external'&&job&&['completed','partial'].includes(job.state)&&!pullResult&&!decisionError&&<p role="status">{t('centralImportRunning')}</p>}
+      {analysis.isLoading&&<LoadingState label={t('loadingRunDetails')}/>} {analysis.isError&&<ErrorState onRetry={()=>void analysis.refetch()}/>} {analysis.data&&<section className="snapshot-panel"><h4>{analysis.data.status==='partial'?t('analysisPartial'):t('analysisCompleted')}</h4><div className="metric-grid">{[[t('processed'),analysis.data.processed_documents],[t('entities'),analysis.data.entity_count],[t('indicators'),analysis.data.indicator_count],[t('correlations'),analysis.data.correlation_count],[t('skipped'),analysis.data.skipped_count],[t('errors'),analysis.data.error_count]].map(([label,value])=><article className="metric-card" key={String(label)}><span>{label}</span><strong>{number(value as number)}</strong></article>)}</div><h4>{t('entities')}</h4>{analysis.data.entities.length?<ul>{analysis.data.entities.map((item,index)=><li key={`${item.event_id}-${index}`}>{item.type}: {item.value} · {item.record_title}</li>)}</ul>:<EmptyState label={t('noEntitiesIdentified')}/>}<h4>{t('indicators')}</h4>{analysis.data.indicators.length?<ul>{analysis.data.indicators.map((item,index)=><li key={`${item.event_id}-${index}`}>{item.type}: {item.value} · {item.record_title}</li>)}</ul>:<EmptyState label={t('noIndicatorsExtracted')}/>}<h4>{t('correlations')}</h4>{analysis.data.correlations.length?<ul>{analysis.data.correlations.map((item,index)=><li key={`${item.type}-${index}`}>{item.type}: {item.explanation}</li>)}</ul>:<EmptyState label={t('noCorrelationsFound')}/>}</section>}
       {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('approve')}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('reject')}>{t('reject')}</button></article>}
-      {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}</div>}
+      {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}{kind==='external'&&job&&['completed','partial'].includes(job.state)&&<button className="button button-secondary" onClick={()=>{importedTerminalJob.current='';setDecisionError(undefined);setJob({...job});}}>{t('retry')}</button>}</div>}
     </section>
-    <section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
+    {!job&&!pullResult&&<section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
       <div className="metric-grid">{[[t('totalEvents'), summary?.events], [t('totalIndicators'), indicators?.total], [t('totalCorrelations'), correlations?.total], [t('totalOutliers'), outliers?.total]].map(([label, value]) => <article className="metric-card" key={String(label)}><span>{label}</span><strong>{typeof value === 'number' ? number(value) : '—'}</strong></article>)}</div>
       {events?.items.length ? <div className="center-events"><h4>{t('latestEvents')}</h4>{events.items.map((event) => <article key={event.id}><div><strong>{event.title}</strong><small>{event.source_pipeline} · {event.severity || '—'} · {number(Math.round(event.confidence * 100))}%</small></div><Link to={`/intelligence/events/${event.id}`}>{t('viewDetails')}</Link></article>)}</div> : null}
       <nav className="quick-actions" aria-label={t('quickActions')}><Link to="/intelligence/indicators">{t('viewIndicators')}</Link><Link to="/intelligence/correlations">{t('viewCorrelations')}</Link><Link to="/intelligence/outliers">{t('viewOutliers')}</Link><Link to="/analysis">{t('viewRuns')}</Link></nav>
-    </section>
+    </section>}
   </section>;
 }
