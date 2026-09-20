@@ -41,6 +41,43 @@ def response(status: int, body: bytes = b"", *, headers=None):
 
 
 class TorPolicyTests(unittest.TestCase):
+    def test_empty_static_registry_is_valid(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {
+                "host": "127.0.0.1", "port": 9999}, "sources": []}), encoding="utf-8")
+            proxy, sources = load_dark_web_config(path, environ={})
+        self.assertEqual((proxy, sources), (TorProxy("127.0.0.1", 9999), ()))
+
+    def test_all_disabled_static_registry_is_valid_and_has_no_enabled_sources(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {
+                "host": "127.0.0.1", "port": 9999}, "sources": [{
+                    "id": "disabled-valid", "name": "Disabled", "url": BASE_URL,
+                    "enabled": False, "allowed_paths": ["/advisories/"]}]}), encoding="utf-8")
+            _proxy, sources = load_dark_web_config(path, environ={})
+        self.assertEqual(len(sources), 1)
+        self.assertFalse(sources[0].enabled)
+        self.assertEqual(tuple(item for item in sources if item.enabled), ())
+
+    def test_malformed_static_registry_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaises(DarkWebConfigurationError):
+                load_dark_web_config(path, environ={})
+
+    def test_enabled_valid_static_registry_remains_available(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "dark_web_sources.local.json"
+            path.write_text(json.dumps({"schema_version": "1.0", "proxy": {
+                "host": "127.0.0.1", "port": 9999}, "sources": [{
+                    "id": "enabled-valid", "name": "Enabled", "url": BASE_URL,
+                    "enabled": True, "allowed_paths": ["/advisories/"]}]}), encoding="utf-8")
+            _proxy, sources = load_dark_web_config(path, environ={})
+        self.assertEqual((len(sources), sources[0].enabled), (1, True))
+
     def test_local_config_requires_explicit_proxy_and_enforces_policy(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "dark_web_sources.local.json"

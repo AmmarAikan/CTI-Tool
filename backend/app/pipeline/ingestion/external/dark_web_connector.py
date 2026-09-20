@@ -164,6 +164,13 @@ class TorHttpClient:
 
 
 def load_dark_web_config(path: str | Path = LOCAL_CONFIG, *, environ: dict[str, str] | None = None) -> tuple[TorProxy, tuple[DarkWebSource, ...]]:
+    """Load the optional static registry without requiring an enabled source.
+
+    Empty and all-disabled registries are valid startup states.  Structurally
+    valid disabled entries remain in the returned tuple so an explicit request
+    can be rejected as disabled rather than misreported as nonexistent.
+    Enabled entries retain the full Tor-only v3 Onion validation below.
+    """
     values = load_json(path, default=None)
     if not isinstance(values, dict) or values.get("schema_version") != "1.0":
         raise DarkWebConfigurationError("valid local dark-web configuration is required")
