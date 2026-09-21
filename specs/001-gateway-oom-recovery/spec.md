@@ -4,7 +4,9 @@
 
 **Created**: 2026-09-21
 
-**Status**: Draft
+**Status**: Approved for implementation planning and isolated validation
+
+**Approval note**: This status does not authorize production deployment, restart, collection, rollback, writes under `/opt/cti-platform`, or any Phase 8 action. Those actions remain separately approval-gated.
 
 **Input**: User description: "Diagnose and safely resolve the failed scheduled External
 Collection lifecycle and verified Gateway out-of-memory evidence with the smallest
