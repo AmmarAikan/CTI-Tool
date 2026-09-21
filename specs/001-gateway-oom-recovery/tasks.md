@@ -164,7 +164,7 @@ Phase 1 (T001–T005, read-only) → Phase 2 (T006–T009, read-only)
 - **US1 — Verified failure boundary**: T001–T009; blocks all candidate work.
 - **US2 — Isolated validation**: T010–T019; depends on US1 and blocks candidate selection.
 - **US3 — Smallest safe correction**: T020–T029; depends on US2 and blocks production approval.
-- **US4 — One real lifecycle and readiness**: T032–T040; depends on explicit T031 approval. T032–T036 are blocked, never automatic.
+- **US4 — One real lifecycle and readiness**: T032–T040; requires recorded T031 approval, termination of the current `$speckit-implement` run, and a new, separate explicit user-authorized session after review of `specs/001-gateway-oom-recovery/evidence/production-approval-request.md`. T032–T036 are blocked and never automatic.
 
 ### Parallel opportunities
 
