@@ -483,3 +483,18 @@ observation; repeat readiness checks. Preserve existing pipeline, volumes,
 MISP data, and Tailscale-only ingress. Do not claim full operational GO or
 repeatedly trigger production collection while unresolved. Previously tracked
 low MISP ADMIN_KEY scope and two-user tailnet fairness remain open.
+
+## External collection incident checkpoint (2026-09-23)
+
+Read-only T001–T009 verification established that the latest scheduled workflow
+on 2026-09-22 was invoked successfully by its timer and service, then External
+collection terminated with `state=failed`. systemd recorded `Result=exit-code`
+and `ExecMainStatus=1`. The existing publisher stopped before export retrieval;
+no Gateway publish, merge, or ACK occurred in this invocation. No current-run
+Gateway OOM was observed in the bounded incident window.
+
+The historical curl 52 / Gateway OOM remains a separate unresolved incident and
+MUST NOT be attributed to this run. The underlying External collector cause is
+unverified. External Sources remains **NOT production-ready** because the
+complete lifecycle has not succeeded. The next safe action is a bounded,
+read-only investigation of the collector failure. No collection replay,
