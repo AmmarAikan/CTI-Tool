@@ -498,3 +498,16 @@ MUST NOT be attributed to this run. The underlying External collector cause is
 unverified. External Sources remains **NOT production-ready** because the
 complete lifecycle has not succeeded. The next safe action is a bounded,
 read-only investigation of the collector failure. No collection replay,
+production mutation, deployment, restart, rollback, `/opt` write, or
+Docker/Compose action is authorized.
+
+### متابعة تشخيص سجل التطبيق (2026-09-23)
+
+أظهر الفحص المقيد أن طلب External المجدول في 2026-09-22 قُبل وتمت متابعته
+بنجاح، ثم انتهى بالحالة `failed`. توقف الناشر قبل استرجاع export؛ ولم يحدث
+Gateway publish أو merge أو ACK في هذا الاستدعاء. تبقى حادثة `curl 52` وGateway
+OOM التاريخية منفصلة وغير محلولة. ظهرت أخطاء `parsing_contract` غير قابلة
+لإعادة المحاولة لعمليات `cert` و`reddit` داخل النافذة، لكن لا يمكن ربطها بأمان
+بالوظيفة المجدولة الفاشلة. رسالة `TypeError` اللاحقة خارج النافذة ولا تُنسب
+إلى هذا الحدث. السبب الجذري الدقيق للـ collector/job-level غير متحقق؛ ولا يبرر
+ذلك أي إصلاح `code` أو `configuration`. القرار الحالي: **diagnostic NO-GO**
