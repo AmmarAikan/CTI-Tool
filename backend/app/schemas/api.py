@@ -524,6 +524,20 @@ class IntelligenceRunPageResponse(IntelligencePageMeta):
     items: list[IntelligenceRunResponse]
 
 
+class IntelligenceMLQualityGateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=80, pattern=r"^[a-z0-9_]+$")
+    category: Literal["artifact", "performance", "dataset_integrity"]
+    passed: bool
+
+
+class IntelligenceMLInferenceEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    observed: bool
+    input_count: int = Field(ge=0)
+    chunk_count: int = Field(ge=0)
+
+
 class IntelligenceMLStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     execution_model: Literal["central_backend"]
@@ -532,8 +546,23 @@ class IntelligenceMLStatusResponse(BaseModel):
     secondary_model: str = Field(max_length=80)
     primary_loaded: bool
     secondary_loaded: bool
+    inference_evidence: IntelligenceMLInferenceEvidenceResponse
     quality_gates_passed: bool
     held_out_f1: float | None = None
+    unique_unseen_f1: float | None = None
+    runtime_state: Literal["primary_active", "secondary_fallback_active", "unavailable"]
+    readiness: Literal["ready", "degraded", "unavailable"]
+    inference_scope: Literal["named_entity_recognition"]
+    metric_scope: Literal["saved_offline_evaluation"]
+    quality_gates: list[IntelligenceMLQualityGateResponse] = Field(max_length=9)
+    limitations: list[
+        Literal[
+            "saved_metrics_not_live_accuracy",
+            "quality_gates_incomplete",
+            "primary_unavailable",
+            "fallback_unavailable",
+        ]
+    ] = Field(max_length=4)
 
 
 class IntelligenceMISPHealthResponse(BaseModel):

@@ -100,6 +100,81 @@ export function CorrelationsPage() {
 export function OutliersPage() { const {t,number,dateTime}=useI18n();const [offset, setOffset] = useState(0); const limit = 20; const query = useQuery({ queryKey: ['outliers', offset], queryFn: () => api.intelligenceOutliers(limit, offset), retry: false }); return <SimpleListPage title={t('outliers')} text={t('outliersDescription')} query={query} offset={offset} limit={limit} setOffset={setOffset} headers={[t('start'), t('end'), t('alerts'), t('score'), t('status')]} rows={query.data?.items.map((item) => [dateTime(item.started_at), dateTime(item.ended_at), number(item.alert_count), number(item.anomaly_score), item.is_outlier ? t('outlier') : t('normal')]) || []} />; }
 function SimpleListPage({ title, text, query, offset, limit, setOffset, headers, rows }: { title: string; text: string; query: ReturnType<typeof useQuery<Page<unknown>>>; offset: number; limit: number; setOffset: (v: number) => void; headers: string[]; rows: string[][] }) { const {t}=useI18n();return <section className="page-section intelligence-module"><Heading eyebrow={t('intelligence')} title={title} text={text} /><PageState query={query} empty={t('noData')}><div className="table-shell"><table><thead><tr>{headers.map((item) => <th key={item}>{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div></PageState>{query.data && <Pager total={query.data.total} offset={offset} limit={limit} setOffset={setOffset} />}</section>; }
 
-export function AnalysisPage() { const {t,number}=useI18n();const ml = useQuery({ queryKey: ['ml-status'], queryFn: api.mlStatus, retry: false }); const [offset, setOffset] = useState(0); const limit = 20; const runs = useQuery({ queryKey: ['analysis-runs', offset], queryFn: () => api.analysisRuns(limit, offset), retry: false }); const [selected, setSelected] = useState(''); const detail = useQuery({ queryKey: ['analysis-run', selected], queryFn: () => api.analysisRun(selected), enabled: Boolean(selected), retry: false }); return <section className="page-section analysis-module"><Heading eyebrow={t('analysisEyebrow')} title={t('analysisOperations')} text={t('analysisExecutionModel')} />{ml.isLoading && <LoadingState />}{ml.isError && <ErrorState onRetry={() => void ml.refetch()} />}{ml.data && <div className="metric-grid"><article className="metric-card analysis-accent"><span>{t('analysisBackend')}</span><strong>{ml.data.backend}</strong><small>{ml.data.primary_model}</small></article><article className="metric-card"><span>{t('primaryModel')}</span><strong>{ml.data.primary_loaded ? t('available') : t('unavailableAccess')}</strong></article><article className="metric-card"><span>{t('qualityGates')}</span><strong>{ml.data.quality_gates_passed ? t('successful') : t('incomplete')}</strong></article></div>}<h3 className="subheading">{t('runHistory')}</h3>{runs.isLoading && <LoadingState />}{runs.isError && <ErrorState onRetry={() => void runs.refetch()} />}{runs.data?.items.length === 0 && <EmptyState label={t('noAnalysisRuns')} />}{runs.data && runs.data.items.length > 0 && <><div className="table-shell"><table><thead><tr><th>{t('analysisRun')}</th><th>{t('pipeline')}</th><th>{t('status')}</th><th>{t('processed')}</th><th>{t('duration')}</th></tr></thead><tbody>{runs.data.items.map((run) => <tr key={run.id}><td><button className="button button-quiet" onClick={() => setSelected(run.id)}>{run.id.slice(0, 8)}</button></td><td>{run.pipeline}</td><td><StatusBadge status={run.status} /></td><td>{number(run.processed)} / {number(run.failed)}</td><td>{run.duration_seconds === undefined ? t('inProgress') : t('secondsShort',{value:number(run.duration_seconds)})}</td></tr>)}</tbody></table></div><Pager total={runs.data.total} offset={offset} limit={limit} setOffset={setOffset} /></>}{detail.isLoading && <LoadingState label={t('loadingRunDetails')} />}{detail.isError && <ErrorState onRetry={() => void detail.refetch()} />}{detail.data && <article className="detail-panel"><h3>{t('selectedRunDetails')}</h3><p>{t('runCounters',{collected:number(detail.data.collected),processed:number(detail.data.processed),stored:number(detail.data.stored),failed:number(detail.data.failed)})}</p>{detail.data.error_category && <p>{t('errorCategory')}: {detail.data.error_category}</p>}</article>}</section>; }
+const mlRuntimeLabels: Record<string, TranslationKey> = {
+  primary_active: 'primaryActive',
+  secondary_fallback_active: 'fallbackActive',
+  unavailable: 'modelUnavailable',
+};
+const mlGateLabels: Record<string, TranslationKey> = {
+  bert_artifact_present: 'bertArtifactPresent',
+  secondary_artifact_present: 'secondaryArtifactPresent',
+  bert_test_f1_at_least_0_75: 'bertTestF1Gate',
+  bert_test_accuracy_at_least_0_90: 'bertTestAccuracyGate',
+  primary_outperforms_secondary_entity_f1: 'primaryOutperformsSecondaryGate',
+  bert_unique_unseen_f1_at_least_0_73: 'bertUniqueUnseenGate',
+  dataset_cross_split_overlap_zero: 'datasetOverlapGate',
+  dataset_label_conflicts_zero: 'datasetConflictGate',
+  dataset_malformed_lines_zero: 'datasetMalformedGate',
+};
+const mlLimitationLabels: Record<string, TranslationKey> = {
+  saved_metrics_not_live_accuracy: 'savedMetricsNotLiveAccuracy',
+  quality_gates_incomplete: 'qualityGatesIncomplete',
+  primary_unavailable: 'primaryUnavailable',
+  fallback_unavailable: 'fallbackUnavailable',
+};
+
+function ModelEvidence({ data }: { data: Awaited<ReturnType<typeof api.mlStatus>> }) {
+  const { t, number } = useI18n();
+  const percentage = (value: number | undefined) => value === undefined ? t('noneRecorded') : `${number(Math.round(value * 100))}%`;
+  return <>
+    <div className="metric-grid">
+      <article className="metric-card analysis-accent"><span>{t('analysisBackend')}</span><strong>{data.backend}</strong><small>{data.primary_model}</small></article>
+      <article className="metric-card"><span>{t('runtimeState')}</span><strong>{t(mlRuntimeLabels[data.runtime_state])}</strong><small>{t('inferenceScope')}: {t('namedEntityRecognition')}</small></article>
+      <article className="metric-card"><span>{t('modelReadiness')}</span><StatusBadge status={data.readiness} /><small>{data.quality_gates_passed ? t('successful') : t('incomplete')}</small></article>
+    </div>
+    <article className="detail-panel ml-evidence-panel">
+      <h3>{t('modelEvidence')}</h3>
+      <p>{t('offlineEvaluationScope')}</p>
+      <div className="ml-model-grid">
+        <div><span>{t('primaryModel')}</span><strong>{data.primary_model}</strong><small>{data.primary_loaded ? t('available') : t('unavailableAccess')}</small></div>
+        <div><span>{t('secondaryModel')}</span><strong>{data.secondary_model}</strong><small>{data.secondary_loaded ? t('available') : t('unavailableAccess')}</small></div>
+        <div><span>{t('heldOutF1')}</span><strong>{percentage(data.held_out_f1)}</strong></div>
+        <div><span>{t('uniqueUnseenF1')}</span><strong>{percentage(data.unique_unseen_f1)}</strong></div>
+        <div><span>{t('inferenceEvidence')}</span><strong>{data.inference_evidence.observed ? t('inferenceObserved') : t('noInferenceObserved')}</strong><small>{t('inferenceCounts',{inputs:number(data.inference_evidence.input_count),chunks:number(data.inference_evidence.chunk_count)})}</small></div>
+      </div>
+      <h4>{t('qualityGates')}</h4>
+      <ul className="ml-gate-list">{data.quality_gates.map((gate) => <li key={gate.key}><span>{t(mlGateLabels[gate.key])}</span><strong className={gate.passed ? 'ml-gate-passed' : 'ml-gate-failed'}>{gate.passed ? t('successful') : t('incomplete')}</strong></li>)}</ul>
+      <h4>{t('modelLimitations')}</h4>
+      <ul className="ml-limitations">{data.limitations.map((limitation) => <li key={limitation}>{t(mlLimitationLabels[limitation])}</li>)}</ul>
+    </article>
+  </>;
+}
+
+export function AnalysisPage() {
+  const {t,number}=useI18n();
+  const ml = useQuery({ queryKey: ['ml-status'], queryFn: api.mlStatus, retry: false });
+  const [offset, setOffset] = useState(0);
+  const limit = 20;
+  const runs = useQuery({ queryKey: ['analysis-runs', offset], queryFn: () => api.analysisRuns(limit, offset), retry: false });
+  const [selected, setSelected] = useState('');
+  const detail = useQuery({ queryKey: ['analysis-run', selected], queryFn: () => api.analysisRun(selected), enabled: Boolean(selected), retry: false });
+  return <section className="page-section analysis-module">
+    <Heading eyebrow={t('analysisEyebrow')} title={t('analysisOperations')} text={t('analysisExecutionModel')} />
+    {ml.isLoading && <LoadingState />}
+    {ml.isError && <ErrorState onRetry={() => void ml.refetch()} />}
+    {ml.data && <ModelEvidence data={ml.data} />}
+    <h3 className="subheading">{t('runHistory')}</h3>
+    {runs.isLoading && <LoadingState />}
+    {runs.isError && <ErrorState onRetry={() => void runs.refetch()} />}
+    {runs.data?.items.length === 0 && <EmptyState label={t('noAnalysisRuns')} />}
+    {runs.data && runs.data.items.length > 0 && <>
+      <div className="table-shell"><table><thead><tr><th>{t('analysisRun')}</th><th>{t('pipeline')}</th><th>{t('status')}</th><th>{t('processed')}</th><th>{t('duration')}</th></tr></thead><tbody>{runs.data.items.map((run) => <tr key={run.id}><td><button className="button button-quiet" onClick={() => setSelected(run.id)}>{run.id.slice(0, 8)}</button></td><td>{run.pipeline}</td><td><StatusBadge status={run.status} /></td><td>{number(run.processed)} / {number(run.failed)}</td><td>{run.duration_seconds === undefined ? t('inProgress') : t('secondsShort',{value:number(run.duration_seconds)})}</td></tr>)}</tbody></table></div>
+      <Pager total={runs.data.total} offset={offset} limit={limit} setOffset={setOffset} />
+    </>}
+    {detail.isLoading && <LoadingState label={t('loadingRunDetails')} />}
+    {detail.isError && <ErrorState onRetry={() => void detail.refetch()} />}
+    {detail.data && <article className="detail-panel"><h3>{t('selectedRunDetails')}</h3><p>{t('runCounters',{collected:number(detail.data.collected),processed:number(detail.data.processed),stored:number(detail.data.stored),failed:number(detail.data.failed)})}</p>{detail.data.error_category && <p>{t('errorCategory')}: {detail.data.error_category}</p>}</article>}
+  </section>;
+}
 
 export { MISPPage } from './MISP';

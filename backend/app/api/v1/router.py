@@ -2070,8 +2070,77 @@ def intelligence_ml_status(_: CurrentUser) -> dict[str, Any]:
     status_payload = ModelEvidenceService.status()
     runtime = status_payload.get("runtime", {})
     models = status_payload.get("model_priority", {})
-    bert = status_payload.get("held_out_test", {}).get("bert", {})
-    return {"execution_model": "central_backend", "backend": str(runtime.get("backend") or "unavailable"), "primary_model": str(models.get("primary") or "dnrti_bert_ner"), "secondary_model": str(models.get("secondary_fallback") or "dnrti_sklearn_ner"), "primary_loaded": runtime.get("primary_model_loaded") is True, "secondary_loaded": runtime.get("secondary_fallback_loaded") is True, "quality_gates_passed": status_payload.get("all_quality_gates_passed") is True, "held_out_f1": bert.get("f1")}
+    held_out = status_payload.get("held_out_test", {})
+    bert = held_out.get("bert", {})
+    unseen = held_out.get("bert_unique_unseen", {})
+    primary_loaded = runtime.get("primary_model_loaded") is True
+    secondary_loaded = runtime.get("secondary_fallback_loaded") is True
+    all_gates_passed = status_payload.get("all_quality_gates_passed") is True
+    inference_input_count = runtime.get("last_batch_input_count")
+    inference_chunk_count = runtime.get("last_batch_chunk_count")
+    if not isinstance(inference_input_count, int) or isinstance(inference_input_count, bool) or inference_input_count < 0:
+        inference_input_count = 0
+    if not isinstance(inference_chunk_count, int) or isinstance(inference_chunk_count, bool) or inference_chunk_count < 0:
+        inference_chunk_count = 0
+    runtime_state = (
+        "primary_active"
+        if primary_loaded
+        else "secondary_fallback_active"
+        if secondary_loaded
+        else "unavailable"
+    )
+    readiness = (
+        "unavailable"
+        if runtime_state == "unavailable"
+        else "ready"
+        if primary_loaded and all_gates_passed
+        else "degraded"
+    )
+    gate_categories = {
+        "bert_artifact_present": "artifact",
+        "secondary_artifact_present": "artifact",
+        "bert_test_f1_at_least_0_75": "performance",
+        "bert_test_accuracy_at_least_0_90": "performance",
+        "primary_outperforms_secondary_entity_f1": "performance",
+        "bert_unique_unseen_f1_at_least_0_73": "performance",
+        "dataset_cross_split_overlap_zero": "dataset_integrity",
+        "dataset_label_conflicts_zero": "dataset_integrity",
+        "dataset_malformed_lines_zero": "dataset_integrity",
+    }
+    source_gates = status_payload.get("quality_gates", {})
+    quality_gates = [
+        {"key": key, "category": category, "passed": source_gates.get(key) is True}
+        for key, category in gate_categories.items()
+    ]
+    limitations = ["saved_metrics_not_live_accuracy"]
+    if not all_gates_passed:
+        limitations.append("quality_gates_incomplete")
+    if not primary_loaded:
+        limitations.append("primary_unavailable")
+    if not secondary_loaded:
+        limitations.append("fallback_unavailable")
+    return {
+        "execution_model": "central_backend",
+        "backend": str(runtime.get("backend") or "unavailable"),
+        "primary_model": str(models.get("primary") or "dnrti_bert_ner"),
+        "secondary_model": str(models.get("secondary_fallback") or "dnrti_sklearn_ner"),
+        "primary_loaded": primary_loaded,
+        "secondary_loaded": secondary_loaded,
+        "quality_gates_passed": all_gates_passed,
+        "inference_evidence": {
+            "observed": inference_input_count > 0,
+            "input_count": inference_input_count,
+            "chunk_count": inference_chunk_count,
+        },
+        "held_out_f1": bert.get("f1"),
+        "unique_unseen_f1": unseen.get("f1"),
+        "runtime_state": runtime_state,
+        "readiness": readiness,
+        "inference_scope": "named_entity_recognition",
+        "metric_scope": "saved_offline_evaluation",
+        "quality_gates": quality_gates,
+        "limitations": limitations,
+    }
 
 
 @router.get("/intelligence/misp/health", tags=["intelligence"], response_model=IntelligenceMISPHealthResponse, response_model_exclude_none=True)

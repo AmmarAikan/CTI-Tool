@@ -902,6 +902,126 @@ class BackendAPITests(unittest.TestCase):
         health = self.client.get("/api/v1/intelligence/misp/health", headers=self.headers)
         self.assertEqual(set(health.json()), {"configured", "reachable"})
 
+
+    def test_ml_status_projects_runtime_quality_evidence_and_limitations(self) -> None:
+        quality_gates = {
+            "bert_artifact_present": True,
+            "secondary_artifact_present": True,
+            "bert_test_f1_at_least_0_75": True,
+            "bert_test_accuracy_at_least_0_90": True,
+            "primary_outperforms_secondary_entity_f1": True,
+            "bert_unique_unseen_f1_at_least_0_73": True,
+            "dataset_cross_split_overlap_zero": False,
+            "dataset_label_conflicts_zero": True,
+            "dataset_malformed_lines_zero": True,
+        }
+        evidence = {
+            "runtime": {
+                "last_batch_input_count": 2,
+                "last_batch_chunk_count": 3,
+                "backend": "transformer",
+                "primary_model_loaded": True,
+                "secondary_fallback_loaded": False,
+            },
+            "model_priority": {
+                "primary": "dnrti_bert_ner",
+                "secondary_fallback": "dnrti_sklearn_ner",
+            },
+            "held_out_test": {
+                "bert": {"f1": 0.8},
+                "bert_unique_unseen": {"f1": 0.76},
+            },
+            "quality_gates": quality_gates,
+            "all_quality_gates_passed": False,
+        }
+        with patch(
+            "backend.app.api.v1.router.ModelEvidenceService.status",
+            return_value=evidence,
+        ):
+            response = self.client.get(
+                "/api/v1/intelligence/ml/status", headers=self.headers
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertEqual(payload["runtime_state"], "primary_active")
+        self.assertEqual(
+            payload["inference_evidence"],
+            {"observed": True, "input_count": 2, "chunk_count": 3},
+        )
+        self.assertEqual(payload["readiness"], "degraded")
+        self.assertEqual(payload["inference_scope"], "named_entity_recognition")
+        self.assertEqual(payload["metric_scope"], "saved_offline_evaluation")
+        self.assertEqual(payload["unique_unseen_f1"], 0.76)
+        self.assertEqual(
+            [item["key"] for item in payload["quality_gates"]],
+            list(quality_gates),
+        )
+        self.assertFalse(payload["quality_gates"][6]["passed"])
+        self.assertEqual(
+            payload["limitations"],
+            [
+                "saved_metrics_not_live_accuracy",
+                "quality_gates_incomplete",
+                "fallback_unavailable",
+            ],
+        )
+
+    def test_ml_status_distinguishes_fallback_and_unavailable_runtime(self) -> None:
+        gate_keys = (
+            "bert_artifact_present",
+            "secondary_artifact_present",
+            "bert_test_f1_at_least_0_75",
+            "bert_test_accuracy_at_least_0_90",
+            "primary_outperforms_secondary_entity_f1",
+            "bert_unique_unseen_f1_at_least_0_73",
+            "dataset_cross_split_overlap_zero",
+            "dataset_label_conflicts_zero",
+            "dataset_malformed_lines_zero",
+        )
+        base_evidence = {
+            "model_priority": {
+                "primary": "dnrti_bert_ner",
+                "secondary_fallback": "dnrti_sklearn_ner",
+            },
+            "held_out_test": {
+                "bert": {"f1": 0.8},
+                "bert_unique_unseen": {"f1": 0.76},
+            },
+            "quality_gates": dict.fromkeys(gate_keys, True),
+            "all_quality_gates_passed": True,
+        }
+        cases = (
+            (
+                {"backend": "sklearn", "primary_model_loaded": False, "secondary_fallback_loaded": True},
+                "secondary_fallback_active",
+                "degraded",
+                ["saved_metrics_not_live_accuracy", "primary_unavailable"],
+            ),
+            (
+                {"backend": "unavailable", "primary_model_loaded": False, "secondary_fallback_loaded": False},
+                "unavailable",
+                "unavailable",
+                ["saved_metrics_not_live_accuracy", "primary_unavailable", "fallback_unavailable"],
+            ),
+        )
+        for runtime, expected_state, expected_readiness, expected_limitations in cases:
+            with self.subTest(runtime_state=expected_state), patch(
+                "backend.app.api.v1.router.ModelEvidenceService.status",
+                return_value={**base_evidence, "runtime": runtime},
+            ):
+                response = self.client.get(
+                    "/api/v1/intelligence/ml/status", headers=self.headers
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                payload = response.json()
+                self.assertEqual(payload["runtime_state"], expected_state)
+                self.assertEqual(payload["readiness"], expected_readiness)
+                self.assertEqual(payload["limitations"], expected_limitations)
+                self.assertEqual(
+                    payload["inference_evidence"],
+                    {"observed": False, "input_count": 0, "chunk_count": 0},
+                )
+
     def test_misp_candidates_batch_delivery_and_durable_outcomes(self) -> None:
         ready_id = "misp-batch-ready"
         blocked_id = "misp-batch-blocked"

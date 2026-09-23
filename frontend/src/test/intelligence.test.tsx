@@ -99,14 +99,38 @@ describe('threat intelligence pages', () => {
 });
 
 describe('analysis and MISP', () => {
-  it('states the real in-process execution model and renders safe runs', async () => {
-    const ml = { execution_model: 'central_backend', backend: 'transformer', primary_model: 'dnrti_bert_ner', secondary_model: 'dnrti_sklearn_ner', primary_loaded: true, secondary_loaded: false, quality_gates_passed: true, held_out_f1: .8 };
+  it('renders runtime, individual quality gates, offline scope, and limitations', async () => {
+    const quality_gates = [
+      { key: 'bert_artifact_present', category: 'artifact', passed: true },
+      { key: 'secondary_artifact_present', category: 'artifact', passed: true },
+      { key: 'bert_test_f1_at_least_0_75', category: 'performance', passed: true },
+      { key: 'bert_test_accuracy_at_least_0_90', category: 'performance', passed: true },
+      { key: 'primary_outperforms_secondary_entity_f1', category: 'performance', passed: true },
+      { key: 'bert_unique_unseen_f1_at_least_0_73', category: 'performance', passed: true },
+      { key: 'dataset_cross_split_overlap_zero', category: 'dataset_integrity', passed: false },
+      { key: 'dataset_label_conflicts_zero', category: 'dataset_integrity', passed: true },
+      { key: 'dataset_malformed_lines_zero', category: 'dataset_integrity', passed: true },
+    ];
+    const ml = { execution_model: 'central_backend', backend: 'transformer', primary_model: 'dnrti_bert_ner', secondary_model: 'dnrti_sklearn_ner', primary_loaded: true, secondary_loaded: false, quality_gates_passed: false, held_out_f1: .8, unique_unseen_f1: .76, runtime_state: 'primary_active', readiness: 'degraded', inference_scope: 'named_entity_recognition', inference_evidence: { observed: true, input_count: 2, chunk_count: 3 }, metric_scope: 'saved_offline_evaluation', quality_gates, limitations: ['saved_metrics_not_live_accuracy', 'quality_gates_incomplete', 'fallback_unavailable'] };
     const run = { id: '12345678-1234-1234-1234-123456789012', pipeline: 'external', status: 'completed', collected: 2, processed: 2, stored: 2, failed: 0, error_category: null, started_at: '2026-09-07T10:00:00Z', completed_at: '2026-09-07T10:00:02Z', duration_seconds: 2 };
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/ml/status') ? json(ml) : json(page([run])));
     renderWithProviders(<AnalysisPage />);
     await waitFor(() => expect(screen.getByText('transformer')).toBeInTheDocument());
     expect(screen.getByText(/داخل Central Backend مباشرة/)).toBeInTheDocument();
+    expect(screen.getByText('النموذج الأساسي نشط')).toBeInTheDocument();
+    expect(screen.getByText('متدهورة')).toBeInTheDocument();
+    expect(screen.getByText('لا يوجد تداخل بين تقسيمات البيانات')).toBeInTheDocument();
+    expect(screen.getByText('المقاييس المحفوظة لا تمثل دقة الإنتاج الحية.')).toBeInTheDocument();
+    expect(screen.getByText('لوحظت دفعة استدلال منذ بدء العملية')).toBeInTheDocument();
+    expect(screen.getByText('المدخلات: 2 · المقاطع: 3')).toBeInTheDocument();
+    expect(screen.getByText('80%')).toBeInTheDocument();
+    expect(screen.getByText('76%')).toBeInTheDocument();
     expect(screen.queryByText(/worker|heartbeat|queue/i)).not.toBeInTheDocument();
+  });
+
+  it('rejects incomplete or unknown ML evidence contracts', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ execution_model: 'central_backend', unexpected: 'field' }));
+    await expect(api.mlStatus()).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
   it('keeps viewers read-only on MISP', async () => {

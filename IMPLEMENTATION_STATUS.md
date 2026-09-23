@@ -1,6 +1,6 @@
 # ACTIT Final Production Implementation Status
 
-Last updated: 2026-09-18 (UTC)
+Last updated: 2026-09-23 (UTC)
 
 ## Objective
 
@@ -11,6 +11,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 ## Current checkpoint
 
 - Phase: P0 Phases 1-8 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, reviewed multi-event MISP delivery, isolated Demo Dataset/System Readiness, and RBAC/session/reverse-proxy hardening.
+- ML transparency is complete in development and not deployed: the bounded status contract and Analysis view now expose runtime/readiness state, individual quality gates, offline metric scope, safe in-process inference counters, model limitations, and fallback availability.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -153,7 +154,7 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | MISP health/preview/send/history | Ready in development, not deployed | Candidate queue, readiness/omission reasons, admin-confirmed batch of at most 20, per-event audit outcomes, post-send links, and idempotent client passed Docker parity tests | Validate after immutable deployment; retain review and unpublished-by-default policy |
 | MISP population | Partial by design | Sole production MISP event is the only ACTIT event actually sent; deterministic UUID prevents duplicates. Multi-event workflow exists only in development | Do not mirror PostgreSQL; admin deliberately selects and confirms eligible events after deployment |
 | Enrichment | Missing live data | Enrichment table contains zero rows | Add controlled enrichment runs/status and make risk/assessment provenance visible |
-| ML transparency | Partial | Runtime model and stored metrics endpoint exists | Show individual quality gates, model scope/limitations, inference evidence, and fallback/degraded state |
+| ML transparency | Ready in development, not deployed | Bounded API and bilingual Analysis view expose runtime/readiness state, all nine individual quality gates, held-out and unique-unseen metrics with offline scope, safe in-process inference counters, explicit limitations, and fallback availability | Validate against an immutable release after separately approved deployment; never present saved evaluation metrics as live production accuracy |
 | Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
 | Outlier detection | Partial | 413 sessions and Isolation Forest/fallback metadata exist | Explain features, sample sufficiency, detector choice, and event relationship |
 | Demo/readiness dataset | Ready in development, not deployed | Private disposable SQLite fixture with fixed external/internal evidence, Storyline/risk/ATT&CK/STIX/MISP projections and deterministic CLI walkthrough; protected readiness page reads existing live API contracts only | Keep demo synthetic and offline; after a separately approved immutable deployment, verify readiness UI against the release and demonstrate actual pipeline-generated cross-source evidence when available |
@@ -475,14 +476,13 @@ not proof of a new-release regression. The heavy scheduled job was not rerun
 just to reproduce OOM. Rolling back would not fix the prior failure and
 would introduce the Gateway log compatibility hazard, so no rollback occurred.
 
-**Next Task, requiring owner approval because it expands beyond deploy and
-verify:** make a narrow, data-preserving Gateway external-feed publish
-memory-budget fix or justified resource adjustment; test a representative
-large export in isolated VPS Compose; run one scheduled workflow under
-observation; repeat readiness checks. Preserve existing pipeline, volumes,
-MISP data, and Tailscale-only ingress. Do not claim full operational GO or
-repeatedly trigger production collection while unresolved. Previously tracked
-low MISP ADMIN_KEY scope and two-user tailnet fairness remain open.
+The 2026-09-22 External collection failure and the historical Gateway OOM /
+`curl 52` incident are paused as separate unresolved incidents. Resume incident
+work only when new correlatable evidence is available or the owner explicitly
+authorizes the applicable gated phase. Neither incident blocks unrelated ACTIT
+product development. No collection replay, Gateway OOM Phase 3, or production
+action is authorized by this checkpoint. Previously tracked low MISP ADMIN_KEY
+scope and two-user tailnet fairness remain open.
 
 ## External collection incident checkpoint (2026-09-23)
 
@@ -501,13 +501,51 @@ read-only investigation of the collector failure. No collection replay,
 production mutation, deployment, restart, rollback, `/opt` write, or
 Docker/Compose action is authorized.
 
-### متابعة تشخيص سجل التطبيق (2026-09-23)
+### Bounded application-log diagnostic follow-up (2026-09-23)
 
-أظهر الفحص المقيد أن طلب External المجدول في 2026-09-22 قُبل وتمت متابعته
-بنجاح، ثم انتهى بالحالة `failed`. توقف الناشر قبل استرجاع export؛ ولم يحدث
-Gateway publish أو merge أو ACK في هذا الاستدعاء. تبقى حادثة `curl 52` وGateway
-OOM التاريخية منفصلة وغير محلولة. ظهرت أخطاء `parsing_contract` غير قابلة
-لإعادة المحاولة لعمليات `cert` و`reddit` داخل النافذة، لكن لا يمكن ربطها بأمان
-بالوظيفة المجدولة الفاشلة. رسالة `TypeError` اللاحقة خارج النافذة ولا تُنسب
-إلى هذا الحدث. السبب الجذري الدقيق للـ collector/job-level غير متحقق؛ ولا يبرر
-ذلك أي إصلاح `code` أو `configuration`. القرار الحالي: **diagnostic NO-GO**
+Bounded inspection confirmed that the scheduled External job on 2026-09-22 was
+accepted and polled successfully, then ended in `state=failed`. The publisher
+stopped before export retrieval; no Gateway publish, merge, or ACK occurred in
+that invocation. The historical `curl 52` / Gateway OOM incident remains separate
+and unresolved. Non-retryable `parsing_contract` errors occurred for `cert` and
+`reddit` operations inside the incident window, but they cannot be safely
+correlated to the failed scheduled job. A later `TypeError` is outside the
+incident window and MUST NOT be attributed to this event. The exact collector or
+job-level root cause remains unverified, so no code or configuration fix is
+justified. The current decision is **diagnostic NO-GO; no candidate selected**.
+External Sources remains **NOT production-ready**, and no production action is
+authorized.
+
+## ML transparency development checkpoint (2026-09-23)
+
+The ML transparency milestone is complete in the development worktree and has
+not been deployed. The authenticated ML status contract now projects the active
+primary, secondary fallback, or unavailable runtime state; a separate
+ready/degraded/unavailable assessment; all nine stored quality gates grouped by
+artifact, performance, or dataset-integrity evidence; held-out and unique-unseen
+F1 values; and explicit limitations. Saved evaluation metrics are labeled as
+offline evidence and MUST NOT be represented as live production accuracy.
+
+The Analysis view now displays the same bounded evidence in Arabic and English,
+including primary/fallback availability and safe counts for the latest
+in-process inference batch observed since process start. It does not expose
+model paths, load errors, inputs, extracted entities, production records, or
+secrets. Strict frontend parsing rejects missing, duplicate, inconsistent, or
+unknown evidence fields.
+
+Verification completed in the development worktree:
+
+- `tests.test_backend_api`: 18/18 passed, including the new runtime, quality,
+  limitation, and inference-evidence projection test.
+- Frontend Vitest regression: 132/132 passed.
+- Frontend TypeScript lint passed.
+- Frontend production build passed; the existing chunk-size advisory remains a
+  non-blocking build warning.
+- `git diff --check` passed.
+
+Production remains unchanged. This checkpoint does not authorize deployment,
+restart, rollback, `/opt` writes, collection execution, Docker/Compose action,
+or any other production mutation. The 2026-09-22 External `state=failed`
+incident remains diagnostic NO-GO with no candidate selected; the historical
+Gateway OOM / `curl 52` incident remains separate and unresolved. These paused
+incidents do not block unrelated ACTIT development.
