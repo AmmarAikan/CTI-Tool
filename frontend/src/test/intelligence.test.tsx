@@ -11,6 +11,13 @@ const event = { id: 'cti-1', title: 'CVE campaign', summary: 'Safe CTI summary',
 const page = <T,>(items: T[]) => ({ items, total: items.length, limit: 20, offset: 0 });
 const assessed = { semantic_role: 'observable', validation_status: 'valid', assessment: 'unknown', assessment_confidence: 0, actionable: false, evidence_count: 0, evidence_providers: [], reason_code: 'needs_enrichment' } as const;
 const mispCandidate = { event_id: 'cti-1', title: 'CVE campaign', source_pipeline: 'external', severity: 'high', risk_score: 91, included: 1, omitted: 0, omitted_by_reason: { external_reference: 0, invalid: 0, non_actionable: 0, unsupported: 0 }, ready: true, readiness_reason: 'ready', delivery_count: 0, last_delivered_at: null, last_misp_event_id: null };
+const pendingEnrichment = {
+  event_id: 'cti-1', provider: 'NVD', eligible_count: 1, completed_count: 0,
+  not_found_count: 0, failed_count: 0, pending_count: 1, last_enriched_at: null,
+  items_truncated: false,
+  items: [{ indicator_id: 'i-cve', cve_id: 'CVE-2026-12345', provider: 'NVD', status: 'not_run', enriched_at: null, found: false, cvss_score: null, cvss_version: null, severity: null, description: null, cwes: [], nvd_url: 'https://nvd.nist.gov/vuln/detail/CVE-2026-12345' }],
+  risk: { method: 'deterministic_rule_score', score: 42, severity: 'medium', factors: [{ key: 'base_severity_or_cvss', value: 20 }] },
+};
 
 beforeEach(() => { sessionStorage.clear(); vi.restoreAllMocks(); });
 afterEach(cleanup);
@@ -48,11 +55,55 @@ describe('threat intelligence pages', () => {
 
   it('shows complete indicator values in event details', async () => {
     const indicator = { id: 'i-1', event_id: 'cti-1', type: 'ipv4', value: '203.0.113.7', confidence: .8, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null, ...assessed };
-    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => String(input).endsWith('/attack') ? json({ event_id: 'cti-1', catalog_version: 'ATT&CK v19.1', source: 'built_in_subset', official_dataset_url: 'https://github.com/mitre-attack/attack-stix-data', techniques: [] }) : json({ ...event, indicators: [indicator], entities: [], relationships: [] }));
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = String(input);
+      if (path.endsWith('/attack')) return json({ event_id: 'cti-1', catalog_version: 'ATT&CK v19.1', source: 'built_in_subset', official_dataset_url: 'https://github.com/mitre-attack/attack-stix-data', techniques: [] });
+      if (path.endsWith('/enrichment')) return json({ ...pendingEnrichment, eligible_count: 0, pending_count: 0, items: [] });
+      return json({ ...event, indicators: [indicator], entities: [], relationships: [] });
+    });
     renderWithProviders(<Routes><Route path="/intelligence/events/:eventId" element={<EventDetailPage />} /></Routes>, ['/intelligence/events/cti-1']);
     await waitFor(() => expect(screen.getByText(new RegExp(`ipv4: ${indicator.value.replaceAll('.', '\\.')}`))).toBeInTheDocument());
     expect(document.body).not.toHaveTextContent('[redacted]');
     expect(document.body).not.toHaveTextContent('••••••••');
+  });
+
+  it('requires analyst confirmation, persists safe NVD evidence, and explains risk impact', async () => {
+    sessionStorage.setItem('cti_access_token', 'token');
+    const indicator = { id: 'i-cve', event_id: 'cti-1', type: 'cve', value: 'CVE-2026-12345', confidence: .95, source_pipeline: 'external', severity: 'high', first_seen: null, last_seen: null, ...assessed };
+    const requests: RequestInit[] = [];
+    const completed = {
+      ...pendingEnrichment,
+      completed_count: 1, pending_count: 0, last_enriched_at: '2026-09-23T03:00:00Z',
+      items: [{ ...pendingEnrichment.items[0], status: 'completed', enriched_at: '2026-09-23T03:00:00Z', found: true, cvss_score: 9.8, cvss_version: '3.1', severity: 'critical', description: 'Stored safe vulnerability evidence.', cwes: ['CWE-79'] }],
+      risk: { method: 'deterministic_rule_score', score: 68, severity: 'high', factors: [{ key: 'base_severity_or_cvss', value: 39.2 }, { key: 'indicators', value: 3 }] },
+      previous_risk_score: 42, risk_changed: true, attempted_count: 1,
+    };
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, options) => {
+      const path = String(input);
+      if (path.endsWith('/auth/me')) return json({ id: 'analyst-1', username: 'analyst', role: 'analyst', is_active: true });
+      if (path.endsWith('/attack')) return json({ event_id: 'cti-1', catalog_version: 'ATT&CK v19.1', source: 'built_in_subset', official_dataset_url: 'https://github.com/mitre-attack/attack-stix-data', techniques: [] });
+      if (path.endsWith('/enrichment/nvd') && options?.method === 'POST') { requests.push(options); return json(completed); }
+      if (path.endsWith('/enrichment')) return json(pendingEnrichment);
+      if (path.endsWith('/intelligence/events/cti-1')) return json({ ...event, indicators: [indicator], entities: [], relationships: [] });
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderWithProviders(<Routes><Route path="/intelligence/events/:eventId" element={<EventDetailPage />} /></Routes>, ['/intelligence/events/cti-1']);
+    const actor = userEvent.setup();
+    await actor.click(await screen.findByRole('button', { name: 'إثراء CVE عبر NVD' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(JSON.parse(String(requests[0].body))).toEqual({ confirm_external_lookup: true, refresh: false });
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('استعلامات خارجية محدودة'));
+    expect(await screen.findByText('Stored safe vulnerability evidence.')).toBeInTheDocument();
+    expect(screen.getByText('CWE-79')).toBeInTheDocument();
+    expect(screen.getByText('تغيرت درجة المخاطر من 42 إلى 68.')).toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('vector');
+    expect(document.body).not.toHaveTextContent('references');
+  });
+
+  it('rejects enrichment responses containing arbitrary provider data', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json({ ...pendingEnrichment, provider_payload: { token: 'secret' } }));
+    await expect(api.intelligenceEnrichment('cti-1')).rejects.toMatchObject({ code: 'invalid_response' });
   });
 
   it('renders explainable cross-source correlations and rejects arbitrary evidence', async () => {

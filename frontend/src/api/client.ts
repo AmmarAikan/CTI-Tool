@@ -206,6 +206,45 @@ export interface StorylineResponse {
   evidence_truncated: boolean;
   limitations: StorylineLimitation[];
 }
+export type CVEEnrichmentStatus = 'not_run' | 'completed' | 'not_found' | 'failed';
+export interface CVEEnrichmentItem {
+  indicator_id: string;
+  cve_id: string;
+  provider: 'NVD';
+  status: CVEEnrichmentStatus;
+  enriched_at?: string;
+  found: boolean;
+  cvss_score?: number;
+  cvss_version?: string;
+  severity?: 'low' | 'medium' | 'high' | 'critical';
+  description?: string;
+  cwes: string[];
+  nvd_url: string;
+}
+export interface EnrichmentRisk {
+  method: 'deterministic_rule_score';
+  score: number;
+  severity?: string;
+  factors: Array<{ key: StorylineRiskFactorKey; value: number }>;
+}
+export interface EnrichmentStatusResponse {
+  event_id: string;
+  provider: 'NVD';
+  eligible_count: number;
+  completed_count: number;
+  not_found_count: number;
+  failed_count: number;
+  pending_count: number;
+  last_enriched_at?: string;
+  items_truncated: boolean;
+  items: CVEEnrichmentItem[];
+  risk: EnrichmentRisk;
+}
+export interface EnrichmentRunResponse extends EnrichmentStatusResponse {
+  previous_risk_score: number;
+  risk_changed: boolean;
+  attempted_count: number;
+}
 export interface AttackNavigatorLayer { name: string; versions: Record<string, string>; domain: 'enterprise-attack'; description: string; techniques: Array<{ techniqueID: string; tactic: string; score: number; color: string; comment: string; enabled: boolean; metadata: Array<{ name: string; value: string }> }>; [key: string]: unknown; }
 export interface Page<T> { items: T[]; total: number; limit: number; offset: number; malformed_items?: number; }
 export interface AdminUser { id: string; username: string; role: Role; is_active: boolean; created_at: string; }
@@ -737,6 +776,69 @@ function parseStoryline(value: unknown): StorylineResponse {
   };
 }
 
+function parseEnrichment(value: unknown, includeRunResult = false): EnrichmentStatusResponse | EnrichmentRunResponse {
+  if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const statusKeys = ['event_id', 'provider', 'eligible_count', 'completed_count', 'not_found_count', 'failed_count', 'pending_count', 'last_enriched_at', 'items_truncated', 'items', 'risk'];
+  exactKeys(value, includeRunResult ? [...statusKeys, 'previous_risk_score', 'risk_changed', 'attempted_count'] : statusKeys);
+  if (value.provider !== 'NVD' || typeof value.items_truncated !== 'boolean' || !Array.isArray(value.items) || value.items.length > 100 || !isPlainObject(value.risk)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const count = (item: unknown) => {
+    if (!Number.isSafeInteger(item) || (item as number) < 0) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    return item as number;
+  };
+  const eligibleCount = count(value.eligible_count);
+  const completedCount = count(value.completed_count);
+  const notFoundCount = count(value.not_found_count);
+  const failedCount = count(value.failed_count);
+  const pendingCount = count(value.pending_count);
+  if (completedCount + notFoundCount + failedCount + pendingCount !== eligibleCount || value.items_truncated !== (eligibleCount > value.items.length)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const statuses: CVEEnrichmentStatus[] = ['not_run', 'completed', 'not_found', 'failed'];
+  const severities: Array<NonNullable<CVEEnrichmentItem['severity']>> = ['low', 'medium', 'high', 'critical'];
+  const items = value.items.map((item): CVEEnrichmentItem => {
+    if (!isPlainObject(item)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    exactKeys(item, ['indicator_id', 'cve_id', 'provider', 'status', 'enriched_at', 'found', 'cvss_score', 'cvss_version', 'severity', 'description', 'cwes', 'nvd_url']);
+    if (item.provider !== 'NVD' || !statuses.includes(item.status as CVEEnrichmentStatus) || typeof item.found !== 'boolean' || item.found !== (item.status === 'completed') || !Array.isArray(item.cwes) || item.cwes.length > 20 || item.cwes.some((entry) => typeof entry !== 'string' || !entry || entry.length > 50)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    const cveId = requiredText(item.cve_id, 20);
+    const nvdUrl = requiredText(item.nvd_url, 200);
+    if (!/^CVE-\d{4}-\d{4,7}$/.test(cveId) || !nvdUrl.startsWith('https://nvd.nist.gov/')) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    if (item.severity !== null && item.severity !== undefined && !severities.includes(item.severity as NonNullable<CVEEnrichmentItem['severity']>)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    return {
+      indicator_id: requiredText(item.indicator_id, 36), cve_id: cveId, provider: 'NVD', status: item.status as CVEEnrichmentStatus,
+      enriched_at: optionalTimestamp(item.enriched_at), found: item.found,
+      cvss_score: item.cvss_score === null || item.cvss_score === undefined ? undefined : boundedNumber(item.cvss_score, 0, 10),
+      cvss_version: optionalSafeText(item.cvss_version, 20), severity: item.severity as CVEEnrichmentItem['severity'],
+      description: optionalSafeText(item.description, 1000), cwes: item.cwes as string[], nvd_url: nvdUrl,
+    };
+  });
+  if (!value.items_truncated && (
+    items.filter((item) => item.status === 'completed').length !== completedCount
+    || items.filter((item) => item.status === 'not_found').length !== notFoundCount
+    || items.filter((item) => item.status === 'failed').length !== failedCount
+    || items.filter((item) => item.status === 'not_run').length !== pendingCount
+  )) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  exactKeys(value.risk, ['method', 'score', 'severity', 'factors']);
+  if (value.risk.method !== 'deterministic_rule_score' || !Array.isArray(value.risk.factors) || value.risk.factors.length > 6) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const factorKeys: StorylineRiskFactorKey[] = ['base_severity_or_cvss', 'indicators', 'confidence', 'source_diversity', 'correlations', 'internal_outlier'];
+  const factors = value.risk.factors.map((factor): EnrichmentRisk['factors'][number] => {
+    if (!isPlainObject(factor)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    exactKeys(factor, ['key', 'value']);
+    if (!factorKeys.includes(factor.key as StorylineRiskFactorKey)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+    return { key: factor.key as StorylineRiskFactorKey, value: boundedNumber(factor.value, 0, 100) };
+  });
+  if (new Set(factors.map((factor) => factor.key)).size !== factors.length) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const result: EnrichmentStatusResponse = {
+    event_id: requiredText(value.event_id, 64), provider: 'NVD', eligible_count: eligibleCount,
+    completed_count: completedCount, not_found_count: notFoundCount, failed_count: failedCount, pending_count: pendingCount,
+    last_enriched_at: optionalTimestamp(value.last_enriched_at), items_truncated: value.items_truncated, items,
+    risk: { method: 'deterministic_rule_score', score: boundedNumber(value.risk.score, 0, 100), severity: optionalSafeText(value.risk.severity, 30), factors },
+  };
+  if (!includeRunResult) return result;
+  if (typeof value.risk_changed !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  const previousRiskScore = boundedNumber(value.previous_risk_score, 0, 100);
+  const attemptedCount = count(value.attempted_count);
+  if (attemptedCount > 5 || value.risk_changed !== (previousRiskScore !== result.risk.score)) throw new ApiError(502, 'invalid_response', 'Invalid enrichment response');
+  return { ...result, previous_risk_score: previousRiskScore, risk_changed: value.risk_changed, attempted_count: attemptedCount };
+}
+
 function parseAttackNavigator(value: unknown): AttackNavigatorLayer { if (!isPlainObject(value) || value.domain !== 'enterprise-attack' || typeof value.name !== 'string' || typeof value.description !== 'string' || !isPlainObject(value.versions) || !Array.isArray(value.techniques) || value.techniques.length > 1000) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); const versions = Object.fromEntries(Object.entries(value.versions).map(([key, item]) => [requiredText(key, 30), requiredText(item, 30)])); const techniques = value.techniques.map((item) => { if (!isPlainObject(item) || !Array.isArray(item.metadata) || typeof item.enabled !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); const metadata = item.metadata.map((entry) => { if (!isPlainObject(entry)) throw new ApiError(502, 'invalid_response', 'Invalid ATT&CK Navigator response'); return { name: requiredText(entry.name, 80), value: requiredText(entry.value, 100) }; }); return { techniqueID: requiredText(item.techniqueID, 20), tactic: requiredText(item.tactic, 80), score: boundedNumber(item.score, 0, 100), color: requiredText(item.color, 20), comment: requiredText(item.comment, 240), enabled: item.enabled, metadata }; }); return { ...value, name: requiredText(value.name, 160), versions, domain: 'enterprise-attack', description: requiredText(value.description, 500), techniques }; }
 function parseSTIX(value: unknown): Record<string, unknown> { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid STIX bundle'); exactKeys(value, ['type', 'id', 'objects']); if (value.type !== 'bundle' || typeof value.id !== 'string' || !Array.isArray(value.objects) || value.objects.length > 5000 || value.objects.some((item) => !isPlainObject(item) || typeof item.type !== 'string' || Object.keys(item).some((key) => /(token|password|secret|authorization|cookie|api[_-]?key)/i.test(key)))) throw new ApiError(502, 'invalid_response', 'Invalid STIX bundle'); return value; }
 function parseAdminUser(value: unknown): AdminUser { if (!isPlainObject(value)) throw new ApiError(502, 'invalid_response', 'Invalid administration response'); exactKeys(value, ['id', 'username', 'role', 'is_active', 'created_at']); if (!isRole(value.role) || typeof value.is_active !== 'boolean' || !validIsoTimestamp(value.created_at)) throw new ApiError(502, 'invalid_response', 'Invalid administration response'); return { id: requiredText(value.id, 36), username: requiredText(value.username, 100), role: value.role, is_active: value.is_active, created_at: value.created_at }; }
@@ -996,6 +1098,16 @@ export const api = {
   intelligenceSearch: async (query: string, limitPerType = 5) => { const normalized = query.trim(); const params = new URLSearchParams({ q: normalized, limit_per_type: String(limitPerType) }); const result = parseIntelligenceSearch(await request<unknown>(`/intelligence/search?${params}`)); if (result.query !== normalized || result.limit_per_type !== limitPerType) throw new ApiError(502, 'invalid_response', 'Search response identity mismatch'); return result; },
   intelligenceEvents: async (limit = 25, offset = 0, filters: { severity?: string; source_pipeline?: string; processing_status?: string; search?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key, value); }); return parsePage(await request<unknown>(`/intelligence/events?${params}`), parseCTIEvent); },
   intelligenceEvent: async (id: string) => parseEventDetail(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}`)),
+  intelligenceEnrichment: async (id: string) => {
+    const result = parseEnrichment(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}/enrichment`)) as EnrichmentStatusResponse;
+    if (result.event_id !== id) throw new ApiError(502, 'invalid_response', 'Enrichment identity mismatch');
+    return result;
+  },
+  runNVDEnrichment: async (id: string, refresh = false) => {
+    const result = parseEnrichment(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}/enrichment/nvd`, { method: 'POST', body: JSON.stringify({ confirm_external_lookup: true, refresh }) }, INTERNAL_PULL_TIMEOUT_MS), true) as EnrichmentRunResponse;
+    if (result.event_id !== id) throw new ApiError(502, 'invalid_response', 'Enrichment identity mismatch');
+    return result;
+  },
   intelligenceStoryline: async (id: string) => parseStoryline(await request<unknown>(`/intelligence/events/${encodeURIComponent(id)}/storyline`)),
   intelligenceIndicators: async (limit = 25, offset = 0, filters: { type?: string; search?: string; semantic_role?: string; assessment?: string; validation_status?: string } = {}) => { const params = new URLSearchParams({ limit: String(limit), offset: String(offset) }); Object.entries(filters).forEach(([key, value]) => { if (value) params.set(key === 'type' ? 'indicator_type' : key, value); }); return parsePage(await request<unknown>(`/intelligence/indicators?${params}`), parseIndicator); },
   intelligenceIndicatorSummary: async () => parseIndicatorSummary(await request<unknown>('/intelligence/indicators-summary')),

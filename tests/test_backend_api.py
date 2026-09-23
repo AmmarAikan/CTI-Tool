@@ -647,6 +647,179 @@ class BackendAPITests(unittest.TestCase):
             self.assertNotIn(forbidden, response.text)
 
 
+    def test_cve_enrichment_is_analyst_controlled_persisted_and_safely_projected(self) -> None:
+        event_id = "enrichment-workflow-event"
+        indicator_id = "51000000-0000-0000-0000-000000000001"
+        with SessionLocal() as db:
+            event = ThreatEvent(
+                id=event_id,
+                source_record_id="enrichment-workflow-record",
+                source_type="research",
+                source_pipeline="external",
+                title="Stored CVE enrichment workflow",
+                description="A bounded test event with one vulnerability identifier.",
+                normalized_text="CVE-2026-12345",
+                classification_label="cti_related",
+                classification_confidence=0.9,
+                severity="medium",
+                risk_score=42,
+                confidence=0.8,
+                processing_status="transformed",
+                raw_reference={
+                    "risk_factors": {
+                        "base_severity_or_cvss": 20,
+                        "indicators": 3,
+                        "confidence": 8,
+                    }
+                },
+            )
+            db.add(event)
+            db.add(IndicatorRecord(
+                id=indicator_id,
+                event_id=event_id,
+                indicator_type="cve",
+                value="CVE-2026-12345",
+                confidence=0.95,
+            ))
+            db.commit()
+
+        initial = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}/enrichment",
+            headers=self.headers,
+        )
+        self.assertEqual(initial.status_code, 200, initial.text)
+        self.assertEqual(initial.json()["eligible_count"], 1)
+        self.assertEqual(initial.json()["pending_count"], 1)
+        self.assertEqual(initial.json()["items"][0]["status"], "not_run")
+        self.assertNotIn("raw_reference", initial.text)
+
+        confirmation_required = self.client.post(
+            f"/api/v1/intelligence/events/{event_id}/enrichment/nvd",
+            headers=self.headers,
+            json={"confirm_external_lookup": False, "refresh": False},
+        )
+        self.assertEqual(confirmation_required.status_code, 422)
+        legacy_confirmation_required = self.client.post(
+            f"/api/v1/events/{event_id}/enrich/nvd",
+            headers=self.headers,
+            json={},
+        )
+        self.assertEqual(legacy_confirmation_required.status_code, 422)
+
+        nvd_result = {
+            "provider": "NVD",
+            "found": True,
+            "cve_id": "CVE-2026-12345",
+            "description": "A safely projected vulnerability description.",
+            "published": "2026-01-01T00:00:00.000Z",
+            "last_modified": "2026-02-01T00:00:00.000Z",
+            "vuln_status": "Analyzed",
+            "cvss_version": "3.1",
+            "cvss_score": 9.8,
+            "severity": "critical",
+            "vector": "must-not-be-projected",
+            "cwes": ["CWE-79"],
+            "references": ["https://provider.example/private-reference"],
+        }
+        with patch(
+            "backend.app.services.pipeline_service.NVDClient.fetch_cve",
+            return_value=nvd_result,
+        ) as fetch_cve:
+            enriched = self.client.post(
+                f"/api/v1/intelligence/events/{event_id}/enrichment/nvd",
+                headers=self.headers,
+                json={"confirm_external_lookup": True, "refresh": False},
+            )
+        self.assertEqual(enriched.status_code, 200, enriched.text)
+        fetch_cve.assert_called_once_with("CVE-2026-12345")
+        body = enriched.json()
+        self.assertEqual(body["attempted_count"], 1)
+        self.assertEqual(body["completed_count"], 1)
+        self.assertEqual(body["pending_count"], 0)
+        self.assertEqual(body["items"][0]["cvss_score"], 9.8)
+        self.assertEqual(body["items"][0]["cwes"], ["CWE-79"])
+        self.assertEqual(
+            body["items"][0]["nvd_url"],
+            "https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+        )
+        self.assertEqual(body["risk_changed"], body["previous_risk_score"] != body["risk"]["score"])
+        for forbidden in ("must-not-be-projected", "private-reference", "references", "vector"):
+            self.assertNotIn(forbidden, enriched.text)
+
+        with patch("backend.app.services.pipeline_service.NVDClient.fetch_cve") as fetch_cve:
+            duplicate = self.client.post(
+                f"/api/v1/intelligence/events/{event_id}/enrichment/nvd",
+                headers=self.headers,
+                json={"confirm_external_lookup": True, "refresh": False},
+            )
+        self.assertEqual(duplicate.status_code, 409)
+        fetch_cve.assert_not_called()
+
+        created = self.client.post(
+            "/api/v1/users",
+            headers=self.headers,
+            json={"username": "enrichmentviewer", "password": "EnrichmentViewerPassword123!", "role": "viewer"},
+        )
+        self.assertIn(created.status_code, {201, 409}, created.text)
+        login = self.client.post(
+            "/api/v1/auth/login",
+            json={"username": "enrichmentviewer", "password": "EnrichmentViewerPassword123!"},
+        )
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        viewer_read = self.client.get(
+            f"/api/v1/intelligence/events/{event_id}/enrichment",
+            headers=viewer_headers,
+        )
+        viewer_write = self.client.post(
+            f"/api/v1/intelligence/events/{event_id}/enrichment/nvd",
+            headers=viewer_headers,
+            json={"confirm_external_lookup": True, "refresh": True},
+        )
+        self.assertEqual(viewer_read.status_code, 200, viewer_read.text)
+        self.assertEqual(viewer_write.status_code, 403, viewer_write.text)
+
+        bounded_event_id = "bounded-enrichment-event"
+        with SessionLocal() as db:
+            db.add(ThreatEvent(
+                id=bounded_event_id,
+                source_record_id="bounded-enrichment-record",
+                source_type="research",
+                source_pipeline="external",
+                title="Bounded CVE enrichment",
+                description="Six CVEs verify the five-lookup request boundary.",
+                normalized_text="Bounded enrichment test",
+                severity="low",
+                risk_score=10,
+                confidence=0.5,
+                processing_status="transformed",
+            ))
+            db.add_all([
+                IndicatorRecord(
+                    id=f"52000000-0000-0000-0000-{index:012d}",
+                    event_id=bounded_event_id,
+                    indicator_type="cve",
+                    value=f"CVE-2026-{20000 + index}",
+                    confidence=0.9,
+                )
+                for index in range(1, 7)
+            ])
+            db.commit()
+        with patch(
+            "backend.app.services.pipeline_service.NVDClient.fetch_cve",
+            side_effect=lambda cve_id: {"provider": "NVD", "found": False, "cve_id": cve_id},
+        ) as bounded_fetch:
+            bounded = self.client.post(
+                f"/api/v1/intelligence/events/{bounded_event_id}/enrichment/nvd",
+                headers=self.headers,
+                json={"confirm_external_lookup": True, "refresh": False},
+            )
+        self.assertEqual(bounded.status_code, 200, bounded.text)
+        self.assertEqual(bounded.json()["attempted_count"], 5)
+        self.assertEqual(bounded.json()["not_found_count"], 5)
+        self.assertEqual(bounded.json()["pending_count"], 1)
+        self.assertEqual(bounded_fetch.call_count, 5)
+
+
     def test_dionaea_upload_persists_sessions_and_outlier_event(self) -> None:
         with DIONAEA_SAMPLE_PATH.open("rb") as handle:
             response = self.client.post(

@@ -638,20 +638,49 @@ class PipelineService:
             "risk_recalculated": recalculated,
         }
 
-    def enrich_event_cves(self, event_id: str, client: NVDClient | None = None) -> list[dict[str, Any]]:
+    def enrich_event_cves(
+        self,
+        event_id: str,
+        client: NVDClient | None = None,
+        *,
+        refresh: bool = False,
+        max_lookups: int | None = None,
+        commit: bool = True,
+    ) -> list[dict[str, Any]]:
         event = self.repository.get_event(event_id)
         if event is None:
             raise LookupError(event_id)
         client = client or NVDClient()
         results = []
-        for indicator in event.indicators:
+        lookup_count = 0
+        indicators = sorted(
+            event.indicators,
+            key=lambda item: (item.indicator_type, item.value.upper(), item.id),
+        )
+        for indicator in indicators:
             if indicator.indicator_type != "cve":
                 continue
+            existing = next(
+                (row for row in indicator.enrichments if row.provider == "NVD"),
+                None,
+            )
+            if (
+                existing is not None
+                and existing.status in {"completed", "not_found"}
+                and not refresh
+            ):
+                continue
+            if max_lookups is not None and lookup_count >= max_lookups:
+                break
+            lookup_count += 1
             try:
                 data = client.fetch_cve(indicator.value)
                 status = "completed" if data.get("found") else "not_found"
             except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
-                data = {"cve_id": indicator.value, "error": str(exc)}
+                data = {
+                    "cve_id": indicator.value,
+                    "error_category": type(exc).__name__,
+                }
                 status = "failed"
             self.repository.upsert_enrichment(indicator, "NVD", data, status)
             results.append(data)
@@ -668,7 +697,8 @@ class PipelineService:
                 "nvd_cvss_score": cvss,
             }
         self._recalculate_risk_scores({event.id})
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return results
 
     def _recalculate_risk_scores(self, event_ids: set[str] | None = None) -> int:

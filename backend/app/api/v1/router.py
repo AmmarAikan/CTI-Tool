@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -71,6 +72,9 @@ from backend.app.schemas.api import (
     AcceptedRecordDetailResponse,
     AcceptedRecordPageResponse,
     IntelligenceCorrelationPageResponse,
+    IntelligenceEnrichmentRequest,
+    IntelligenceEnrichmentRunResponse,
+    IntelligenceEnrichmentStatusResponse,
     IntelligenceEventDetailResponse,
     IntelligenceEventPageResponse,
     IntelligenceIndicatorPageResponse,
@@ -1737,6 +1741,167 @@ def _storyline_risk(event: ThreatEvent) -> tuple[list[dict[str, Any]], dict[str,
     }
 
 
+def _nvd_enrichment_item(indicator: IndicatorRecord) -> dict[str, Any]:
+    enrichment = next(
+        (row for row in indicator.enrichments if row.provider == "NVD"),
+        None,
+    )
+    data = enrichment.data if enrichment and isinstance(enrichment.data, dict) else {}
+    stored_status = enrichment.status if enrichment else "not_run"
+    item_status = (
+        stored_status
+        if stored_status in {"not_run", "completed", "not_found", "failed"}
+        else "failed"
+    )
+    cve_id = indicator.value.strip().upper()[:20]
+    cvss_score = data.get("cvss_score")
+    if (
+        not isinstance(cvss_score, (int, float))
+        or isinstance(cvss_score, bool)
+        or not 0 <= float(cvss_score) <= 10
+    ):
+        cvss_score = None
+    cvss_version = data.get("cvss_version")
+    cvss_version = str(cvss_version)[:20] if cvss_version else None
+    severity = str(data.get("severity") or "").lower()
+    severity = severity if severity in {"low", "medium", "high", "critical"} else None
+    description = data.get("description")
+    description = str(description)[:1000] if description else None
+    raw_cwes = data.get("cwes") if isinstance(data.get("cwes"), list) else []
+    cwes = []
+    for value in raw_cwes:
+        text = str(value).strip()[:50]
+        if text and text not in cwes:
+            cwes.append(text)
+        if len(cwes) == 20:
+            break
+    nvd_url = (
+        f"https://nvd.nist.gov/vuln/detail/{cve_id}"
+        if re.fullmatch(r"CVE-\d{4}-\d{4,7}", cve_id)
+        else "https://nvd.nist.gov/vuln/search"
+    )
+    return {
+        "indicator_id": indicator.id,
+        "cve_id": cve_id,
+        "provider": "NVD",
+        "status": item_status,
+        "enriched_at": iso(enrichment.enriched_at) if enrichment else None,
+        "found": item_status == "completed" and data.get("found") is True,
+        "cvss_score": float(cvss_score) if cvss_score is not None else None,
+        "cvss_version": cvss_version,
+        "severity": severity,
+        "description": description,
+        "cwes": cwes,
+        "nvd_url": nvd_url,
+    }
+
+
+def _nvd_enrichment_status(event: ThreatEvent) -> dict[str, Any]:
+    cve_indicators = sorted(
+        (item for item in event.indicators if item.indicator_type == "cve"),
+        key=lambda item: (item.value.upper(), item.id),
+    )
+    all_items = [_nvd_enrichment_item(item) for item in cve_indicators]
+    counts = {
+        value: sum(item["status"] == value for item in all_items)
+        for value in ("completed", "not_found", "failed", "not_run")
+    }
+    enriched_times = [
+        row.enriched_at
+        for indicator in cve_indicators
+        for row in indicator.enrichments
+        if row.provider == "NVD" and row.enriched_at is not None
+    ]
+    risk_factors, _risk_context = _storyline_risk(event)
+    return {
+        "event_id": event.id,
+        "provider": "NVD",
+        "eligible_count": len(cve_indicators),
+        "completed_count": counts["completed"],
+        "not_found_count": counts["not_found"],
+        "failed_count": counts["failed"],
+        "pending_count": counts["not_run"],
+        "last_enriched_at": iso(max(enriched_times)) if enriched_times else None,
+        "items_truncated": len(all_items) > 100,
+        "items": all_items[:100],
+        "risk": {
+            "method": "deterministic_rule_score",
+            "score": event.risk_score,
+            "severity": event.severity,
+            "factors": risk_factors,
+        },
+    }
+
+
+@router.get(
+    "/intelligence/events/{event_id}/enrichment",
+    tags=["intelligence", "enrichment"],
+    response_model=IntelligenceEnrichmentStatusResponse,
+)
+def intelligence_event_enrichment(
+    event_id: str,
+    db: SessionDep,
+    _: CurrentUser,
+) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    return _nvd_enrichment_status(event)
+
+
+@router.post(
+    "/intelligence/events/{event_id}/enrichment/nvd",
+    tags=["intelligence", "enrichment"],
+    response_model=IntelligenceEnrichmentRunResponse,
+)
+def intelligence_event_enrich_nvd(
+    event_id: str,
+    payload: IntelligenceEnrichmentRequest,
+    db: SessionDep,
+    user: Annotated[User, Depends(require_roles("admin", "analyst"))],
+) -> dict[str, Any]:
+    event = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Threat event not found")
+    before = _nvd_enrichment_status(event)
+    if before["eligible_count"] == 0:
+        raise HTTPException(status_code=409, detail="No CVE indicators are eligible for NVD enrichment")
+    if not payload.refresh and before["pending_count"] == 0 and before["failed_count"] == 0:
+        raise HTTPException(status_code=409, detail="Current NVD enrichment is already stored; confirm a refresh to run again")
+    previous_risk_score = float(event.risk_score)
+    lookup_results = PipelineService(db).enrich_event_cves(
+        event_id,
+        refresh=payload.refresh,
+        max_lookups=5,
+        commit=False,
+    )
+    db.expire_all()
+    refreshed = db.scalar(event_query().where(ThreatEvent.id == event_id))
+    if refreshed is None:
+        raise HTTPException(status_code=409, detail="Threat event became unavailable during enrichment")
+    result = _nvd_enrichment_status(refreshed)
+    audit(
+        db,
+        user,
+        "enrich_nvd",
+        "threat_event",
+        event_id,
+        refresh=payload.refresh,
+        eligible_count=result["eligible_count"],
+        completed_count=result["completed_count"],
+        not_found_count=result["not_found_count"],
+        failed_count=result["failed_count"],
+        attempted_count=len(lookup_results),
+    )
+    db.commit()
+    return {
+        **result,
+        "previous_risk_score": previous_risk_score,
+        "risk_changed": previous_risk_score != float(result["risk"]["score"]),
+        "attempted_count": len(lookup_results),
+    }
+
+
 @router.get(
     "/intelligence/events/{event_id}/storyline",
     tags=["intelligence"],
@@ -2647,19 +2812,19 @@ def get_event(event_id: str, db: SessionDep, _: CurrentUser) -> dict[str, Any]:
     return event_dict(event, detail=True)
 
 
-@router.post("/events/{event_id}/enrich/nvd", tags=["enrichment"])
+@router.post(
+    "/events/{event_id}/enrich/nvd",
+    tags=["enrichment"],
+    response_model=IntelligenceEnrichmentRunResponse,
+    deprecated=True,
+)
 def enrich_event(
     event_id: str,
+    payload: IntelligenceEnrichmentRequest,
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
 ) -> dict[str, Any]:
-    try:
-        results = PipelineService(db).enrich_event_cves(event_id)
-    except LookupError:
-        raise HTTPException(status_code=404, detail="Threat event not found")
-    audit(db, user, "enrich_nvd", "threat_event", event_id, result_count=len(results))
-    db.commit()
-    return {"event_id": event_id, "results": results}
+    return intelligence_event_enrich_nvd(event_id, payload, db, user)
 
 
 @router.get("/indicators", tags=["cti"])

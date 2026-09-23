@@ -720,6 +720,57 @@ class IntelligenceStorylineRiskContextResponse(BaseModel):
     correlation_count: int | None = Field(default=None, ge=0)
 
 
+class IntelligenceEnrichmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm_external_lookup: Literal[True]
+    refresh: bool = False
+
+
+class IntelligenceEnrichmentItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    indicator_id: str = Field(max_length=36)
+    cve_id: str = Field(max_length=20)
+    provider: Literal["NVD"]
+    status: Literal["not_run", "completed", "not_found", "failed"]
+    enriched_at: str | None = Field(default=None, max_length=40)
+    found: bool
+    cvss_score: float | None = Field(default=None, ge=0, le=10)
+    cvss_version: str | None = Field(default=None, max_length=20)
+    severity: Literal["low", "medium", "high", "critical"] | None = None
+    description: str | None = Field(default=None, max_length=1000)
+    cwes: list[str] = Field(max_length=20)
+    nvd_url: str = Field(max_length=200)
+
+
+class IntelligenceEnrichmentRiskResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    method: Literal["deterministic_rule_score"]
+    score: float = Field(ge=0, le=100)
+    severity: str | None = Field(default=None, max_length=30)
+    factors: list[IntelligenceStorylineRiskFactorResponse] = Field(max_length=6)
+
+
+class IntelligenceEnrichmentStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_id: str = Field(max_length=64)
+    provider: Literal["NVD"]
+    eligible_count: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    not_found_count: int = Field(ge=0)
+    failed_count: int = Field(ge=0)
+    pending_count: int = Field(ge=0)
+    last_enriched_at: str | None = Field(default=None, max_length=40)
+    items_truncated: bool
+    items: list[IntelligenceEnrichmentItemResponse] = Field(max_length=100)
+    risk: IntelligenceEnrichmentRiskResponse
+
+
+class IntelligenceEnrichmentRunResponse(IntelligenceEnrichmentStatusResponse):
+    previous_risk_score: float = Field(ge=0, le=100)
+    risk_changed: bool
+    attempted_count: int = Field(ge=0, le=5)
+
+
 class IntelligenceStorylineEvidenceCountsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     observables: int = Field(ge=0)

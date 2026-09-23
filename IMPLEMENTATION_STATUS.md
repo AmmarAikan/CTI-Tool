@@ -12,6 +12,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 
 - Phase: P0 Phases 1-8 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, reviewed multi-event MISP delivery, isolated Demo Dataset/System Readiness, and RBAC/session/reverse-proxy hardening.
 - ML transparency is complete in development and not deployed: the bounded status contract and Analysis view now expose runtime/readiness state, individual quality gates, offline metric scope, safe in-process inference counters, model limitations, and fallback availability.
+- Analyst-controlled CVE enrichment is complete in development and not deployed: event details now expose persisted NVD status/provenance, bounded explicit analyst/admin execution, safe result projection, and deterministic risk before/after evidence while viewers remain read-only.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -153,7 +154,7 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | STIX sharing | Partial | Per-event STIX endpoint exists | Add obvious UI download/export, validation feedback, and safe filename/content handling |
 | MISP health/preview/send/history | Ready in development, not deployed | Candidate queue, readiness/omission reasons, admin-confirmed batch of at most 20, per-event audit outcomes, post-send links, and idempotent client passed Docker parity tests | Validate after immutable deployment; retain review and unpublished-by-default policy |
 | MISP population | Partial by design | Sole production MISP event is the only ACTIT event actually sent; deterministic UUID prevents duplicates. Multi-event workflow exists only in development | Do not mirror PostgreSQL; admin deliberately selects and confirms eligible events after deployment |
-| Enrichment | Missing live data | Enrichment table contains zero rows | Add controlled enrichment runs/status and make risk/assessment provenance visible |
+| Enrichment | Ready in development, not deployed; no live data | Authenticated event status and analyst/admin-confirmed NVD execution are bounded to five lookups per request, persist results, audit atomically, expose safe provenance/CVSS/CWE evidence, and show deterministic risk impact; production still contains zero enrichment rows | Validate through a separately approved immutable release; retain explicit confirmation, viewer read-only access, no automatic retry, and safe result projection |
 | ML transparency | Ready in development, not deployed | Bounded API and bilingual Analysis view expose runtime/readiness state, all nine individual quality gates, held-out and unique-unseen metrics with offline scope, safe in-process inference counters, explicit limitations, and fallback availability | Validate against an immutable release after separately approved deployment; never present saved evaluation metrics as live production accuracy |
 | Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
 | Outlier detection | Partial | 413 sessions and Isolation Forest/fallback metadata exist | Explain features, sample sufficiency, detector choice, and event relationship |
@@ -549,3 +550,49 @@ or any other production mutation. The 2026-09-22 External `state=failed`
 incident remains diagnostic NO-GO with no candidate selected; the historical
 Gateway OOM / `curl 52` incident remains separate and unresolved. These paused
 incidents do not block unrelated ACTIT development.
+
+## Analyst-controlled CVE enrichment development checkpoint (2026-09-23)
+
+The CVE enrichment milestone is complete in the development worktree and has
+not been deployed. Existing `NVDClient`, `PipelineService`, PostgreSQL
+`enrichments`, event risk recalculation, RBAC, audit, and Event Details
+components were reused; no provider, queue, datastore, framework, dependency,
+service, or schema migration was introduced.
+
+Authenticated users can read a bounded safe enrichment projection for an
+event. Analysts and administrators can explicitly confirm a bounded NVD run;
+each request attempts at most five CVEs, skips stored completed/not-found
+results unless refresh is confirmed, performs no automatic retry, persists
+per-CVE status and timestamp, recalculates deterministic risk, and commits the
+enrichment plus audit record atomically. Viewers remain read-only. Provider
+vectors, references, raw responses, exception messages, secrets, and arbitrary
+stored fields are not projected. The deprecated legacy endpoint now requires
+the same confirmation contract and returns the same safe response instead of
+raw provider results.
+
+Event Details now provides bilingual, responsive status cards for pending,
+completed, not-found, and failed CVEs; official NVD links; CVSS version/score,
+severity, CWE evidence, timestamps, stored-result counts, deterministic risk
+factors, and before/after risk feedback. The interface labels the calculation
+as deterministic rather than ML, requires browser confirmation before an
+external lookup, and does not retry automatically.
+
+Verification completed in the development worktree with all NVD calls mocked:
+
+- Focused Backend enrichment test passed, including confirmation, RBAC,
+  persistence, safe projection, duplicate prevention, the five-lookup bound,
+  and legacy-path safety.
+- Backend API regression passed 19/19.
+- Full Python regression passed 462/462.
+- Frontend Vitest regression passed 134/134 after the new API/parser/UI tests.
+- Frontend TypeScript lint and production build passed; the existing Vite
+  chunk-size advisory remains non-blocking.
+- Python compile checks and `git diff --check` passed.
+
+Production remains unchanged and contains no new enrichment data. No real NVD
+request, deployment, restart, rollback, `/opt` write, Docker/Compose action,
+collection execution, database migration, or production mutation occurred.
+The 2026-09-22 External collection incident remains diagnostic NO-GO with no
+candidate selected; the historical Gateway OOM / `curl 52` incident remains
+separate and unresolved. Neither paused incident blocks this completed
+development milestone.
