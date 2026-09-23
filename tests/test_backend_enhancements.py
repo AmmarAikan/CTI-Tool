@@ -371,6 +371,48 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual((lifecycle["items"][0]["state"], lifecycle["items"][0]["central_run_id"]),
                          ("processed", first["run_id"]))
 
+    def test_review_lifecycle_projection_is_bounded_and_empty_is_normal(self) -> None:
+        from sqlalchemy import event as sqlalchemy_event
+        from backend.app.api.v1.router import _project_review_lifecycle
+
+        engine = temporary_database_engine()
+        statements: list[str] = []
+
+        def capture_statement(_connection, _cursor, statement, _parameters, _context, _executemany):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(statement.lower())
+
+        sqlalchemy_event.listen(engine, "before_cursor_execute", capture_statement)
+        try:
+            with Session(engine) as session:
+                empty = _project_review_lifecycle(
+                    session,
+                    {"schema_version": "1.0", "items": []},
+                )
+                self.assertEqual(empty["items"], [])
+                self.assertEqual(statements, [])
+
+                lifecycle = {
+                    "schema_version": "1.0",
+                    "items": [
+                        {
+                            "record_id": f"review-record-{index:04d}",
+                            "export_run_id": f"review-run-{index:04d}",
+                            "state": "pending",
+                        }
+                        for index in range(100)
+                    ],
+                }
+                projected = _project_review_lifecycle(session, lifecycle)
+        finally:
+            sqlalchemy_event.remove(engine, "before_cursor_execute", capture_statement)
+            engine.dispose()
+
+        self.assertEqual(len(projected["items"]), 100)
+        self.assertEqual(len(statements), 4)
+        self.assertTrue(all("threat_events.description" not in statement for statement in statements))
+        self.assertTrue(all("raw_items.content" not in statement for statement in statements))
+
     def test_review_import_failure_is_retryable_without_redeciding_external_state(self) -> None:
         from fastapi import HTTPException
         from backend.app.api.v1.router import external_control_review_decision

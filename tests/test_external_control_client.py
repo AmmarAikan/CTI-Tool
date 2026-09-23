@@ -198,6 +198,21 @@ class ExternalControlClientTests(unittest.TestCase):
         self.assertTrue(client.session.calls[1][1].endswith("/jobs?limit=50"))
         self.assertEqual(client.session.calls[2][0], "POST")
 
+    def test_reviews_isolate_malformed_siblings_but_fail_when_all_are_malformed(self) -> None:
+        valid = {"record_id": "record-1234567890", "canonical_url": None, "title": "Safe",
+            "source_type": "rss", "review_reason": "privacy_review", "review_reasons": ["privacy_review"],
+            "stage_status": {"privacy": "review"}, "classification_label": "related",
+            "privacy_status": "review_required", "collected_at": "2026-09-07T00:00:00Z", "published": None,
+            "content_sha256": "sha256:" + "a" * 64, "review_version": "external_review_v2",
+            "summary": "Sanitized summary", "excerpt": "Sanitized review content",
+            "source": "Safe source", "category": "advisory", "status": "pending"}
+        malformed = {**valid, "record_id": "record-malformed-123", "summary": {"secret": "value"}}
+        payload = {"run_id": "ext-run-1234567890", "records": [malformed, valid]}
+        projected = self.client([FakeResponse(payload)]).latest_reviews()
+        self.assertEqual([item["record_id"] for item in projected["records"]], [valid["record_id"]])
+        with self.assertRaises(ExternalControlTransportError):
+            self.client([FakeResponse({**payload, "records": [malformed]})]).latest_reviews()
+
     def test_review_decision_requires_confirmed_processing_and_exact_export_identity(self) -> None:
         digest = "sha256:" + "a" * 64
         approved = {"schema_version": "1.0", "record_id": "record-1234567890", "content_sha256": digest,

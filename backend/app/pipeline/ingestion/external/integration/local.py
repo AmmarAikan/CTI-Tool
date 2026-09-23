@@ -602,6 +602,7 @@ class LocalReviewService:
         decided = {(str(value.get("record_id")), str(value.get("content_sha256"))) for value in decisions.values()
                    if isinstance(value, dict) and value.get("decision") in {"approved", "rejected"}}
         records = []
+        candidate_count = 0
         for entry in values[:1000]:
             if not isinstance(entry, dict) or not isinstance(entry.get("record"), dict): continue
             record = entry["record"]
@@ -621,6 +622,7 @@ class LocalReviewService:
                     or not re.fullmatch(r"sha256:[0-9a-f]{64}",content_hash) or not content.strip()): continue
             decision = decisions.get(f"{record_id}:{content_hash}")
             if isinstance(decision, dict) and decision.get("decision") == "rejected": continue
+            candidate_count += 1
             status = "pending"
             if isinstance(decision, dict) and decision.get("decision") == "approved":
                 status = "processing_failed" if decision.get("processing_state") == "processing_failed" else "approved_processing"
@@ -636,6 +638,8 @@ class LocalReviewService:
                 "category": str(record.get("category") or "unknown")[:80], "status": status}
             try: records.append(ReviewRecordResponse.model_validate(projected).model_dump())
             except PydanticValidationError: continue
+        if candidate_count and not records:
+            raise ValueError("invalid_response")
         return {"run_id": run_id, "records": sorted(records, key=lambda value: value["record_id"])[:100]}
 
     def lifecycle(self) -> dict[str, Any]:

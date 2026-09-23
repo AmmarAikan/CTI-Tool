@@ -121,6 +121,33 @@ class UnifiedCollectionTests(unittest.TestCase):
         self.assertEqual(result["status"], "partial")
         self.assertEqual((result["error_count"], result["review_records"]), (2, 1))
         self.assertNotIn("https://", str(result))
+        diagnostic = result["sources"]["rss-one"]
+        self.assertEqual(diagnostic, {"status": "failed", "accepted_records": 0,
+            "review_records": 0, "rejected_records": 0, "skipped_records": 0,
+            "error_count": 1, "failure_categories": {"internal_failure": 1},
+            "collection_stage": "source_execution", "exception_class": "RuntimeError",
+            "retryable": False})
+        self.assertNotIn("private URL", str(diagnostic))
+
+    def test_ordinary_multi_source_run_isolates_exceptions_and_preserves_handled_results(self):
+        runner = ImmediateRunner()
+        executor = Executor({"rss-one": SourceExecutionResult("rss-one", "completed", accepted_records=1),
+                             "dark-one": RuntimeError("https://private.invalid token=secret body=private")})
+        executor.runner = runner
+        service = CanonicalCollectionService(runner, registry(), executor)
+        service.start_collection(CollectionRequest(source_ids=("rss-one", "dark-one")))
+        self.assertEqual((runner.result["status"], runner.result["accepted_records"],
+                          runner.result["sources"]["dark-one"]["exception_class"]),
+                         ("partial", 1, "RuntimeError"))
+        self.assertNotIn("private.invalid", str(runner.result))
+        self.assertNotIn("secret", str(runner.result))
+
+    def test_failed_status_with_skipped_outcome_is_handled(self):
+        values = {"rss-one": SourceExecutionResult("rss-one", "failed", skipped_records=2, error_count=1),
+                  "dark-one": SourceExecutionResult("dark-one", "failed", error_count=1)}
+        result = self.run_unified(Executor(values), ManualService())
+        self.assertEqual((result["status"], result["sources"]["rss-one"]["status"], result["skipped_records"]),
+                         ("partial", "partial", 2))
 
     def test_all_selected_operations_failed(self):
         failed = SourceExecutionResult("rss-one", "failed", error_count=1)
