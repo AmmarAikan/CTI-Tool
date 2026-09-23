@@ -32,6 +32,7 @@ from backend.app.db.models import (
     IndicatorRecord,
     OutlierSessionRecord,
     PipelineRun,
+    RawItem,
     Source,
     ThreatEvent,
     User,
@@ -844,35 +845,89 @@ def external_control_latest_export(_: CurrentUser) -> dict[str, Any]:
 
 
 def _project_review_lifecycle(db: Session, external: dict[str, Any]) -> dict[str, Any]:
+    raw_items = [dict(value) for value in external.get("items", [])[:1000]]
+    record_ids = {str(value["record_id"]) for value in raw_items}
+    export_run_ids = {
+        str(value["export_run_id"])
+        for value in raw_items
+        if isinstance(value.get("export_run_id"), str) and value["export_run_id"]
+    }
+
+    event_updates: dict[str, datetime] = {}
+    if record_ids:
+        direct_events = db.execute(
+            select(ThreatEvent.source_record_id, ThreatEvent.updated_at)
+            .where(
+                ThreatEvent.source_pipeline == "external",
+                ThreatEvent.source_record_id.in_(record_ids),
+            )
+            .order_by(desc(ThreatEvent.updated_at))
+            .limit(10_000)
+        ).all()
+        for record_id, updated_at in direct_events:
+            event_updates.setdefault(str(record_id), updated_at)
+
+        missing_ids = record_ids - event_updates.keys()
+        if missing_ids:
+            legacy_record_id = RawItem.raw_data["record_id"].as_string()
+            legacy_events = db.execute(
+                select(legacy_record_id, ThreatEvent.updated_at)
+                .join(RawItem, ThreatEvent.raw_item_id == RawItem.id)
+                .where(
+                    ThreatEvent.source_pipeline == "external",
+                    legacy_record_id.in_(missing_ids),
+                )
+                .order_by(desc(ThreatEvent.updated_at))
+                .limit(10_000)
+            ).all()
+            for record_id, updated_at in legacy_events:
+                if record_id is not None:
+                    event_updates.setdefault(str(record_id), updated_at)
+
+    central_runs: dict[str, str] = {}
+    if export_run_ids:
+        export_run_id = PipelineRun.details["export_run_id"].as_string()
+        run_rows = db.execute(
+            select(PipelineRun.id, export_run_id)
+            .where(
+                PipelineRun.pipeline == "external",
+                export_run_id.in_(export_run_ids),
+            )
+            .order_by(desc(PipelineRun.started_at))
+            .limit(1000)
+        ).all()
+        for run_id, external_run_id in run_rows:
+            if external_run_id is not None:
+                central_runs.setdefault(str(external_run_id), run_id)
+
+    latest_audit: dict[str, dict[str, Any]] = {}
+    if record_ids:
+        audit_rows = db.execute(
+            select(AuditLog.resource_id, AuditLog.details)
+            .where(
+                AuditLog.action == "decide_external_review",
+                AuditLog.resource_id.in_(record_ids),
+            )
+            .order_by(desc(AuditLog.created_at))
+            .limit(1000)
+        ).all()
+        for record_id, details in audit_rows:
+            if record_id and record_id not in latest_audit:
+                latest_audit[record_id] = details if isinstance(details, dict) else {}
+
     items = []
-    external_events = db.scalars(select(ThreatEvent).where(ThreatEvent.source_pipeline == "external")
-        .options(selectinload(ThreatEvent.raw_item)).order_by(desc(ThreatEvent.created_at)).limit(10_000)).all()
-    runs = db.scalars(select(PipelineRun).where(PipelineRun.pipeline == "external")
-        .order_by(desc(PipelineRun.started_at)).limit(1000)).all()
-    audits = db.scalars(select(AuditLog).where(AuditLog.action == "decide_external_review")
-        .order_by(desc(AuditLog.created_at)).limit(1000)).all()
-    latest_audit = {}
-    for value in audits:
-        if value.resource_id and value.resource_id not in latest_audit: latest_audit[value.resource_id] = value
-    for raw in external.get("items", [])[:1000]:
+    for raw in raw_items:
         item = dict(raw); record_id = item["record_id"]; export_run_id = item.get("export_run_id")
-        event = next((value for value in external_events if value.source_record_id == record_id
-                      or value.raw_item is not None and isinstance(value.raw_item.raw_data, dict)
-                      and value.raw_item.raw_data.get("record_id") == record_id), None)
-        run = None
-        if export_run_id:
-            run = next((value for value in runs if isinstance(value.details, dict)
-                        and value.details.get("export_run_id") == export_run_id), None)
-        failed_audit = latest_audit.get(record_id)
-        details = failed_audit.details if failed_audit and isinstance(failed_audit.details, dict) else {}
-        if event is not None:
+        central_run_id = central_runs.get(str(export_run_id)) if export_run_id else None
+        details = latest_audit.get(record_id, {})
+        if record_id in event_updates:
             item.update({"state": "processed", "stage": "processed", "retryable": False,
-                         "central_run_id": run.id if run else None, "updated_at": iso(event.updated_at)})
+                         "central_run_id": central_run_id, "updated_at": iso(event_updates[record_id])})
         elif details.get("processing_state") == "processing_failed":
             item.update({"state": "processing_failed", "stage": "central_import", "retryable": True,
                          "central_run_id": details.get("central_run_id")})
         else:
-            item["central_run_id"] = run.id if run else None
+            item["central_run_id"] = central_run_id
         items.append(item)
     return {"schema_version": "1.0", "items": items}
 
@@ -2176,7 +2231,7 @@ def _accepted_record(event: ThreatEvent, source: Source | None, correlation_coun
             "summary": str(raw.get("summary") or event.description or "")[:1000],
             "published": str(raw.get("published") or "")[:40] or None,
             "collected_at": str(raw.get("collected_at") or "")[:40] or None,
-            "accepted_at": iso(event.created_at), "processing_state": event.processing_status[:30],
+            "accepted_at": iso(event.updated_at), "processing_state": event.processing_status[:30],
             "classification": event.classification_label[:50] if event.classification_label else None,
             "privacy_status": str(privacy.get("status") or "")[:40] or None,
             "entity_count": len(event.entities), "indicator_count": len(event.indicators),
@@ -2197,7 +2252,7 @@ def accepted_records(db: SessionDep, _: CurrentUser, search: str | None = Query(
     total = db.scalar(select(func.count()).select_from(ThreatEvent).outerjoin(Source).where(*filters)) or 0
     rows = db.execute(select(ThreatEvent, Source).outerjoin(Source).where(*filters).options(
         selectinload(ThreatEvent.raw_item), selectinload(ThreatEvent.entities), selectinload(ThreatEvent.indicators)
-    ).order_by(desc(ThreatEvent.created_at), ThreatEvent.id).limit(limit).offset(offset)).unique().all()
+    ).order_by(desc(ThreatEvent.updated_at), desc(ThreatEvent.id)).limit(limit).offset(offset)).unique().all()
     ids = [event.id for event, _source in rows]
     correlations = db.scalars(select(CorrelationRecord).where(or_(CorrelationRecord.event_a_id.in_(ids),
         CorrelationRecord.event_b_id.in_(ids)))).all() if ids else []

@@ -292,8 +292,10 @@ class ExternalControlClient:
                     or not isinstance(item.get("summary"),str) or len(item["summary"])>500
                     or not self._safe_text(item.get("excerpt"), 2000)
                     or item.get("status") not in {"pending", "approved_processing", "processing_failed"}):
-                raise ExternalControlTransportError("External review contract is invalid")
+                continue
             safe_records.append({key: item.get(key) for key in allowed if key != "canonical_url" and key != "stage_status"})
+        if payload["records"] and not safe_records:
+            raise ExternalControlTransportError("External review contract is invalid")
         return {"run_id": payload["run_id"], "records": safe_records}
 
     def review_lifecycle(self) -> dict[str, Any]:

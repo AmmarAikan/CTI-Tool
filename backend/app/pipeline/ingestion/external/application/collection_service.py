@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import secrets
 import threading
 from typing import Any, Callable, Literal, Protocol
@@ -76,6 +76,8 @@ class SourceExecutionResult:
     retryable: bool = False
     collection_method: str | None = None
     failure_categories: dict[str, int] = field(default_factory=dict)
+    collection_stage: str | None = None
+    exception_class: str | None = None
 
 
 class SourceExecutor(Protocol):
@@ -156,10 +158,7 @@ class CanonicalCollectionService(CollectionService):
         try:
             for source_id in source_ids:
                 if cancellation.is_set(): cancelled = True; break
-                try: result = self.executor.execute(self._source(source_id), force=force, command_id=command_id)
-                except Exception:
-                    result = SourceExecutionResult(source_id, "failed", error_count=1, errors=("source_execution_failed",))
-                registered.append(result)
+                registered.append(self._execute_isolated(source_id, force=force, command_id=command_id))
             roots: tuple[ManualTrackedRoot, ...] = ()
             if not cancelled and self.manual_service is not None:
                 try: roots = self.manual_service.list_tracked_roots()
@@ -230,7 +229,10 @@ class CanonicalCollectionService(CollectionService):
                 "review_records": value.review_records, "rejected_records": value.rejected_records,
                 "skipped_records": value.skipped_records, "error_count": value.error_count,
                 **({"collection_method": value.collection_method} if value.collection_method else {}),
-                **({"failure_categories": value.failure_categories} if value.failure_categories else {})} for value in registered},
+                **({"failure_categories": value.failure_categories} if value.failure_categories else {}),
+                **({"collection_stage": value.collection_stage} if value.collection_stage else {}),
+                **({"exception_class": value.exception_class} if value.exception_class else {}),
+                **({"retryable": value.retryable} if value.error_count else {})} for value in registered},
             "manual_sources": manual,
         }
 
@@ -272,7 +274,7 @@ class CanonicalCollectionService(CollectionService):
         return source_ids
 
     def _run(self, source_ids: tuple[str, ...], *, force: bool, command_id: str, run_id: str, started_at: str) -> dict[str, Any]:
-        results = tuple(self.executor.execute(self._source(source_id), force=force, command_id=command_id) for source_id in source_ids)
+        results = tuple(self._execute_isolated(source_id, force=force, command_id=command_id) for source_id in source_ids)
         failed = sum(result.status == "failed" for result in results)
         overall = "failed" if failed == len(results) else "partial" if failed else "completed"
         aggregate = {
@@ -286,7 +288,10 @@ class CanonicalCollectionService(CollectionService):
             "sources": {result.source_id: {"status": result.status, "accepted_records": result.accepted_records,
                                             "review_records": result.review_records, "error_count": result.error_count,
                                             **({"collection_method": result.collection_method} if result.collection_method else {}),
-                                            **({"failure_categories": result.failure_categories} if result.failure_categories else {})}
+                                            **({"failure_categories": result.failure_categories} if result.failure_categories else {}),
+                                            **({"collection_stage": result.collection_stage} if result.collection_stage else {}),
+                                            **({"exception_class": result.exception_class} if result.exception_class else {}),
+                                            **({"retryable": result.retryable} if result.error_count else {})}
                         for result in results},
             "force": force,
             "run_id": run_id,
@@ -305,6 +310,21 @@ class CanonicalCollectionService(CollectionService):
                 aggregate["export"] = {"status": "failed", "error": {"code": "export_failed",
                     "message": "collection completed but export generation failed safely", "retryable": True, "details": {}}}
         return aggregate
+
+    def _execute_isolated(self, source_id: str, *, force: bool, command_id: str) -> SourceExecutionResult:
+        try:
+            result = self.executor.execute(self._source(source_id), force=force, command_id=command_id)
+        except Exception as exc:
+            exception_class = type(exc).__name__
+            LOGGER.error("external source execution failed source_id=%s collection_stage=source_execution exception_class=%s failure_category=internal_failure retryable=false error_count=1",
+                         source_id, exception_class)
+            return SourceExecutionResult(source_id, "failed", error_count=1,
+                failure_category="internal_failure", failure_categories={"internal_failure": 1},
+                collection_stage="source_execution", exception_class=exception_class)
+        handled = result.accepted_records + result.review_records + result.rejected_records + result.skipped_records
+        if result.status == "failed" and handled:
+            return replace(result, status="partial")
+        return result
 
     def _source(self,source_id:str)->RegisteredSource:
         source=self.registry.get(source_id)
