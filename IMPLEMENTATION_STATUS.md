@@ -731,3 +731,131 @@ or production-readiness claim. No `/opt` write, deployment, rollback, production
 restart, timer action, live database/MISP change, credential change, or heavy
 production job occurred. The scheduled External `state=failed` incident and
 historical Gateway OOM/`curl 52` incident remain separate and unresolved.
+
+## Final production stabilization checkpoint (2026-09-24)
+
+ACTIT production is now on immutable release
+`/opt/cti-platform/releases/20260923T223701Z-e4e9f520b16e`, sourced from
+`e4e9f520b16e9d27fd078bded88292f45e10dab8` on
+`codex/actit-final-production`. The local and remote branch tips matched before
+the final cutover. The preceding production release was
+`/opt/cti-platform/releases/20260920T200352Z-7e6364b14f0c9c408b4b561c351d782dca03f557`.
+
+Pre-deployment verification confirmed that CVE/NVD enrichment, ML
+transparency, checkpoint-aware Web Access health, bounded Reviews projection,
+and External collection diagnostics were included. Full Python regression
+passed 472/472. Frontend lint, 134/134 Vitest tests, and the production build
+passed. The final runner-only correction passed Bash syntax validation,
+14/14 VPS deployment tests, and `git diff --check`. No model or migration file
+changed relative to the previous production revision, and no destructive or
+incompatible database migration was required.
+
+The existing production PostgreSQL database was backed up and validated before
+the Central cutover at
+`/opt/cti-platform/backups/central-predeploy-20260923T215659Z.dump`. PostgreSQL,
+MISP, Gateway state, External state, Docker volumes, Tailscale configuration,
+secrets, and systemd automation were preserved. Backend and Frontend were
+rebuilt and replaced; External Sources was rebuilt and replaced without its
+dependencies. Gateway was not rebuilt, recreated, or downgraded. The final
+runner-only release changed no container lifecycle.
+
+Current production image identifiers are:
+
+- Backend: `sha256:c1278642f427934a4fbfbb78674cd4c22929c81f077780c95582f435986e4c20`
+- Frontend: `sha256:3e56fd942221d83c5cdf6ee59f18a97e2ec48ccf738be96fc4fe7d2c594f2aaf`
+- External Sources: `sha256:55987679ecdb7dfc173b1eb04b5d468c03fbac22e550a6a683a7a80b2fbd67d7`
+- Gateway, deliberately unchanged: `sha256:e5db0c43da9b13259513eb86f0ae1164acf10d9cfe2cc4c3dc7274b0cedd6dbe`
+
+The pre-deployment Backend, Frontend, External Sources, and Gateway identifiers
+were respectively `sha256:e73c38bf89f88137651d7b856c0b16bafe67a41ccdf8d6247ee366f780cb42c7`,
+`sha256:5d9459ca527f94f837ce277ef8416fcceb662b220ba7c0b6537ac2badc73fe34`,
+`sha256:51fa84f7388d2b2a5e8c30df174f1ebfcad83951652b39568828bbc4d6ada783`,
+and the same unchanged Gateway identifier above.
+
+### Live validation
+
+Frontend, Backend, PostgreSQL, Gateway, External Sources, and MISP containers
+are healthy. The Backend health endpoint reports `status=ok` and
+`database=true`. The Dashboard summary and event-detail service paths read the
+live PostgreSQL dataset successfully. Unauthenticated access to a protected API
+returned HTTP 401, and the live database contains active admin, analyst, and
+viewer roles. The stored `BOOTSTRAP_ADMIN_PASSWORD` no longer authenticated the
+existing account; no credential was inspected, reset, or changed. A complete
+password-login browser session therefore remains unverified until the owner
+uses a current production account.
+
+Checkpoint-aware Central Backend health now reports Web Access as configured,
+reachable, and contract-valid. A raw cursorless Gateway read still returns the
+expected HTTP 409 after base-offset compaction, while the Backend read using the
+stored checkpoint succeeds without ACK or Gateway mutation. Dionaea and Host
+Auth also remain configured, reachable, and contract-valid.
+
+The live Reviews latest and lifecycle service paths each returned a valid
+bounded 100-item contract; the UI bundle contains the Reviews integration and
+must no longer treat valid data as service unavailable. CVE/NVD enrichment and
+ML transparency are present in the deployed Frontend and Backend. Production
+currently contains 10,883 CVE indicators and zero stored NVD enrichment rows;
+no real NVD lookup was run. ML reports the primary model active with 6/9 quality
+gates passing, degraded readiness, unavailable fallback, and explicit
+limitations. This is live transparent evidence, not a claim of full ML
+readiness. A live STIX 2.1 service export returned a valid bundle. MISP health
+reports configured and reachable.
+
+### Controlled MISP batch awaiting approval
+
+No MISP delivery was executed. The candidate queue currently reports 13,952
+external events. The first 50 candidates in risk-descending order were examined
+using the production preview path. The following 20-event batch is ready,
+contains transferable attributes, has zero prior delivery for every identity,
+and previews with `published=false` and distribution 0:
+
+1. `cti-3fa1ef7ee5262ca3e3088705`
+2. `cti-1d3d473be6b42ed4d30ad88e`
+3. `cti-1e3767f44fd7f67fca20373f`
+4. `cti-d8ed33d753954a8dda0e30b2`
+5. `cti-ba9e9559da59edddcd6344a5`
+6. `cti-3262b07dedf9b6a400ef8cf0`
+7. `cti-f40d5d653bfb4f98df0263aa`
+8. `cti-155690338f2fc1e16a7a9dd7`
+9. `cti-8fed487a2de89a64c7729da7`
+10. `cti-7caf7b3b7702ca223ef821bf`
+11. `cti-8f1defbc83a78d0e20d9a751`
+12. `cti-a0a941b542151b0c4de74fa3`
+13. `cti-de9b70a5d734aacd8a9c635e`
+14. `cti-ffe35e56785daf12bd887cf1`
+15. `cti-424e14239d86ebf4ea7db28a`
+16. `cti-33f141c7fe668ae17a9ecc2a`
+17. `cti-1af32d6482cdc93d09c5559e`
+18. `cti-a9ae36ba0b95f92e31c17aa2`
+19. `cti-07603ec05a3ae206059a405f`
+20. `cti-af2e2c48e8e9e6e8dd3a1705`
+
+The ordered batch SHA-256 is
+`2223b46ddd6591fddc9674f47aa89065ba0388175d70d219a3a2d29f1455fe81`.
+The existing endpoint remains admin-only, accepts at most 20 unique event IDs,
+requires `confirm_unpublished=true`, uses deterministic MISP identity, keeps
+events unpublished by default, and records a per-event result and audit. A new
+explicit owner instruction matching this exact unchanged batch and digest is
+required before delivery. There is no automatic retry or delivery authorization.
+
+### External collection diagnostics
+
+The two-hour timer remains enabled and unchanged. Structured diagnostics are
+deployed in External Sources and the installed systemd runner, including
+systemd invocation correlation, job and command IDs, orchestration stage,
+source class/status counts, export stage, sanitized failure category, and
+exception class. The runner and release copies have matching SHA-256
+`03825e0e52af6bfa63d4ec61153c685b0d3f111f6f7ce1e7a629907dbd177f27`.
+
+The first normal timer invocation after the initial application cutover
+overlapped the authorized External container replacement. Its submit connection
+was reset before a job was accepted, producing `ExecMainStatus=56`; no Gateway
+publish, merge, or ACK occurred. This deployment-overlap failure is not evidence
+of the earlier job-level `TypeError`, Gateway OOM, or a collector failure. The
+runner was then hardened to log start and all early non-zero exits through an
+`EXIT` trap, without changing collection behavior. No manual collection or
+publisher run was executed. The next normal scheduled invocation must supply
+the first post-hardening diagnostic evidence. External Sources remains **NOT
+production-ready**, the exact historical `TypeError` boundary remains
+unverified, and the historical Gateway OOM / `curl 52` incident remains
+separate and unresolved.
