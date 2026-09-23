@@ -859,3 +859,25 @@ the first post-hardening diagnostic evidence. External Sources remains **NOT
 production-ready**, the exact historical `TypeError` boundary remains
 unverified, and the historical Gateway OOM / `curl 52` incident remains
 separate and unresolved.
+
+## Approved MISP batch continuation checkpoint (2026-09-24)
+
+The owner explicitly approved the previously prepared 20-event batch with
+ordered SHA-256
+`2223b46ddd6591fddc9674f47aa89065ba0388175d70d219a3a2d29f1455fe81`.
+Immediately before delivery, the ordered identifier digest matched, all 20
+candidates remained present, ready, undelivered, transferable, distribution 0,
+and unpublished. Their previews contained 93 transferable attributes in total.
+The MISP baseline remained one event, zero published events, and one distinct
+event UUID.
+
+Delivery did not run. A normal login attempt using the credentials actually
+loaded by the production Backend returned HTTP 401. No credential was exposed,
+reset, changed, or bypassed, and no direct privilege or token was manufactured.
+The approved MISP batch remains unchanged and unsent. A valid existing
+production administrator login is required before the bounded admin-only batch
+endpoint and authenticated browser validation can proceed.
+
+The next normal External collection timer invocation had not yet occurred at
+this checkpoint; it remained scheduled for 2026-09-24 02:05:02 CEST. No manual
+collection or publisher run was triggered.
