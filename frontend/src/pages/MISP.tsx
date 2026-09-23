@@ -15,6 +15,7 @@ import { StatusBadge } from '../components/StatusBadge';
 import { useI18n, type TranslationKey } from '../i18n/I18nContext';
 
 const MISP_PUBLIC_URL = 'https://cti-gateway-vps.tailf2792f.ts.net:8443';
+const MISP_DELIVERY_DISABLED = import.meta.env.VITE_MISP_DELIVERY_DISABLED === 'true';
 
 function Heading({ eyebrow, title, text }: { eyebrow: string; title: string; text: string }) {
   return <div className="section-heading"><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2><p>{text}</p></div></div>;
@@ -108,7 +109,8 @@ export function MISPPage() {
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [reviewId, setReviewId] = useState('');
   const limit = 20;
-  const canSend = user?.role === 'admin';
+  const isAdmin = user?.role === 'admin';
+  const canSend = isAdmin && !MISP_DELIVERY_DISABLED;
 
   const health = useQuery({ queryKey: ['misp-health'], queryFn: api.mispHealth, retry: false });
   const candidates = useQuery({
@@ -169,6 +171,8 @@ export function MISPPage() {
   return <section className="page-section misp-module">
     <Heading eyebrow={t('mispEyebrow')} title="MISP" text={t('mispDescription')} />
 
+    {MISP_DELIVERY_DISABLED && <div className="notice"><span className="notice-mark">i</span><div><strong>{t('demoMispDisabledTitle')}</strong><p>{t('demoMispDisabledDescription')}</p></div></div>}
+
     {health.isLoading && <LoadingState />}
     {health.isError && <ErrorState onRetry={() => void health.refetch()} />}
     {health.data && <article className="health-card misp-accent">
@@ -181,8 +185,8 @@ export function MISPPage() {
       <h3>{t('peopleToolAccess')}</h3>
       <p>{t('peopleToolAccessDescription')}</p>
       <div className="action-row">
-        <a className="button button-secondary" href={MISP_PUBLIC_URL + '/'} target="_blank" rel="noreferrer">{t('openMisp')}</a>
-        <a href="https://www.misp-project.org/openapi/" target="_blank" rel="noreferrer">MISP API</a>
+        {!MISP_DELIVERY_DISABLED && <a className="button button-secondary" href={MISP_PUBLIC_URL + '/'} target="_blank" rel="noreferrer">{t('openMisp')}</a>}
+        {!MISP_DELIVERY_DISABLED && <a href="https://www.misp-project.org/openapi/" target="_blank" rel="noreferrer">MISP API</a>}
       </div>
     </article>
 
@@ -219,7 +223,7 @@ export function MISPPage() {
           </button>
         </div>
       </div>}
-      {!canSend && <p className="role-note">{t('mispAdminOnly')}</p>}
+      {!isAdmin && <p className="role-note">{t('mispAdminOnly')}</p>}
 
       {candidates.isLoading && <LoadingState label={t('loadingEvents')} />}
       {candidates.isError && <ErrorState onRetry={() => void candidates.refetch()} />}

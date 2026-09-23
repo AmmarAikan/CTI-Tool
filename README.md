@@ -25,6 +25,18 @@ This repository now contains the backend foundation of the graduation-project CT
 
 The backend is intentionally a graduation-project prototype. PostgreSQL is the central application database. FastAPI, PostgreSQL, DNRTI BERT, the sklearn fallback, External Sources, MISP 2.5.44, the CTI Gateway, Dionaea, the production frontend, and lightweight SSH/web sensors run on the VPS. No personal or collaborator computer is required at runtime. Wazuh Manager/Indexer/Dashboard are not deployed on the current 12 GB server; the tested Wazuh connector remains optional code for a future larger or separate host. The VPS-only production architecture and deployment procedure are documented in `docs/architecture/cloud_distributed_architecture.md` and `docs/operations/vps_production_runbook.md`; the live database result-quality audit and OpenCTI-inspired corrections are in `Parts Report/CTI_Result_Quality_Audit.md`.
 
+## Graduation defense demo
+
+The browser-based defense environment is separate from production. It builds the current Frontend, Backend, and Gateway, uses a disposable PostgreSQL database and synthetic fixtures, blocks live MISP delivery, performs no NVD request or scheduled External collection, and publishes only Frontend on loopback.
+
+```bash
+./scripts/defense_demo.sh prepare
+./scripts/defense_demo.sh start
+./scripts/defense_demo.sh smoke
+```
+
+Open `http://127.0.0.1:19090`. Accounts, the browser walkthrough, fixed event IDs, status labels, offline fallback, and project-scoped cleanup are documented in [`docs/graduation-demo.md`](docs/graduation-demo.md). Development-verified demo behavior must not be represented as deployed production behavior.
+
 ## Quick start — backend
 
 Live result-quality evaluation is separate from model training. The private 400-document

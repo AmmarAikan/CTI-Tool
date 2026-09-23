@@ -403,6 +403,18 @@ class IntelligenceCorrelationResponse(BaseModel):
     created_at: str = Field(max_length=40)
 
 
+class IntelligenceOutlierFactorResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: Literal[
+        "alert_volume",
+        "rule_severity",
+        "rule_diversity",
+        "failed_actions",
+        "credential_attempts",
+    ]
+    value: float = Field(ge=0)
+
+
 class IntelligenceOutlierResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(max_length=64)
@@ -413,6 +425,8 @@ class IntelligenceOutlierResponse(BaseModel):
     is_outlier: bool
     anomaly_score: float
     detector: str = Field(max_length=100)
+    explanation_method: Literal["bounded_feature_evidence"]
+    explanation_factors: list[IntelligenceOutlierFactorResponse] = Field(max_length=5)
 
 
 class IntelligenceRunResponse(BaseModel):

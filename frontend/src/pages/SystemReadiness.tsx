@@ -16,6 +16,7 @@ function integrationState(value: HealthResponse): CheckState {
 
 export function SystemReadiness() {
   const { t, number, dateTime } = useI18n();
+  const demoMode = import.meta.env.VITE_ACTIT_DEMO_MODE === 'true';
   const system = useQuery({ queryKey: ['system-health'], queryFn: api.systemHealth, retry: false });
   const external = useQuery({ queryKey: ['external-health'], queryFn: api.externalHealth, retry: false });
   const internalNames: Array<[InternalIntegration, string]> = [
@@ -102,6 +103,6 @@ export function SystemReadiness() {
         <p>{check.detail}</p>
       </article>)}
     </div>}
-    <p className="safe-explanation">{t('readinessNoSyntheticData')}</p>
+    <p className="safe-explanation">{t(demoMode ? 'readinessSyntheticDemoData' : 'readinessNoSyntheticData')}</p>
   </section>;
 }

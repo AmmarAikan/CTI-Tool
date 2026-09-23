@@ -154,7 +154,7 @@ class DionaeaAPIConnector(InternalConnector):
             response = self.session.get(
                 self.url,
                 headers=self._headers(),
-                params={"limit": 1},
+                params={"limit": 1, **({"cursor": self.checkpoint} if self.checkpoint else {})},
                 timeout=self.timeout,
                 verify=self.verify_tls,
             )

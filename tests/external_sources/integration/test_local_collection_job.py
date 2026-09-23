@@ -162,11 +162,16 @@ class LocalCollectionJobTests(unittest.TestCase):
         executor = RecordingExecutor(error=RuntimeError("token=do-not-return content=do-not-return"))
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); app = self._build(root, executor); client = TestClient(app)
-            accepted = client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers()).json()
-            terminal = self._wait(client, accepted["job_id"], self._headers())
-            self.assertEqual((terminal["state"], terminal["error"]["code"]), ("failed", "job_failed"))
-            self.assertNotIn("do-not-return", str(terminal))
-            self._close(app, root)
+            try:
+                accepted = client.post(f"{API_PREFIX}/jobs", json={"source_ids": ["the-hacker-news"]}, headers=self._headers()).json()
+                terminal = self._wait(client, accepted["job_id"], self._headers())
+                self.assertEqual((terminal["state"], terminal["error"]["code"]), ("failed", "internal_failure"))
+                diagnostic = terminal["result"]["sources"]["the-hacker-news"]
+                self.assertEqual((diagnostic["collection_stage"], diagnostic["exception_class"]),
+                                 ("source_execution", "RuntimeError"))
+                self.assertNotIn("do-not-return", str(terminal))
+            finally:
+                self._close(app, root)
 
     def test_manual_source_identifier_is_rejected_from_collection_command(self):
         with tempfile.TemporaryDirectory() as folder:

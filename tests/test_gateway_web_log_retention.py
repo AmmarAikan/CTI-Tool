@@ -113,6 +113,56 @@ class GatewayWebLogRetentionTests(unittest.TestCase):
         self.assertEqual(after_restart.status_code, 200)
         self.assertEqual(len(after_restart.json()["events"]), 1)
 
+    def test_healthcheck_resumes_after_compaction_without_acknowledging_pending_data(self) -> None:
+        for index in range(3):
+            self.assertEqual(self.client.get(f"/health/{index}").status_code, 404)
+        complete = self.client.get(
+            "/api/v1/sensors/web-access",
+            params={"limit": 10},
+            headers=self.headers,
+        ).json()
+        checkpoint = complete["checkpoint"]
+        self.assertEqual(self.client.get("/health/pending").status_code, 404)
+        signature = hmac.new(
+            self.settings.sensor_read_token.encode(),
+            f"web-access-ack:{checkpoint}".encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        compacted = self.client.get(
+            "/api/v1/sensors/web-access",
+            params={"cursor": checkpoint, "limit": 10},
+            headers={
+                **self.headers,
+                "X-CTI-Ack-Cursor": checkpoint,
+                "X-CTI-Ack-Signature": signature,
+            },
+        )
+        self.assertEqual(compacted.status_code, 200)
+        path = self.root / "web_access.jsonl"
+        before_health = path.read_bytes()
+
+        class GatewaySession:
+            def get(self, _url: str, **kwargs):
+                return self_client.get(
+                    "/api/v1/sensors/web-access",
+                    params=kwargs["params"],
+                    headers=kwargs["headers"],
+                )
+
+        self_client = self.client
+        connector = SecuritySensorAPIConnector(
+            "http://gateway.test/api/v1/sensors/web-access",
+            self.settings.sensor_read_token,
+            source_type="web_access",
+            hmac_secret=self.settings.sensor_hmac_secret,
+            allow_http=True,
+            verify_tls=False,
+            checkpoint=checkpoint,
+            session=GatewaySession(),
+        )
+        self.assertTrue(connector.healthcheck()["reachable"])
+        self.assertEqual(path.read_bytes(), before_health)
+        self.assertEqual(self.client.get("/api/v1/sensors/dionaea", headers=self.headers).status_code, 200)
     def test_capacity_backpressure_keeps_pending_log_and_recovers_after_ack(self) -> None:
         settings = replace(self.settings, max_web_log_bytes=64 * 1024)
         client = TestClient(gateway.create_app(settings))

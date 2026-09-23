@@ -125,6 +125,7 @@ class UnifiedCollectionTests(unittest.TestCase):
         self.assertEqual(diagnostic, {"status": "failed", "accepted_records": 0,
             "review_records": 0, "rejected_records": 0, "skipped_records": 0,
             "error_count": 1, "failure_categories": {"internal_failure": 1},
+            "collection_method": "rss",
             "collection_stage": "source_execution", "exception_class": "RuntimeError",
             "retryable": False})
         self.assertNotIn("private URL", str(diagnostic))

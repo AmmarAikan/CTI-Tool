@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from backend.app.core.config import get_settings
-from backend.app.db.models import CorrelationRecord, IndicatorRecord, PipelineRun, ThreatEvent
+from backend.app.db.models import CorrelationRecord, IndicatorRecord, PipelineRun, Source, ThreatEvent
 from backend.app.pipeline.correlation.correlator import (
     SimilarityCorrelator,
     SimpleCorrelator,
@@ -161,12 +161,20 @@ class PipelineService:
             page_size=settings.dionaea_api_page_size,
         ).healthcheck()
 
-    @staticmethod
-    def security_sensor_health(source_type: str) -> dict[str, Any]:
+    def security_sensor_health(self, source_type: str) -> dict[str, Any]:
         settings = get_settings()
         url, source_name, configured = PipelineService._security_sensor_profile(settings, source_type)
         if not configured:
             return {"configured": False, "reachable": False}
+        state_source = self.session.scalar(
+            select(Source).where(
+                Source.name == source_name,
+                Source.source_type == source_type,
+                Source.source_pipeline == "internal",
+            )
+        )
+        state = dict(state_source.config or {}) if state_source is not None else {}
+
         return SecuritySensorAPIConnector(
             str(url),
             str(settings.internal_sensor_api_token),
@@ -179,6 +187,7 @@ class PipelineService:
             max_bytes=settings.internal_sensor_max_bytes,
             max_pages=settings.internal_sensor_max_pages,
             page_size=settings.internal_sensor_page_size,
+            checkpoint=state.get("checkpoint"),
         ).healthcheck()
 
     def run_external_files(self, paths: list[str | Path]) -> dict[str, Any]:

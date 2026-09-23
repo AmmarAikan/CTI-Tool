@@ -1152,8 +1152,8 @@ def pull_dionaea_api(
 
 
 @router.get("/integrations/host-auth/health", tags=["integrations"])
-def host_auth_api_health(_: CurrentUser) -> dict[str, Any]:
-    return PipelineService.security_sensor_health("linux_auth")
+def host_auth_api_health(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    return PipelineService(db).security_sensor_health("linux_auth")
 
 
 @router.post("/integrations/host-auth/pull", tags=["integrations"], response_model=InternalPullResponse)
@@ -1174,8 +1174,8 @@ def pull_host_auth_api(
 
 
 @router.get("/integrations/web-access/health", tags=["integrations"])
-def web_access_api_health(_: CurrentUser) -> dict[str, Any]:
-    return PipelineService.security_sensor_health("web_access")
+def web_access_api_health(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
+    return PipelineService(db).security_sensor_health("web_access")
 
 
 @router.post("/integrations/web-access/pull", tags=["integrations"], response_model=InternalPullResponse)
@@ -2165,7 +2165,34 @@ def intelligence_outliers(db: SessionDep, _: CurrentUser, only_outliers: bool = 
     filters = [OutlierSessionRecord.is_outlier.is_(True)] if only_outliers else []
     total = db.scalar(select(func.count()).select_from(OutlierSessionRecord).where(*filters)) or 0
     rows = db.scalars(select(OutlierSessionRecord).where(*filters).order_by(desc(OutlierSessionRecord.started_at), OutlierSessionRecord.id).limit(limit).offset(offset)).all()
-    return {"items": [{"id": item.id, "event_id": item.event_id, "started_at": iso(item.started_at), "ended_at": iso(item.ended_at), "alert_count": item.alert_count, "is_outlier": item.is_outlier, "anomaly_score": item.anomaly_score, "detector": item.detector_backend} for item in rows], "total": total, "limit": limit, "offset": offset}
+    feature_keys = (
+        ("alerts_count", "alert_volume"),
+        ("max_rule_level", "rule_severity"),
+        ("distinct_rules", "rule_diversity"),
+        ("failed_actions", "failed_actions"),
+        ("credential_attempts", "credential_attempts"),
+    )
+    items = []
+    for item in rows:
+        features = item.features if isinstance(item.features, dict) else {}
+        factors = []
+        for source_key, public_key in feature_keys:
+            value = features.get(source_key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+                factors.append({"key": public_key, "value": round(float(value), 4)})
+        items.append({
+            "id": item.id,
+            "event_id": item.event_id,
+            "started_at": iso(item.started_at),
+            "ended_at": iso(item.ended_at),
+            "alert_count": item.alert_count,
+            "is_outlier": item.is_outlier,
+            "anomaly_score": item.anomaly_score,
+            "detector": item.detector_backend,
+            "explanation_method": "bounded_feature_evidence",
+            "explanation_factors": factors,
+        })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def _intelligence_run_dict(item: PipelineRun) -> dict[str, Any]:

@@ -219,7 +219,9 @@ class LocalSourceJobTests(unittest.TestCase):
             self.assertIn(job.job_id, logged)
             self.assertIn("command_id=cmd-safe-123", logged)
             self.assertIn("source_id=the-hacker-news", logged)
+            self.assertIn("orchestration_stage=job_operation", logged)
             self.assertIn("exception_type=RuntimeError", logged)
+            self.assertIn("failure_category=internal_failure", logged)
             self.assertNotIn("must-not-appear", logged)
             self.assertEqual(runner.get(job.job_id).error["code"], "job_failed")
 

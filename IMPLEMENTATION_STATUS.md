@@ -13,6 +13,7 @@ This document is the durable continuation checkpoint. The `Next Task` section is
 - Phase: P0 Phases 1-8 complete in development: incremental UI/Auth, real-data Dashboard, Global Intelligence Search, Cross-Source Evidence, Threat Storyline, reviewed multi-event MISP delivery, isolated Demo Dataset/System Readiness, and RBAC/session/reverse-proxy hardening.
 - ML transparency is complete in development and not deployed: the bounded status contract and Analysis view now expose runtime/readiness state, individual quality gates, offline metric scope, safe in-process inference counters, model limitations, and fallback availability.
 - Analyst-controlled CVE enrichment is complete in development and not deployed: event details now expose persisted NVD status/provenance, bounded explicit analyst/admin execution, safe result projection, and deterministic risk before/after evidence while viewers remain read-only.
+- The defense-ready isolated full-stack demo is complete and development-verified, not deployed: current Frontend, Backend, Gateway, disposable PostgreSQL, deterministic synthetic CTI evidence, offline provider contracts, and a containerized browser smoke are available at the project-scoped loopback environment documented in `docs/graduation-demo.md`.
 - Working branch: `codex/actit-final-production`.
 - Branch base: `origin/codex/vps-production-integration` at `f9d0c311be6e6fa6a19429825da7dfc5bf7e0e8d`.
 - Development worktree: `/home/alaaldeen/.codex-worktrees/actit-final-production` on VPS `vmi3538777`; it is not a production path.
@@ -143,22 +144,22 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 | RBAC and user administration | Ready/Partial in development, not deployed | Viewer/analyst/admin guards, last-admin protection, audit view; all central FastAPI mutating routes have role dependencies and anonymous/viewer deny-path tests, plus admin-only analyst denial | Validate against immutable release after deployment; keep External Sources' separate authenticated control tests |
 | Information architecture | Partial | Existing routes/pages/components preserved; added public Landing/Register, moved Dashboard to `/dashboard`, presented MISP as sharing, and added Dashboard, global-search, evidence, and Storyline investigation pivots | Continue page-by-page incremental accessibility and workflow improvements |
 | Executive dashboard | Ready/Partial in development, not deployed | Existing real counts/health/distributions preserved; latest five real events and direct events/indicators/sources/analysis drill-downs added with loading/error/empty states | Add explicit system-readiness evidence and later trend clarity without mock metrics |
-| External Sources | Ready/Partial | Healthy service and canonical external implementation | Preserve ownership boundaries; expose provenance/freshness/failure evidence more clearly |
-| Internal Sources | Ready/Partial | Gateway streams ready; Dionaea/host-auth/web-access views exist | Improve drill-down, sensor freshness, and safe outlier evidence display |
+| External Sources | Product implementation available; operationally not production-ready | Canonical implementation and health contract exist, but the latest scheduled workflow ends `state=failed` before export retrieval and its exact fatal boundary remains unverified | Preserve ownership boundaries; do not claim readiness until the complete collection-to-Gateway lifecycle succeeds |
+| Internal Sources | Ready/Partial in development, not deployed | Gateway streams and Dionaea/host-auth/web-access views exist; checkpoint-aware Web Access health/read/pull passed isolated validation | Validate the development Web Access fix after a separately approved immutable deployment; preserve ACK and checkpoint semantics |
 | Global search | Ready in development, not deployed | Authenticated bounded search covers real events, indicators, entities, sources, and correlations with exact/prefix/contains ordering, safe projections, provenance, literal wildcard handling, viewer access, and existing-record pivots | Validate against the immutable release after deployment; consider database-specific index/performance work only if measured |
 | Indicator meaning and quality | Partial | Type, semantic role, validation, assessment, evidence fields exist | Explain reference vs suspicious/malicious values and surface evidence consistently |
 | Cross-source evidence | Ready/Partial in development, not deployed | Typed API endpoints expose real source provenance and derived same-pipeline/cross-source scope; UI links both events; isolated synthetic demo covers both scopes | Current production rows are same-pipeline; validate real External-to-Internal evidence when generated |
 | Correlation explanation | Ready in development, not deployed | Safe allowlisted factors explain exact observable match or normalized-text method/threshold; arbitrary evidence remains private | Validate against the immutable release after deployment and extend only when a new correlation method has a defined safe projection |
 | Threat storyline | Ready in development, not deployed | Typed bounded endpoint and bilingual responsive investigation view project real provenance, chronology, observables, entities, relationships, correlations, ATT&CK candidates, and deterministic risk factors | Validate against the immutable release after deployment; preserve chronology-versus-causality and candidate-status labels |
 | MITRE ATT&CK | Partial | Built-in subset, evidence-bearing candidates, Navigator export, official links | Broaden safe catalog use, expose tactic/technique context, and retain candidate/confirmed distinction |
-| STIX sharing | Partial | Per-event STIX endpoint exists | Add obvious UI download/export, validation feedback, and safe filename/content handling |
+| STIX sharing | Ready/Partial in development, not deployed | Per-event STIX 2.1 endpoint and UI download exist; the isolated browser smoke verified a bundle with a vulnerability object | Validate after immutable deployment; retain bounded safe filenames and structural interoperability claims |
 | MISP health/preview/send/history | Ready in development, not deployed | Candidate queue, readiness/omission reasons, admin-confirmed batch of at most 20, per-event audit outcomes, post-send links, and idempotent client passed Docker parity tests | Validate after immutable deployment; retain review and unpublished-by-default policy |
 | MISP population | Partial by design | Sole production MISP event is the only ACTIT event actually sent; deterministic UUID prevents duplicates. Multi-event workflow exists only in development | Do not mirror PostgreSQL; admin deliberately selects and confirms eligible events after deployment |
 | Enrichment | Ready in development, not deployed; no live data | Authenticated event status and analyst/admin-confirmed NVD execution are bounded to five lookups per request, persist results, audit atomically, expose safe provenance/CVSS/CWE evidence, and show deterministic risk impact; production still contains zero enrichment rows | Validate through a separately approved immutable release; retain explicit confirmation, viewer read-only access, no automatic retry, and safe result projection |
 | ML transparency | Ready in development, not deployed | Bounded API and bilingual Analysis view expose runtime/readiness state, all nine individual quality gates, held-out and unique-unseen metrics with offline scope, safe in-process inference counters, explicit limitations, and fallback availability | Validate against an immutable release after separately approved deployment; never present saved evaluation metrics as live production accuracy |
-| Risk scoring | Partial | Deterministic risk factors stored in `raw_reference` | Project factors through API/UI and label score provenance |
-| Outlier detection | Partial | 413 sessions and Isolation Forest/fallback metadata exist | Explain features, sample sufficiency, detector choice, and event relationship |
-| Demo/readiness dataset | Ready in development, not deployed | Private disposable SQLite fixture with fixed external/internal evidence, Storyline/risk/ATT&CK/STIX/MISP projections and deterministic CLI walkthrough; protected readiness page reads existing live API contracts only | Keep demo synthetic and offline; after a separately approved immutable deployment, verify readiness UI against the release and demonstrate actual pipeline-generated cross-source evidence when available |
+| Risk scoring | Ready/Partial in development, not deployed | Deterministic factors and context are projected through Event Details and Threat Storyline with explicit non-ML provenance | Validate against an immutable release and extend only with evidence-backed factors |
+| Outlier detection | Ready/Partial in development, not deployed | Existing Isolation Forest/fallback metadata is preserved; the UI now projects only allowlisted explanation factors and hides raw IP/feature dictionaries | Validate against an immutable release; retain sample-sufficiency and detector limitations |
+| Defense-ready full-stack demo | Ready as an isolated synthetic demo; not deployed | Project-scoped Compose uses current Frontend/Backend/Gateway, disposable PostgreSQL and Gateway data, offline NVD-like/Reviews/MISP contracts, fixed RBAC accounts and IDs, explicit synthetic banner, and passing browser smoke for both Reviews states | Rehearse from prepared local images; never represent synthetic/mock evidence as production behavior or use production as a demo fallback |
 | App/API security | Partial in development, not deployed | Isolated two-client rate-limit and Auth/RBAC HTTPS ingress smoke passed; loopback, CSP, firewall, and network separation remain | Real two-user Tailscale fairness remains unverified because only one distinct peer user is online; public ingress is optional |
 | SSRF controls | DNS race fixed in development, not deployed | Candidate External Sources pins each socket to a validated public IP while retaining original Host/TLS SNI/certificate checks; 232/232 External Docker tests and 368/368 VPS regression pass | Keep final holistic SSRF/security review and immutable-release validation before public ingress; do not represent this as a live production fix |
 | Security scan/remediation | Partial; two open findings | Codex Security Standard scan completed on a clean local source-only checkout matching VPS commit `3500855`; 25 security-sensitive files fully reviewed, not exhaustive | Fix or explicitly accept medium gateway log-growth risk; track low MISP credential-scope issue |
@@ -240,14 +241,15 @@ Legend: **Ready** = verified usable now; **Partial** = implemented but incomplet
 
 ## Next Task
 
-Await explicit owner approval for the documented immutable `/opt` release. Before executing it, record the approved commit and recheck the clean VPS worktree, existing services, volumes, database backup path, gateway log format, and previous image IDs. Keep Tailscale as the presentation ingress; do not enable public HTTPS or alter credentials. Preserve the forward-compatible Gateway during any post-compaction Central rollback. Track the low MISP service-key privilege issue separately.
+Rehearse the isolated browser walkthrough from already prepared images and preserve its synthetic/offline labels. Do not deploy the pending development work. Any immutable `/opt` release remains a separate owner-approved operation: before it, record the exact approved commit and recheck the clean VPS worktree, existing services, volumes, database backup path, Gateway compatibility, and previous image IDs. Keep Tailscale as the production presentation ingress; do not enable public HTTPS or alter credentials. Preserve the forward-compatible Gateway during any post-compaction Central rollback. Track the unresolved External collection failure, historical Gateway OOM, and low MISP service-key privilege issue separately.
 
 ## Remaining P0 sequence
 
-1. Gateway availability risk resolved in development; await explicit approval for controlled immutable release. Track low MISP least-privilege work.
-2. If a second distinct tailnet user becomes available, repeat live fairness testing without trusting supplied identity headers.
-3. After security disposition and explicit approval, stage an immutable VPS release and validate before switching `/opt/cti-platform/current`.
-4. Treat public-IP HTTPS, ACME, and firewall changes as separately approved optional work; preserve Tailscale.
+1. Rehearse the defense-ready isolated full-stack demo; this does not authorize or require a production release.
+2. Gateway availability and product-readiness fixes remain development-only; await explicit approval for any controlled immutable release. Track low MISP least-privilege work.
+3. If a second distinct tailnet user becomes available, repeat live fairness testing without trusting supplied identity headers.
+4. After security disposition and explicit approval, stage an immutable VPS release and validate before switching `/opt/cti-platform/current`.
+5. Treat public-IP HTTPS, ACME, and firewall changes as separately approved optional work; preserve Tailscale.
 
 ## Remaining P1 / deferred
 
@@ -596,3 +598,136 @@ The 2026-09-22 External collection incident remains diagnostic NO-GO with no
 candidate selected; the historical Gateway OOM / `curl 52` incident remains
 separate and unresolved. Neither paused incident blocks this completed
 development milestone.
+
+## Pre-defense operational readiness checkpoint (2026-09-23)
+
+This milestone addressed only Web Access health, Reviews availability, the
+scheduled External failure, and MISP population readiness. The development
+changes are not deployed. Production was inspected read-only and was not
+restarted, reconfigured, or mutated.
+
+### Web Access
+
+The live Gateway process, Backend-to-Gateway Docker network, DNS alias, token,
+HMAC response validation, internal HTTP policy, and response contract are
+working. A read-only signed request made with PostgreSQL's stored Web Access
+checkpoint returned a valid page. The visible disconnect was Central Backend
+application logic: the health connector always requested offset zero, while the
+acknowledged Gateway log had already compacted through absolute offset 583.
+Gateway therefore returned HTTP 409 to the stale cursorless health request.
+
+The development fix makes the authenticated health route read the existing
+sensor `Source.config` checkpoint without creating or updating source state and
+passes it as the health-read cursor. Health reads still omit ACK headers and do
+not compact or acknowledge Gateway data. The existing pull path retains its
+post-commit ACK behavior. Isolated tests verified health after compaction,
+unchanged pending log bytes, safe paginated pull, and no Dionaea or host-auth
+regression.
+
+### Reviews
+
+The live External `latest_reviews` and `review_lifecycle` adapters both returned
+valid bounded contracts with 100 items. External logs recorded HTTP 200 for
+both calls. Central frontend access logs recorded client-aborted HTTP 499 for
+`/integrations/external-control/reviews/latest`; this was not a no-artifact,
+authentication, transport, or External contract failure.
+
+The root cause was Central lifecycle projection loading up to 10,000 complete
+events plus related raw items, 1,000 runs, and 1,000 audits, then repeatedly
+scanning those collections for every review. The development fix preserves the
+response contract but performs bounded column-only queries restricted to the
+requested record and export-run identities, with constant-time maps. It retains
+the legacy raw-record identity fallback and the existing processing-failure
+projection. An empty External review artifact performs no database queries and
+remains a normal empty state rather than service unavailable.
+
+### Scheduled External collection
+
+The two-hour timer is active and invoking the service correctly; no timer change
+is justified. The latest inspected scheduled `all_enabled` job on 2026-09-23 was
+accepted and polled successfully, then ended `state=failed`; systemd recorded
+`Result=exit-code` and `ExecMainStatus=1`. The publisher stopped before export
+retrieval, so no Gateway publish, merge, or ACK occurred.
+
+Bounded logs correlate this current job with a fatal job-level `TypeError` after
+registered and manual-source work and before a completed export. The same window
+also contains isolated non-retryable `parsing_contract` results for one CERT and
+one Reddit operation; those source results should produce a partial aggregate
+and do not prove the fatal exception's internal line. The job runner intentionally
+records only the exception class, so the exact internal `TypeError` boundary is
+still unverified. No collection replay was run and no code/configuration candidate
+was guessed. Decision remains **diagnostic NO-GO; no External candidate selected**.
+External Sources is **NOT production-ready**. The historical Gateway OOM / `curl
+52` incident remains separate and unresolved.
+
+### MISP population readiness
+
+A batched read-only evaluation of all live PostgreSQL threat events using the
+same candidate-filtering implementation produced:
+
+- 13,997 total ACTIT candidates;
+- 10,644 currently ready to share;
+- 3,353 with `no_transferable_attributes`;
+- one unique successfully delivered ACTIT event represented by four successful
+  delivery audit entries;
+- zero recorded skipped outcomes and zero recorded failed outcomes.
+
+The delivered event is still ready, resolves to exactly one deterministic MISP
+event, and remains unpublished. Excluding that already delivered identity leaves
+10,643 currently ready candidates: 532 full batches of 20 plus one final batch
+of three, or 533 sequential batches if the snapshot remains unchanged. No live
+delivery was executed. `docs/operations/misp_population_runbook.md` defines the
+separate approval gate, per-batch preview and confirmation, unpublished default,
+per-event audit evidence, drift checks, and mandatory no-retry stop conditions.
+
+## Defense-ready isolated full-stack demo checkpoint (2026-09-23)
+
+The graduation-defense demo is complete in the development worktree and is not
+deployed. `compose.demo.yml` creates the fixed `actit-defense-demo` project from
+the current Frontend, Backend, and Gateway source, a disposable PostgreSQL tmpfs,
+one project-scoped Gateway volume, deterministic fixtures, and an internal
+offline provider. Only Frontend is published on loopback. Backend, database,
+Gateway, provider, and Playwright validation have no host ports; the core network
+is Docker-internal and has no production networks, volumes, secrets, paths, or
+data.
+
+The fixed viewer, analyst, and administrator accounts and deterministic event
+IDs cover RBAC, Dashboard/readiness, global search, Event Details, Threat
+Storyline, explicit synthetic cross-source provenance, stored offline NVD-like
+CVSS/CWE/provenance evidence, deterministic risk, explainable outliers, explicit
+and analyst-review ATT&CK mappings, STIX 2.1, MISP preview/selective-sharing
+semantics, Reviews available/empty states, and Web Access health/read/pull. The
+Frontend displays a persistent synthetic-environment banner. MISP live delivery
+and external links are disabled, and the offline provider rejects mutation. No
+real NVD, MISP, or External collection call is part of the demo.
+
+The isolated ML contract reports runtime `unavailable`, readiness `unavailable`,
+all nine stored quality gates, offline metrics, and four explicit limitations.
+The large BERT artifact is intentionally absent from the demo Backend image. The
+included sklearn artifact also cannot load in this image because its serialized
+training artifact references an unavailable `_loss` module; this remains an
+honestly displayed fallback/unavailable limitation and is not presented as live
+model inference. Production's previously verified transformer state is a
+separate deployed fact.
+
+Verification completed in the development worktree:
+
+- full Python unittest discovery passed 466/466;
+- Frontend TypeScript lint, 134/134 Vitest tests, and production build passed;
+- the Frontend candidate Docker build repeated lint, 134/134 tests, and build;
+- deterministic demo dataset tests passed 4/4 and Python compile checks passed;
+- Compose preflight/configuration and isolated startup passed, with all core
+  services healthy at `http://127.0.0.1:19090`;
+- the containerized Chromium smoke passed for both Reviews `available` and
+  `empty`, including viewer API denial, all three accounts, stored CVE and STIX,
+  Storyline/risk, ATT&CK, outlier explanation, ML evidence, MISP non-delivery,
+  Web Access health/read, and exactly one isolated Web Access pull;
+- the smoke restored Reviews to `available` after validation.
+
+`docs/graduation-demo.md` is the authoritative startup, account, walkthrough,
+fallback, and cleanup guide. The demo is **GO for defense rehearsal** with its
+synthetic/offline labels and known limitations. It is not a production release
+or production-readiness claim. No `/opt` write, deployment, rollback, production
+restart, timer action, live database/MISP change, credential change, or heavy
+production job occurred. The scheduled External `state=failed` incident and
+historical Gateway OOM/`curl 52` incident remain separate and unresolved.

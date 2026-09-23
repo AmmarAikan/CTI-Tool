@@ -117,10 +117,31 @@ class InProcessJobRunner:
                     job.error = {"code": failure_category, "message": "job execution failed safely", "retryable": bool(failure_retryable), "details": {}}
                 else: job.state, job.result = "completed", result
                 job.updated_at = utc_now()
+                terminal_state = job.state
+            sources = result.get("sources") if isinstance(result.get("sources"), dict) else {}
+            status_counts = {
+                status: sum(
+                    isinstance(value, dict) and value.get("status") == status
+                    for value in sources.values()
+                )
+                for status in ("completed", "partial", "failed", "cancelled")
+            }
+            export = result.get("export")
+            export_status = export.get("status", "unknown") if isinstance(export, dict) else "not_started"
+            LOGGER.info(
+                "external job terminal job_id=%s command_id=%s orchestration_stage=job_terminal "
+                "state=%s source_count=%s source_completed=%s source_partial=%s source_failed=%s "
+                "source_cancelled=%s export_stage=%s failure_category=%s",
+                job_id, job.command_id, terminal_state, len(sources),
+                status_counts["completed"], status_counts["partial"], status_counts["failed"],
+                status_counts["cancelled"], export_status,
+                failure_category if terminal_state == "failed" else "none",
+            )
         except Exception as exc:
             source_id = safe_context.get("source_id", "not_applicable")
             LOGGER.error(
-                "external job failed job_id=%s command_id=%s source_id=%s exception_type=%s",
+                "external job failed job_id=%s command_id=%s source_id=%s "
+                "orchestration_stage=job_operation exception_type=%s failure_category=internal_failure",
                 job_id, job.command_id, source_id, type(exc).__name__,
             )
             with self._lock:

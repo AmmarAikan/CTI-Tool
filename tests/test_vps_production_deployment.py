@@ -17,6 +17,7 @@ DEPLOY_MISP = ROOT / "infra" / "vps" / "scripts" / "deploy_misp.sh"
 FRONTEND_DOCKERFILE = ROOT / "frontend" / "Dockerfile"
 FRONTEND_NGINX = ROOT / "frontend" / "nginx.conf"
 PUBLIC_EDGE = ROOT / "infra" / "vps" / "public-edge.conf"
+EXTERNAL_COLLECTION_RUNNER = ROOT / "infra" / "vps" / "scripts" / "run_external_collection.sh"
 
 
 def render_production() -> dict:
@@ -86,6 +87,7 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         cls.deploy_misp = DEPLOY_MISP.read_text(encoding="utf-8")
         cls.frontend_dockerfile = FRONTEND_DOCKERFILE.read_text(encoding="utf-8")
         cls.frontend_nginx = FRONTEND_NGINX.read_text(encoding="utf-8")
+        cls.external_collection_runner = EXTERNAL_COLLECTION_RUNNER.read_text(encoding="utf-8")
 
     def test_production_images_and_ports_are_stable_and_loopback_only(self) -> None:
         self.assertEqual(self.compose["name"], "cti-test")
@@ -129,6 +131,25 @@ class VPSProductionDeploymentTests(unittest.TestCase):
         self.assertNotIn("POSTGRES_PASSWORD", self.deploy)
         self.assertIn('docker volume inspect "${volume_name}"', self.deploy)
         self.assertIn('docker network inspect "${network_name}"', self.deploy)
+        self.assertNotIn('rollback_central_stack.sh" "${state_dir}"', self.deploy)
+        self.assertIn("rollback requires separate explicit owner approval", self.deploy)
+
+    def test_scheduled_collection_logs_only_bounded_correlated_diagnostics(self) -> None:
+        script = self.external_collection_runner
+        for field in (
+            "INVOCATION_ID",
+            "job_id=",
+            "command_id=",
+            "stage=collection_terminal",
+            "source_status_counts=",
+            "source_class_status_counts=",
+            "failure_categories=",
+            "exception_classes=",
+            "export_stage=",
+        ):
+            self.assertIn(field, script)
+        self.assertNotIn("cat \"${work_dir}/status.json\"", script)
+        self.assertNotIn("set -x", script)
 
     def test_rollback_never_restores_or_replaces_postgresql(self) -> None:
         self.assertIn("PostgreSQL was not replaced", self.rollback)

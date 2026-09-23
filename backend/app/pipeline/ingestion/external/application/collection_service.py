@@ -312,15 +312,19 @@ class CanonicalCollectionService(CollectionService):
         return aggregate
 
     def _execute_isolated(self, source_id: str, *, force: bool, command_id: str) -> SourceExecutionResult:
+        source = self._source(source_id)
         try:
-            result = self.executor.execute(self._source(source_id), force=force, command_id=command_id)
+            result = self.executor.execute(source, force=force, command_id=command_id)
         except Exception as exc:
             exception_class = type(exc).__name__
-            LOGGER.error("external source execution failed source_id=%s collection_stage=source_execution exception_class=%s failure_category=internal_failure retryable=false error_count=1",
-                         source_id, exception_class)
+            LOGGER.error("external source execution failed command_id=%s source_id=%s collection_stage=source_execution exception_class=%s failure_category=internal_failure retryable=false error_count=1",
+                         command_id, source_id, exception_class)
             return SourceExecutionResult(source_id, "failed", error_count=1,
                 failure_category="internal_failure", failure_categories={"internal_failure": 1},
-                collection_stage="source_execution", exception_class=exception_class)
+                collection_method=source.source_type, collection_stage="source_execution",
+                exception_class=exception_class)
+        if result.collection_method is None:
+            result = replace(result, collection_method=source.source_type)
         handled = result.accepted_records + result.review_records + result.rejected_records + result.skipped_records
         if result.status == "failed" and handled:
             return replace(result, status="partial")

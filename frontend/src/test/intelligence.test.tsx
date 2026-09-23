@@ -141,9 +141,10 @@ describe('threat intelligence pages', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ ...correlation, evidence: { secret: true } }])));
     await expect(api.intelligenceCorrelations()).rejects.toMatchObject({ code: 'invalid_response' });
     cleanup();
-    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ id: 'o-1', event_id: null, started_at: '2026-09-07T10:00:00Z', ended_at: '2026-09-07T10:02:00Z', alert_count: 3, is_outlier: true, anomaly_score: .8, detector: 'isolation_forest' }])));
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => json(page([{ id: 'o-1', event_id: null, started_at: '2026-09-07T10:00:00Z', ended_at: '2026-09-07T10:02:00Z', alert_count: 3, is_outlier: true, anomaly_score: .8, detector: 'isolation_forest', explanation_method: 'bounded_feature_evidence', explanation_factors: [{ key: 'alert_volume', value: 3 }] }])));
     renderWithProviders(<OutliersPage />);
     await waitFor(() => expect(screen.getByText('شاذ')).toBeInTheDocument());
+    expect(screen.getByText('حجم التنبيهات: 3')).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent('source_ip');
     expect(document.body).not.toHaveTextContent('features');
   });

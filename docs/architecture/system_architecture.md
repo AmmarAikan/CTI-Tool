@@ -101,3 +101,20 @@ The implemented VPS-only layout and its trust boundaries are defined in `cloud_d
 ## Backend API and security
 
 FastAPI exposes versioned routes under `/api/v1`. Authentication uses short-lived signed bearer tokens, scrypt password hashing, and admin/analyst/viewer roles. Material operations such as uploads, correlation runs, enrichment, MISP submission, source creation, and user creation are written to `audit_logs`.
+
+## Isolated graduation-defense overlay
+
+`compose.demo.yml` is a development-only overlay, not a production topology or replacement architecture. It builds the current ACTIT Frontend, Backend, and Gateway and connects them to a disposable PostgreSQL database plus a contract-compatible offline provider.
+
+```text
+Browser on 127.0.0.1:19090
+  -> Demo Frontend (only published service)
+     -> Current Central Backend
+        -> Disposable PostgreSQL on tmpfs
+        -> Current Gateway with synthetic sensor fixtures
+        -> Offline Reviews and MISP-health provider
+```
+
+The service network is Docker-internal. Backend, PostgreSQL, Gateway, and provider ports are not published. The optional Playwright smoke runner joins only that internal network. Stored NVD-like evidence is synthetic; the MISP provider rejects delivery; Frontend removes live MISP controls; no External collection service or scheduler is present. Project-scoped cleanup removes only the `actit-defense-demo` containers, networks, and disposable Gateway volume.
+
+This overlay demonstrates existing ACTIT contracts and analyst workflows without asserting production readiness. Development-verified ML transparency, CVE enrichment, Reviews, and Web Access behavior remain distinct from the existing deployed release. The production External collection failure and historical Gateway OOM remain unresolved and are not exercised by the overlay. See `docs/graduation-demo.md` for the exact trust boundaries and walkthrough.

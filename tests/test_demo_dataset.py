@@ -10,15 +10,35 @@ from sqlalchemy.orm import Session
 
 from backend.app.api.v1.router import intelligence_event_storyline
 from backend.app.db.database import Base
-from backend.app.db.models import CorrelationRecord, Source, ThreatEvent
+from backend.app.db.models import EnrichmentRecord, OutlierSessionRecord, Source, ThreatEvent, User, CorrelationRecord
 from backend.app.integrations.misp_client import MISPClient
 from backend.app.integrations.stix_exporter import STIXExporter
 from backend.app.schemas.api import IntelligenceStorylineResponse
-from scripts.create_demo_dataset import DEMO_EVENTS, create_disposable_demo, seed_demo
+from scripts.create_demo_dataset import DEMO_ACCOUNTS, DEMO_EVENTS, create_disposable_demo, seed_defense_demo, seed_demo
 
 from scripts.demo_walkthrough import walkthrough
 
 class DemoDatasetTests(unittest.TestCase):
+    def test_defense_seed_covers_accounts_enrichment_outlier_and_attack_candidate(self) -> None:
+        with TemporaryDirectory(prefix="actit-defense-demo-test-") as directory:
+            path = Path(directory) / "demo.sqlite3"
+            engine = create_engine(f"sqlite+pysqlite:///{path}", future=True)
+            try:
+                Base.metadata.create_all(engine)
+                with Session(engine) as session:
+                    seed_defense_demo(session)
+                    self.assertEqual(session.scalar(select(func.count()).select_from(User)), len(DEMO_ACCOUNTS))
+                    self.assertEqual(session.scalar(select(func.count()).select_from(EnrichmentRecord)), 1)
+                    self.assertEqual(session.scalar(select(func.count()).select_from(OutlierSessionRecord)), 1)
+                    candidate = session.get(ThreatEvent, DEMO_EVENTS["attack_candidate"])
+                    self.assertIsNotNone(candidate)
+                    mapped = intelligence_event_storyline(DEMO_EVENTS["attack_candidate"], session, None)
+                    self.assertTrue(any(item["technique_id"] == "T1053" and item["mapping_source"] == "rule_based_candidate" for item in mapped["attack"]["techniques"]))
+                    enriched = session.get(ThreatEvent, DEMO_EVENTS["external"])
+                    self.assertEqual(enriched.indicators[1].enrichments[0].data["cvss_score"], 9.8)
+            finally:
+                engine.dispose()
+
     def test_isolated_seed_and_existing_projections(self) -> None:
         with TemporaryDirectory(prefix="actit-demo-test-") as directory:
             path = Path(directory) / "demo.sqlite3"

@@ -171,6 +171,56 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual(raw_count, 1)
         self.assertEqual(source.config["checkpoint"], "web-offset-1")
 
+    def test_security_sensor_health_uses_persisted_checkpoint_without_creating_state(self) -> None:
+        settings = SimpleNamespace(
+            web_access_api_url="http://gateway.test/api/v1/sensors/web-access",
+            web_access_sensor_name="VPS Gateway Access",
+            web_access_api_configured=True,
+            host_auth_api_url="http://gateway.test/api/v1/sensors/host-auth",
+            host_auth_sensor_name="VPS SSH Authentication",
+            host_auth_api_configured=True,
+            internal_sensor_api_token="read-token",
+            internal_sensor_api_hmac_secret="response-secret",
+            internal_sensor_verify_tls=False,
+            internal_sensor_allow_http=True,
+            internal_sensor_timeout_seconds=10,
+            internal_sensor_max_bytes=1024 * 1024,
+            internal_sensor_max_pages=2,
+            internal_sensor_page_size=100,
+        )
+        observed: dict[str, object] = {}
+
+        class HealthConnector:
+            def __init__(self, _url: str, _token: str, **kwargs) -> None:
+                observed.update(kwargs)
+
+            def healthcheck(self) -> dict[str, object]:
+                return {"configured": True, "reachable": True}
+
+        engine = temporary_database_engine()
+        with Session(engine) as session:
+            session.add(Source(
+                name="VPS Gateway Access",
+                source_type="web_access",
+                source_pipeline="internal",
+                config={"checkpoint": "stored-web-checkpoint"},
+            ))
+            session.commit()
+            before = session.scalar(select(func.count()).select_from(Source))
+            with patch(
+                "backend.app.services.pipeline_service.get_settings",
+                return_value=settings,
+            ), patch(
+                "backend.app.services.pipeline_service.SecuritySensorAPIConnector",
+                HealthConnector,
+            ):
+                result = PipelineService(session).security_sensor_health("web_access")
+            after = session.scalar(select(func.count()).select_from(Source))
+
+        self.assertTrue(result["reachable"])
+        self.assertEqual(observed["checkpoint"], "stored-web-checkpoint")
+        self.assertEqual((before, after), (1, 1))
+
     def test_external_feed_validates_hmac_paginates_and_deduplicates(self) -> None:
         secret = "shared-test-secret"
         first = {

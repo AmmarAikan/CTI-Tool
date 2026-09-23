@@ -134,7 +134,7 @@ for _attempt in $(seq 1 60); do
 done
 if [[ "${backend_ready}" != "true" ]]; then
   "${compose[@]}" logs --tail 120 backend >&2
-  "${release_root}/infra/vps/scripts/rollback_central_stack.sh" "${state_dir}"
+  echo "Backend validation failed. Deployment stopped; rollback requires separate explicit owner approval. Checkpoint: ${state_dir}" >&2
   exit 1
 fi
 
@@ -149,7 +149,7 @@ for _attempt in $(seq 1 30); do
 done
 if [[ "${frontend_ready}" != "true" ]]; then
   "${compose[@]}" logs --tail 120 frontend >&2
-  "${release_root}/infra/vps/scripts/rollback_central_stack.sh" "${state_dir}"
+  echo "Frontend validation failed. Deployment stopped; rollback requires separate explicit owner approval. Checkpoint: ${state_dir}" >&2
   exit 1
 fi
 

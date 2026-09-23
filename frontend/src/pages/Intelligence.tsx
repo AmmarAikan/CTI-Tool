@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router-dom';
-import { api, type CTICorrelationEndpoint, type CTICorrelationFactor, type Page } from '../api/client';
+import { api, type CTICorrelationEndpoint, type CTICorrelationFactor, type OutlierFactorKey, type Page } from '../api/client';
 import { CVEEnrichmentPanel } from '../components/CVEEnrichmentPanel';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { StatusBadge } from '../components/StatusBadge';
@@ -98,7 +98,8 @@ export function CorrelationsPage() {
     {query.data && <Pager total={query.data.total} offset={offset} limit={limit} setOffset={setOffset} />}
   </section>;
 }
-export function OutliersPage() { const {t,number,dateTime}=useI18n();const [offset, setOffset] = useState(0); const limit = 20; const query = useQuery({ queryKey: ['outliers', offset], queryFn: () => api.intelligenceOutliers(limit, offset), retry: false }); return <SimpleListPage title={t('outliers')} text={t('outliersDescription')} query={query} offset={offset} limit={limit} setOffset={setOffset} headers={[t('start'), t('end'), t('alerts'), t('score'), t('status')]} rows={query.data?.items.map((item) => [dateTime(item.started_at), dateTime(item.ended_at), number(item.alert_count), number(item.anomaly_score), item.is_outlier ? t('outlier') : t('normal')]) || []} />; }
+const outlierFactorLabels: Record<OutlierFactorKey, TranslationKey> = { alert_volume: 'outlierAlertVolume', rule_severity: 'outlierRuleSeverity', rule_diversity: 'outlierRuleDiversity', failed_actions: 'outlierFailedActions', credential_attempts: 'outlierCredentialAttempts' };
+export function OutliersPage() { const {t,number,dateTime}=useI18n();const [offset, setOffset] = useState(0); const limit = 20; const query = useQuery({ queryKey: ['outliers', offset], queryFn: () => api.intelligenceOutliers(limit, offset), retry: false }); return <SimpleListPage title={t('outliers')} text={t('outliersDescription')} query={query} offset={offset} limit={limit} setOffset={setOffset} headers={[t('start'), t('end'), t('alerts'), t('score'), t('status'), t('outlierEvidence')]} rows={query.data?.items.map((item) => [dateTime(item.started_at), dateTime(item.ended_at), number(item.alert_count), number(item.anomaly_score), item.is_outlier ? t('outlier') : t('normal'), item.explanation_factors.map((factor) => `${t(outlierFactorLabels[factor.key])}: ${number(factor.value)}`).join(' · ') || t('noneRecorded')]) || []} />; }
 function SimpleListPage({ title, text, query, offset, limit, setOffset, headers, rows }: { title: string; text: string; query: ReturnType<typeof useQuery<Page<unknown>>>; offset: number; limit: number; setOffset: (v: number) => void; headers: string[]; rows: string[][] }) { const {t}=useI18n();return <section className="page-section intelligence-module"><Heading eyebrow={t('intelligence')} title={title} text={text} /><PageState query={query} empty={t('noData')}><div className="table-shell"><table><thead><tr>{headers.map((item) => <th key={item}>{item}</th>)}</tr></thead><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div></PageState>{query.data && <Pager total={query.data.total} offset={offset} limit={limit} setOffset={setOffset} />}</section>; }
 
 const mlRuntimeLabels: Record<string, TranslationKey> = {

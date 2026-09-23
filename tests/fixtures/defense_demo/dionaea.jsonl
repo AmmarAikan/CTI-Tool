@@ -1,0 +1,1 @@
+{"id":"demo-dionaea-0001","timestamp":"2026-01-15T12:00:00Z","source":{"ip":"192.0.2.20"},"destination":{"port":445},"connection":{"protocol":"smb"},"message":"Synthetic isolated honeypot session"}
