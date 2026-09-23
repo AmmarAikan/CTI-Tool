@@ -137,9 +137,12 @@ class VPSProductionDeploymentTests(unittest.TestCase):
     def test_scheduled_collection_logs_only_bounded_correlated_diagnostics(self) -> None:
         script = self.external_collection_runner
         for field in (
+            "set -Eeuo pipefail",
             "INVOCATION_ID",
             "job_id=",
             "command_id=",
+            "external collection started",
+            "trap report_exit EXIT",
             "stage=collection_terminal",
             "source_status_counts=",
             "source_class_status_counts=",

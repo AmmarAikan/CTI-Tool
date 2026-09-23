@@ -1,10 +1,31 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "run_external_collection.sh must run as root" >&2
   exit 1
 fi
+
+current_stage=initialization
+job_id=unassigned
+command_id=unassigned
+invocation_id="${INVOCATION_ID:-unavailable}"
+if [[ ! "${invocation_id}" =~ ^[a-fA-F0-9]{32}$ ]]; then
+  invocation_id=unavailable
+fi
+work_dir=
+report_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "${status}" -ne 0 ]]; then
+    echo "external collection failed invocation_id=${invocation_id} job_id=${job_id} command_id=${command_id} stage=${current_stage} exit_status=${status}" >&2
+  fi
+  if [[ -n "${work_dir}" ]]; then
+    rm -rf -- "${work_dir}"
+  fi
+  exit "${status}"
+}
+trap report_exit EXIT
 
 exec 9>/run/cti-external-collection.lock
 if ! flock -n 9; then
@@ -26,21 +47,8 @@ set +a
 base_url=http://127.0.0.1:8090/api/v1/external-sources
 gateway_url=http://127.0.0.1:8088/api/v1/external-feed/publish
 work_dir=$(mktemp -d /run/cti-external-collection.XXXXXX)
-trap 'rm -rf -- "${work_dir}"' EXIT
 
-current_stage=initialization
-job_id=unassigned
-command_id=unassigned
-invocation_id="${INVOCATION_ID:-unavailable}"
-if [[ ! "${invocation_id}" =~ ^[a-fA-F0-9]{32}$ ]]; then
-  invocation_id=unavailable
-fi
-report_error() {
-  local status=$?
-  echo "external collection failed invocation_id=${invocation_id} job_id=${job_id} command_id=${command_id} stage=${current_stage} exit_status=${status}" >&2
-  exit "${status}"
-}
-trap report_error ERR
+echo "external collection started invocation_id=${invocation_id} job_id=${job_id} command_id=${command_id} stage=${current_stage}"
 
 auth_header="Authorization: Bearer ${EXTERNAL_CONTROL_TOKEN}"
 publish_header="Authorization: Bearer ${FEED_PUBLISH_TOKEN}"
