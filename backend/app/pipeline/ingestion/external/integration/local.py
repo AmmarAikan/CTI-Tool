@@ -948,7 +948,7 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     def promoted_source(source_id:str)->RegisteredSource|None:
         item=watch_service.store.resolve_discovered(source_id) if watch_service else None
         return (RegisteredSource(source_id,"dark_web",item["enabled"],{"source_id":source_id,"name":item["onion_reference"],"protected_url":item["protected_url"]}) if item else None)
-    collection = CanonicalCollectionService(runner, registry, executor, exporter, manual_service=manual,dynamic_source=promoted_source)
+    collection = CanonicalCollectionService(runner, registry, executor, exporter, manual_service=manual_delegate,dynamic_source=promoted_source)
     scheduler=(DurableDarkWebScheduler(watch_service,runner,
                poll_seconds=float(os.environ.get("EXTERNAL_DARK_WEB_SCHEDULER_POLL_SECONDS","5")),
                lease_seconds=int(os.environ.get("EXTERNAL_DARK_WEB_SCHEDULER_LEASE_SECONDS","30")))

@@ -13,6 +13,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassifiedItemResult
+from backend.app.pipeline.ingestion.external.application.collection_service import SourceExecutionResult
 from backend.app.pipeline.ingestion.external.application.manual_source_service import AdapterResult
 from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
 from backend.app.pipeline.ingestion.external.common.json_storage import load_json, save_json
@@ -141,6 +142,39 @@ class LocalManualSourceJobTests(unittest.TestCase):
                              ("manual-" + sha256_text(URL).split(":", 1)[1][:32], URL, URL))
             self.assertEqual(record["content_hash"], sha256_text(record["content"]))
             self.assertEqual(record["classification"]["status"], "accepted")
+            self._close(app, root)
+
+    def test_all_enabled_rechecks_tracked_manual_root_without_nested_capture_failure(self):
+        class CompletedExecutor:
+            @staticmethod
+            def execute(source, *, force, command_id):
+                del force, command_id
+                return SourceExecutionResult(source.source_id, "completed")
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            crawler = SequenceCrawler([
+                successful_crawl(CONTENT_ONE),
+                CrawlResult(URL, URL, "unchanged"),
+            ])
+            app = self._build(root, crawler, AcceptClassification())
+            app.state.services.collection_service.executor = CompletedExecutor()
+            client = self._client(app)
+            self.assertEqual(self._submit(client)["state"], "completed")
+
+            headers = {"Authorization": "Bearer manual-test-token"}
+            accepted = client.post(
+                f"{API_PREFIX}/jobs",
+                json={"scope": "all_enabled"},
+                headers=headers,
+            )
+            self.assertEqual(accepted.status_code, 202)
+            terminal = self._wait(client, accepted.json()["job_id"], headers)
+
+            self.assertEqual(terminal["state"], "completed")
+            self.assertEqual(terminal["result"]["manual_source_count"], 1)
+            self.assertEqual(terminal["result"]["export"]["status"], "completed")
+            self.assertEqual(crawler.values, [])
             self._close(app, root)
 
     def test_preview_is_non_persistent_until_frozen_approval_exports_it(self):
