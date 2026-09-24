@@ -2,7 +2,7 @@ import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, clearToken } from '../api/client';
-import { JOB_POLL_INTERVAL_MS, JOB_POLL_MAX_MS, Sources } from '../pages/Sources';
+import { JobMonitor, JOB_POLL_INTERVAL_MS, Sources } from '../pages/Sources';
 import { renderWithProviders } from './fixtures';
 
 const enabled = { source_id: 'source-one', name: 'المصدر الأول', source_type: 'rss', status: 'enabled', metadata: {} };
@@ -135,12 +135,11 @@ describe('single external source job', () => {
     expect(await screen.findByText('4')).toBeInTheDocument();
   });
 
-  it('times out bounded polling and cleans polling up on unmount', async () => {
-    const fetchMock = mockRole('analyst', (path) => response(job(path.includes('/sources/') ? 'queued' : 'running'))); vi.spyOn(window, 'confirm').mockReturnValue(true);
-    const view = renderWithProviders(<Sources />); await screen.findByRole('button', { name: `تشغيل ${enabled.name}` }); vi.useFakeTimers();
-    await act(async () => { screen.getByRole('button', { name: `تشغيل ${enabled.name}` }).click(); await Promise.resolve(); });
-    await act(async () => { vi.advanceTimersByTime(JOB_POLL_MAX_MS); await Promise.resolve(); }); expect(screen.getByRole('alert')).toHaveTextContent('انتهت مهلة');
-    const count = fetchMock.mock.calls.length; view.unmount(); await act(async () => { vi.advanceTimersByTime(JOB_POLL_INTERVAL_MS * 2); }); expect(fetchMock).toHaveBeenCalledTimes(count);
+  it('pauses bounded monitoring without reporting job failure and cleans polling up on unmount', async () => {
+    const fetchMock = mockRole('analyst', () => response(job('running')));
+    const view = renderWithProviders(<JobMonitor sourceId="source-one" job={{...job('running'),counts:{},sources:{}} as never} onUpdate={()=>undefined} maxPollingMs={25}/>);
+    expect(await screen.findByText(/لا تزال الوظيفة قيد التشغيل/)).toBeInTheDocument();expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'استئناف المتابعة'})).toBeEnabled();
+    const count = fetchMock.mock.calls.length; view.unmount(); await new Promise(resolve=>window.setTimeout(resolve,JOB_POLL_INTERVAL_MS+25));expect(fetchMock).toHaveBeenCalledTimes(count);
   });
 
   it('uses existing 401 expiry behavior and rejects malformed jobs', async () => {
