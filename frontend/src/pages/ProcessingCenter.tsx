@@ -7,6 +7,7 @@ import { useI18n, type TranslationKey } from '../i18n/I18nContext';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import { JobMonitor, TERMINAL_STATES } from './Sources';
 import {externalQueryKeys} from '../api/externalQueryKeys';
+import { acceptExternalJobUpdate, forgetActiveExternalJob, loadActiveExternalJobs, rememberActiveExternalJob } from '../api/externalJobLifecycle';
 
 type InputKind = 'external' | 'manual' | 'internal' | 'dark';
 type PullResult = { run_id: string; status: string };
@@ -59,7 +60,7 @@ export function ProcessingCenter() {
     },
     onSuccess: (value, request) => {
       if (request.generation !== operationGeneration.current) return;
-      if ('job_id' in value) { setJob(value as ExternalJob); setJobInputKey(`${request.kind}:${request.selection || request.url}`); }
+      if ('job_id' in value) { const external=value as ExternalJob;rememberActiveExternalJob('processing-center',request.selection||'manual',external.job_id);setJob(external); setJobInputKey(`${request.kind}:${request.selection || request.url}`); }
       else if ('preview_id' in value) setPreview(value as ManualPreview);
       else setPullResult(value as PullResult);
     },
@@ -68,7 +69,7 @@ export function ProcessingCenter() {
     mutationFn: (request: PreviewDecisionRequest) => api.approveManualPreviewAbortable(request.preview, request.signal),
     onSuccess: (value, request) => {
       if (request.generation !== operationGeneration.current) return;
-      setPreview(undefined); setDecisionError(undefined); setJob(value); setJobInputKey(`manual:${url.trim()}`);
+      rememberActiveExternalJob('processing-center','manual',value.job_id);setPreview(undefined); setDecisionError(undefined); setJob(value); setJobInputKey(`manual:${url.trim()}`);
     },
     onError: (error, request) => { if (request.generation === operationGeneration.current) setDecisionError(error); },
   });
@@ -91,8 +92,9 @@ export function ProcessingCenter() {
     operationGeneration.current += 1;
     submissionController.current?.abort();
   }, []);
+  useEffect(()=>{const stored=loadActiveExternalJobs().find(item=>item.context==='processing-center');if(!stored)return;let cancelled=false;void api.externalJob(stored.jobId).then(value=>{if(cancelled)return;setJob(value);setJobInputKey(`external:${stored.sourceId}`);if(stored.sourceId!=='manual'){setKind('external');setSelection(stored.sourceId);}}).catch(()=>undefined);return()=>{cancelled=true};},[]);
   useEffect(()=>{
-    if(kind!=='external'||!job||!['completed','partial'].includes(job.state)||importedTerminalJob.current===job.job_id)return;
+    if(!job||!['completed','partial'].includes(job.state)||importedTerminalJob.current===job.job_id)return;
     importedTerminalJob.current=job.job_id;const generation=operationGeneration.current;const controller=new AbortController();submissionController.current=controller;
     void api.importExternalJob(job.job_id,controller.signal).then(value=>{if(generation===operationGeneration.current){setPullResult(value);void queryClient.invalidateQueries({queryKey:['external','accepted-records']});void queryClient.invalidateQueries({queryKey:externalQueryKeys.reviews()});void queryClient.invalidateQueries({queryKey:externalQueryKeys.processingRun(value.run_id)})}}).catch(error=>{if(generation===operationGeneration.current)setDecisionError(error)});
     return()=>controller.abort();
@@ -149,13 +151,13 @@ export function ProcessingCenter() {
     </section>
     <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => {const confirmed=index===0||(index===1&&Boolean(job&&['completed','partial'].includes(job.state)))||(index>1&&Boolean(analysis.data&&['completed','partial'].includes(analysis.data.status)));return <li className={confirmed?'confirmed':''} key={key}><span>{index + 1}</span>{t(key)}</li>})}</ol></section>
     <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
-      {job && <JobMonitor key={job.job_id} sourceId="processing-center" label={selectedLabel} job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => { setJob((current) => current?.job_id === value.job_id ? value : current); if (TERMINAL_STATES.includes(value.state) && refreshedTerminalJob.current !== value.job_id) { refreshedTerminalJob.current = value.job_id; snapshot.forEach((query) => void query.refetch()); } }} />}
+      {job && <JobMonitor key={job.job_id} sourceId="processing-center" label={selectedLabel} job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => { setJob((current) => current?.job_id === value.job_id ? acceptExternalJobUpdate(current,value) : current); if (TERMINAL_STATES.includes(value.state) && refreshedTerminalJob.current !== value.job_id) { forgetActiveExternalJob('processing-center',value.job_id);refreshedTerminalJob.current = value.job_id;void queryClient.invalidateQueries({queryKey:externalQueryKeys.reviews()});snapshot.forEach((query) => void query.refetch()); } }} />}
       {pullResult && <div className="job-panel" role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{pullResult.run_id}</code></details>}</div>}
       {job&&TERMINAL_STATES.includes(job.state)&&<p role="status">{t('collectionCompleted')}</p>}
-      {kind==='external'&&job&&['completed','partial'].includes(job.state)&&!pullResult&&!decisionError&&<p role="status">{t('centralImportRunning')}</p>}
+      {job&&['completed','partial'].includes(job.state)&&!pullResult&&!decisionError&&<p role="status">{t('centralImportRunning')}</p>}
       {analysis.isLoading&&<LoadingState label={t('loadingRunDetails')}/>} {analysis.isError&&<ErrorState onRetry={()=>void analysis.refetch()}/>} {analysis.data&&<section className="snapshot-panel"><h4>{analysis.data.status==='partial'?t('analysisPartial'):t('analysisCompleted')}</h4><div className="metric-grid">{[[t('processed'),analysis.data.processed_documents],[t('entities'),analysis.data.entity_count],[t('indicators'),analysis.data.indicator_count],[t('correlations'),analysis.data.correlation_count],[t('skipped'),analysis.data.skipped_count],[t('errors'),analysis.data.error_count]].map(([label,value])=><article className="metric-card" key={String(label)}><span>{label}</span><strong>{number(value as number)}</strong></article>)}</div><h4>{t('entities')}</h4>{analysis.data.entities.length?<ul>{analysis.data.entities.map((item,index)=><li key={`${item.event_id}-${index}`}>{item.type}: {item.value} · {item.record_title}</li>)}</ul>:<EmptyState label={t('noEntitiesIdentified')}/>}<h4>{t('indicators')}</h4>{analysis.data.indicators.length?<ul>{analysis.data.indicators.map((item,index)=><li key={`${item.event_id}-${index}`}>{item.type}: {item.value} · {item.record_title}</li>)}</ul>:<EmptyState label={t('noIndicatorsExtracted')}/>}<h4>{t('correlations')}</h4>{analysis.data.correlations.length?<ul>{analysis.data.correlations.map((item,index)=><li key={`${item.type}-${index}`}>{item.type}: {item.explanation}</li>)}</ul>:<EmptyState label={t('noCorrelationsFound')}/>}</section>}
       {preview && <article className="preview-card"><h4>{preview.title}</h4><p>{preview.excerpt}</p><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('approve')}>{t('approveSave')}</button><button disabled={approve.isPending || reject.isPending} onClick={() => decidePreview('reject')}>{t('reject')}</button></article>}
-      {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}{kind==='external'&&job&&['completed','partial'].includes(job.state)&&<button className="button button-secondary" onClick={()=>{importedTerminalJob.current='';setDecisionError(undefined);setJob({...job});}}>{t('retry')}</button>}</div>}
+      {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}{job&&['completed','partial'].includes(job.state)&&<button className="button button-secondary" onClick={()=>{importedTerminalJob.current='';setDecisionError(undefined);setJob({...job});}}>{t('retry')}</button>}</div>}
     </section>
     {!job&&!pullResult&&<section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
       <div className="metric-grid">{[[t('totalEvents'), summary?.events], [t('totalIndicators'), indicators?.total], [t('totalCorrelations'), correlations?.total], [t('totalOutliers'), outliers?.total]].map(([label, value]) => <article className="metric-card" key={String(label)}><span>{label}</span><strong>{typeof value === 'number' ? number(value) : '—'}</strong></article>)}</div>
