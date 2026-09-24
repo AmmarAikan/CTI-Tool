@@ -172,6 +172,50 @@ class VPSGatewayTests(unittest.TestCase):
         self.assertEqual([item["external_id"] for item in snapshot["items"]], ["ext-1", "ext-2", "ext-3"])
         self.assertEqual(snapshot["items"][0]["title"], "New title")
 
+    def test_external_feed_ack_is_signed_checkpoint_bound_and_idempotent(self) -> None:
+        published = self.client.post(
+            "/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={"dataset": [{"record_id": "ext-1", "title": "One"}]},
+        )
+        checkpoint = published.json()["etag"]
+        body = json.dumps(
+            {"checkpoint": checkpoint}, sort_keys=True, separators=(",", ":")
+        ).encode()
+        signature = hmac.new(
+            self.settings.feed_hmac_secret.encode(), body, hashlib.sha256
+        ).hexdigest()
+        headers = {
+            "Authorization": f"Bearer {self.settings.feed_read_token}",
+            "Content-Type": "application/json",
+            "X-CTI-Ack-Signature": f"sha256={signature}",
+        }
+        acknowledged = self.client.post(
+            "/api/v1/external-feed/ack", headers=headers, content=body
+        )
+        self.assertEqual(acknowledged.status_code, 200)
+        self.assertEqual(acknowledged.json()["newly_acknowledged_items"], 1)
+        repeated = self.client.post(
+            "/api/v1/external-feed/ack", headers=headers, content=body
+        )
+        self.assertEqual(repeated.status_code, 200)
+        self.assertEqual(repeated.json()["newly_acknowledged_items"], 0)
+        stale_body = json.dumps(
+            {"checkpoint": "0" * 64}, sort_keys=True, separators=(",", ":")
+        ).encode()
+        stale_signature = hmac.new(
+            self.settings.feed_hmac_secret.encode(), stale_body, hashlib.sha256
+        ).hexdigest()
+        stale = self.client.post(
+            "/api/v1/external-feed/ack",
+            headers={
+                **headers,
+                "X-CTI-Ack-Signature": f"sha256={stale_signature}",
+            },
+            content=stale_body,
+        )
+        self.assertEqual(stale.status_code, 409)
+
     def test_cumulative_limit_failure_preserves_previous_snapshot(self) -> None:
         limited = gateway.GatewaySettings(
             feed_publish_token=self.settings.feed_publish_token,

@@ -237,6 +237,22 @@ class PipelineService:
             "last_run_id": summary["run_id"],
         }
         self.session.commit()
+        acknowledgement = (
+            connector.acknowledge(result.checkpoint)
+            if result.checkpoint
+            else {"status": "not_available", "checkpoint": None}
+        )
+        state_source.config = {
+            **dict(state_source.config or {}),
+            "gateway_ack_status": acknowledgement.get("status"),
+            "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
+        }
+        self.session.commit()
+        summary["details"] = {
+            **summary["details"],
+            "gateway_ack_status": acknowledgement.get("status"),
+            "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
+        }
         return summary
 
     def sync_external_accepted(self, client: Any) -> dict[str, Any]:

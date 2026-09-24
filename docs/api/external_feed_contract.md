@@ -35,7 +35,22 @@ Authorization: Bearer <feed-publish-token>
 Content-Type: application/json
 ```
 
-The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a cumulative snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. This prevents Central Backend from missing a collection window while it is unavailable. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic write. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports the published, inserted, updated, unchanged, and total snapshot counts plus the ETag.
+The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a bounded delivery snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. New and changed records remain protected until Central Backend durably commits the complete snapshot and acknowledges its checkpoint. If capacity is reached, the Gateway prunes only acknowledged records, oldest `collected_at`/`published_at` first with `external_id` as the deterministic tie-breaker. This prevents Central Backend from missing a collection window while it is unavailable without turning the Gateway into the permanent CTI archive. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic snapshot write. Missing or stale delivery state fails closed by treating every retained item as unacknowledged. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports `previous_count`, `incoming_count`, `overlap_count`, `new_count`, `pruned_count`, `final_count`, the legacy inserted/updated/unchanged counters, and the ETag.
+
+## Durable delivery acknowledgement
+
+After all pages and raw records have been committed to PostgreSQL, Central Backend sends:
+
+```http
+POST /api/v1/external-feed/ack
+Authorization: Bearer <feed-read-token>
+Content-Type: application/json
+X-CTI-Ack-Signature: sha256=<HMAC-SHA256 of the exact request body>
+
+{"checkpoint":"<64-character snapshot SHA-256>"}
+```
+
+The acknowledgement is accepted only while the checkpoint still matches the current snapshot. A stale checkpoint receives `409` and leaves every unacknowledged record protected. The operation is idempotent. The Gateway response is signed with the normal `X-CTI-Signature` response HMAC. A restricted `external_ids` subset may be supplied only for a verified one-time migration of records already proven byte-for-byte durable in PostgreSQL; normal consumers always acknowledge the complete snapshot.
 
 ## Response envelope
 
@@ -119,7 +134,7 @@ If another page exists, return:
 }
 ```
 
-The final page returns `has_more=false`. The provider should return `ETag`; the backend sends `If-None-Match` on the next first-page request. A `304 Not Modified` response creates a completed zero-item run. The backend also saves the final checkpoint and ignores duplicate `(source, external_id)` items inside a pulled batch. Before BERT, PostgreSQL compares the stored processing-relevant fields and skips unchanged records; new or changed content is processed and upserted. Repeated delivery is therefore idempotent without paying the model cost again.
+The final page returns `has_more=false`. Every page must retain the same `ETag`; the backend rejects the whole batch if it changes during pagination. The backend sends `If-None-Match` on the next first-page request. A `304 Not Modified` response creates a completed zero-item run. The backend also saves the final checkpoint and ignores duplicate `(source, external_id)` items inside a pulled batch. Before BERT, PostgreSQL compares the stored processing-relevant fields and skips unchanged records; new or changed content is processed and upserted. Only after the database transaction and checkpoint commit succeed does the backend send the Gateway acknowledgement. Repeated delivery and acknowledgement are therefore idempotent without paying the model cost again.
 
 ## Failure behavior
 
@@ -128,9 +143,10 @@ The backend rejects the whole remote batch before persistence when:
 - authentication or TLS fails;
 - the response exceeds configured byte/page limits;
 - JSON, schema version, timestamp, stable identifier, pagination, or HMAC validation fails;
-- `feed_id` or `schema_version` changes between pages.
+- `feed_id`, `schema_version`, or `ETag` changes between pages.
 
 One malformed remote batch therefore cannot partially contaminate the CTI database.
+Failure before persistence cannot advance the Gateway acknowledgement. If persistence succeeds but the acknowledgement request fails, the saved ETag/checkpoint makes the next pull a safe idempotent ACK retry.
 
 ## Backend configuration and calls
 

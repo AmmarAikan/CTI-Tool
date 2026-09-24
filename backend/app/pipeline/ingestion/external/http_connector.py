@@ -54,6 +54,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
     """Pull a paginated, authenticated JSON feed from the private VPS Gateway."""
 
     SIGNATURE_HEADER = "X-CTI-Signature"
+    ACK_SIGNATURE_HEADER = "X-CTI-Ack-Signature"
 
     def __init__(
         self,
@@ -107,6 +108,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
             if response.status_code == 304:
                 result.not_modified = True
                 result.etag = self.if_none_match
+                result.checkpoint = self.checkpoint
                 return result
             response.raise_for_status()
             body = self._response_body(response)
@@ -140,7 +142,10 @@ class ExternalFeedAPIConnector(ExternalConnector):
             result.feed_id = feed_id
             result.schema_version = envelope["schema_version"]
             result.generated_at = envelope["generated_at"]
-            result.etag = response.headers.get("ETag") or result.etag
+            response_etag = response.headers.get("ETag")
+            if result.etag and response_etag and response_etag != result.etag:
+                raise ExternalFeedContractError("ETag changed between pages")
+            result.etag = response_etag or result.etag
             result.checkpoint = envelope.get("checkpoint") or result.checkpoint
 
             if not envelope["has_more"]:
@@ -154,6 +159,47 @@ class ExternalFeedAPIConnector(ExternalConnector):
         raise ExternalFeedContractError(
             f"Feed exceeded EXTERNAL_FEED_MAX_PAGES={self.max_pages}; no partial batch was stored"
         )
+
+    def acknowledge(self, checkpoint: str) -> dict[str, Any]:
+        """Acknowledge only after the caller has durably committed the complete feed."""
+        if not self.hmac_secret:
+            return {"status": "disabled", "checkpoint": checkpoint}
+        normalized = checkpoint.strip().strip('"')
+        if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+            raise ExternalFeedContractError("External feed checkpoint is not a SHA-256 digest")
+        body = json.dumps(
+            {"checkpoint": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(
+            str(self.hmac_secret or "").encode("utf-8"), body, hashlib.sha256
+        ).hexdigest()
+        response = self.session.post(
+            f"{self.url.rstrip('/')}/ack",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+                self.ACK_SIGNATURE_HEADER: f"sha256={signature}",
+                "User-Agent": "graduation-cti-backend/2.0",
+            },
+            data=body,
+            timeout=self.timeout,
+            verify=self.verify_tls,
+        )
+        response.raise_for_status()
+        response_body = self._response_body(response)
+        self._verify_signature(response_body, response.headers.get(self.SIGNATURE_HEADER))
+        payload = self._parse_payload(response_body)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "acknowledged"
+            or str(payload.get("checkpoint") or "") != normalized
+        ):
+            raise ExternalFeedContractError("Gateway returned an invalid acknowledgement")
+        return payload
 
     def healthcheck(self) -> dict[str, Any]:
         try:
@@ -313,7 +359,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
             status=3,
             backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset({"GET"}),
+            allowed_methods=frozenset({"GET", "POST"}),
             respect_retry_after_header=True,
         )
         session.mount("https://", HTTPAdapter(max_retries=retry))
