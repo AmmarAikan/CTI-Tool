@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { ExternalJob } from '../api/client';
 import { acceptExternalJobUpdate, forgetActiveExternalJob, loadActiveExternalJobs, rememberActiveExternalJob } from '../api/externalJobLifecycle';
 
-const makeJob=(state:ExternalJob['state'],updated_at:string):ExternalJob=>({schema_version:'1.0',job_id:'job-lifecycle-123456789',command_id:'cmd-lifecycle-123456789',state,created_at:'2026-09-24T00:00:00Z',updated_at,progress:{},result:null,error:null,counts:{},sources:{}});
+const makeJob=(state:ExternalJob['state'],updated_at:string):ExternalJob=>({job_id:'job-lifecycle-123456789',command_id:'cmd-lifecycle-123456789',state,created_at:'2026-09-24T00:00:00Z',updated_at,counts:{},sources:{}});
 
 describe('shared external job lifecycle',()=>{
   beforeEach(()=>sessionStorage.clear());
