@@ -504,7 +504,8 @@ class BackendEnhancementTests(unittest.TestCase):
             )
 
         self.assertEqual(raw_count, 0)
-        self.assertIsNone(state_source)
+        self.assertIsNotNone(state_source)
+        self.assertIsNone((state_source.config or {}).get("checkpoint"))
         self.assertEqual([call[0] for call in fake_session.calls], ["GET"])
 
     def test_historical_accepted_sync_is_idempotent_and_updates_once(self) -> None:

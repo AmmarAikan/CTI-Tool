@@ -53,6 +53,9 @@ class Settings:
     external_feed_max_bytes: int = int(os.getenv("EXTERNAL_FEED_MAX_BYTES", str(20 * 1024 * 1024)))
     external_feed_max_pages: int = int(os.getenv("EXTERNAL_FEED_MAX_PAGES", "20"))
     external_feed_page_size: int = int(os.getenv("EXTERNAL_FEED_PAGE_SIZE", "250"))
+    external_feed_processing_batch_size: int = int(
+        os.getenv("EXTERNAL_FEED_PROCESSING_BATCH_SIZE", "100")
+    )
     external_control_api_url: str | None = os.getenv("EXTERNAL_CONTROL_API_URL")
     external_control_api_token: str | None = os.getenv("EXTERNAL_CONTROL_API_TOKEN")
     external_control_verify_tls: bool = _as_bool(os.getenv("EXTERNAL_CONTROL_VERIFY_TLS"), True)

@@ -206,6 +206,10 @@ class PipelineService:
             "external",
         )
         state = dict(state_source.config or {})
+        state_source_id = state_source.id
+        # Do not keep the source lookup transaction open while the remote feed is
+        # downloaded or while CPU-heavy CTI transformation runs.
+        self.session.commit()
         if connector is None:
             if not settings.external_feed_configured:
                 raise RuntimeError("EXTERNAL_FEED_URL and EXTERNAL_FEED_TOKEN must be configured")
@@ -228,28 +232,60 @@ class PipelineService:
         result = connector.last_result
         if result is None:
             raise RuntimeError("External feed connector returned no collection result")
+        state_source = self.session.get(Source, state_source_id)
         summary = self._run_external_records(records, details=result.details(), run_source=state_source)
-        state_source.config = {
-            **state,
-            "etag": result.etag,
-            "checkpoint": result.checkpoint,
-            "last_generated_at": result.generated_at,
-            "last_run_id": summary["run_id"],
-        }
-        self.session.commit()
-        acknowledgement = (
-            connector.acknowledge(result.checkpoint)
-            if result.checkpoint
-            else {"status": "not_available", "checkpoint": None}
+        effective_checkpoint = result.checkpoint or (
+            state.get("checkpoint") if getattr(result, "not_modified", False) else None
         )
+        already_acknowledged = bool(
+            effective_checkpoint
+            and state.get("gateway_ack_status") == "acknowledged"
+            and state.get("gateway_ack_checkpoint") == effective_checkpoint
+        )
+        try:
+            acknowledgement = (
+                {"status": "acknowledged", "checkpoint": effective_checkpoint, "replayed": True}
+                if already_acknowledged
+                else connector.acknowledge(result.checkpoint)
+                if result.checkpoint
+                else {"status": "not_available", "checkpoint": None}
+            )
+        except Exception as exc:
+            run = self.session.get(PipelineRun, summary["run_id"])
+            if run is not None:
+                run.details = {
+                    **dict(run.details or {}),
+                    "gateway_ack_status": "failed",
+                    "gateway_ack_error": type(exc).__name__,
+                }
+                self.session.commit()
+            raise
+
+        # The feed cursor advances only after every batch is durably committed
+        # and the Gateway has accepted the final acknowledgement.
+        state_source = self.session.get(Source, state_source_id)
+        if state_source is None:
+            raise RuntimeError("External feed state source disappeared")
         state_source.config = {
             **dict(state_source.config or {}),
+            "etag": result.etag or state.get("etag"),
+            "checkpoint": effective_checkpoint,
+            "last_generated_at": result.generated_at or state.get("last_generated_at"),
+            "last_run_id": summary["run_id"],
             "gateway_ack_status": acknowledgement.get("status"),
             "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
         }
+        run = self.session.get(PipelineRun, summary["run_id"])
+        if run is not None:
+            run.details = {
+                **dict(run.details or {}),
+                "gateway_ack_status": acknowledgement.get("status"),
+                "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
+                "gateway_ack_replayed": bool(acknowledgement.get("replayed")),
+            }
         self.session.commit()
         summary["details"] = {
-            **summary["details"],
+            **dict(run.details if run is not None else summary["details"]),
             "gateway_ack_status": acknowledgement.get("status"),
             "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
         }
@@ -318,90 +354,201 @@ class PipelineService:
         run_source=None,
     ) -> dict[str, Any]:
         records = list(records)
-        run = self.repository.create_run("external", run_source, details=details)
+        batch_size = max(
+            1,
+            min(get_settings().external_feed_processing_batch_size, 1000),
+        )
+        run = self.repository.create_run(
+            "external",
+            run_source,
+            details={
+                **details,
+                "processing_batch_size": batch_size,
+                "committed_batches": 0,
+                "correlation_status": "deferred_bounded_ingestion",
+                "correlation_count": 0,
+            },
+        )
+        run_id = run.id
+        # Make the run observable without retaining a transaction throughout
+        # remote processing. Each completed batch is committed independently.
+        self.session.commit()
         stored = failed = unchanged = created = updated = 0
         event_ids: list[str] = []
+        committed_batches = 0
+        pipeline = None
         try:
-            raw_context = []
-            processable_records = []
-            source_cache = {}
-            record_sources = []
-            external_ids_by_source = {}
-            for record in records:
-                source = source_cache.get(record.source_name)
-                if source is None:
-                    source = self.repository.get_or_create_source(
-                        record.source_name,
-                        record.source_type,
-                        "external",
-                    )
-                    source_cache[record.source_name] = source
-                record_sources.append((record, source))
-                external_ids_by_source.setdefault(source.id, []).append(record.external_id)
+            for start in range(0, len(records), batch_size):
+                batch = records[start : start + batch_size]
+                processable_records, batch_unchanged = self._external_batch_changes(batch)
+                # _external_batch_changes commits its short comparison transaction.
+                # No database transaction is held while the expensive model runs.
+                if processable_records and pipeline is None:
+                    pipeline = ExternalCTIPipeline()
+                objects = pipeline.process_batch(processable_records) if processable_records else []
+                if len(objects) != len(processable_records):
+                    raise RuntimeError("External pipeline batch result count mismatch")
+                batch_result = self._persist_external_batch(processable_records, objects)
+                unchanged += batch_unchanged + batch_result["unchanged"]
+                created += batch_result["created"]
+                updated += batch_result["updated"]
+                stored += batch_result["stored"]
+                failed += batch_result["failed"]
+                event_ids.extend(batch_result["event_ids"])
+                committed_batches += 1
 
-            existing_by_source = {
-                source.id: self.repository.get_raw_records(
-                    source, external_ids_by_source.get(source.id, [])
-                )
-                for source in source_cache.values()
-            }
-            for record, source in record_sources:
-                raw_item = existing_by_source.get(source.id, {}).get(record.external_id)
-                if raw_item is not None and self.repository.raw_record_is_unchanged(
-                    raw_item, source, record
-                ):
-                    unchanged += 1
-                    continue
-                if raw_item is None: created += 1
-                else: updated += 1
-                raw_item = self.repository.upsert_raw_record(
-                    source, record, raw_item, flush=False
-                )
-                raw_context.append((source, raw_item))
-                processable_records.append(record)
-            self.session.flush()
-            objects = (
-                ExternalCTIPipeline().process_batch(processable_records)
-                if processable_records
-                else []
-            )
-            for (source, raw_item), cti_object in zip(raw_context, objects):
-                cti_object.raw_reference["source_severity"] = cti_object.severity or "unknown"
-                risk = self.risk_scorer.score(cti_object)
-                cti_object.severity = risk.severity
-                cti_object.raw_reference["risk_factors"] = risk.factors
-                event = self.repository.upsert_cti_object(source, cti_object, raw_item, risk.score)
-                event_ids.append(event.id)
-                if cti_object.processing_status == "failed":
-                    failed += 1
-                else:
-                    stored += 1
-            correlation_counts = self.run_correlations(commit=False) if event_ids else {"total": 0, "risk_recalculated": 0}
+                run = self.session.get(PipelineRun, run_id)
+                if run is None:
+                    raise RuntimeError("External pipeline run disappeared")
+                run.collected_count = min(start + len(batch), len(records))
+                run.processed_count = stored + failed
+                run.stored_count = stored
+                run.failed_count = failed
+                run.details = {
+                    **dict(run.details or {}),
+                    "committed_batches": committed_batches,
+                    "database_unchanged_items": unchanged,
+                    "changed_or_new_items": stored + failed,
+                    "created_items": created,
+                    "updated_items": updated,
+                    "event_ids": event_ids[:500],
+                }
+                self.session.commit()
+
             status = "partial" if failed and stored else "failed" if failed else "completed"
+            run = self.session.get(PipelineRun, run_id)
+            if run is None:
+                raise RuntimeError("External pipeline run disappeared")
             self.repository.finish_run(
                 run,
                 status=status,
                 collected=len(records),
-                processed=len(objects),
+                processed=stored + failed,
                 stored=stored,
                 failed=failed,
                 details={
                     **details,
                     "connector_duplicate_items": int(details.get("duplicate_items", 0)),
                     "database_unchanged_items": unchanged,
-                    "changed_or_new_items": len(processable_records),
+                    "changed_or_new_items": stored + failed,
                     "created_items": created,
                     "updated_items": updated,
                     "duplicate_items": int(details.get("duplicate_items", 0)) + unchanged,
                     "event_ids": event_ids[:500],
-                    "correlation_count": correlation_counts["total"],
+                    "committed_batches": committed_batches,
+                    "correlation_status": "deferred_bounded_ingestion",
+                    "correlation_count": 0,
                 },
             )
             self.session.commit()
             return self._run_summary(run)
         except Exception as exc:
             self.session.rollback()
+            run = self.session.get(PipelineRun, run_id)
+            if run is not None:
+                self.repository.finish_run(
+                    run,
+                    status="failed",
+                    collected=min(committed_batches * batch_size, len(records)),
+                    processed=stored + failed,
+                    stored=stored,
+                    failed=failed,
+                    error_message=type(exc).__name__,
+                    details={
+                        **details,
+                        "processing_batch_size": batch_size,
+                        "committed_batches": committed_batches,
+                        "database_unchanged_items": unchanged,
+                        "changed_or_new_items": stored + failed,
+                        "created_items": created,
+                        "updated_items": updated,
+                        "event_ids": event_ids[:500],
+                        "correlation_status": "deferred_bounded_ingestion",
+                        "correlation_count": 0,
+                    },
+                )
+                self.session.commit()
             raise RuntimeError(f"External pipeline failed: {exc}") from exc
+
+    def _external_batch_changes(self, records) -> tuple[list[Any], int]:
+        """Identify changed records in a short transaction, then close it."""
+        source_cache = {}
+        record_sources = []
+        external_ids_by_source = {}
+        for record in records:
+            source = source_cache.get(record.source_name)
+            if source is None:
+                source = self.repository.get_or_create_source(
+                    record.source_name, record.source_type, "external"
+                )
+                source_cache[record.source_name] = source
+            record_sources.append((record, source))
+            external_ids_by_source.setdefault(source.id, []).append(record.external_id)
+        existing_by_source = {
+            source.id: self.repository.get_raw_records(
+                source, external_ids_by_source.get(source.id, [])
+            )
+            for source in source_cache.values()
+        }
+        processable = []
+        unchanged = 0
+        for record, source in record_sources:
+            raw_item = existing_by_source.get(source.id, {}).get(record.external_id)
+            if raw_item is not None and self.repository.raw_record_is_unchanged(
+                raw_item, source, record
+            ):
+                unchanged += 1
+            else:
+                processable.append(record)
+        self.session.commit()
+        return processable, unchanged
+
+    def _persist_external_batch(self, records, objects) -> dict[str, Any]:
+        """Persist one processed batch atomically and durably."""
+        if not records:
+            return {"unchanged": 0, "created": 0, "updated": 0, "stored": 0,
+                    "failed": 0, "event_ids": []}
+        source_cache = {}
+        external_ids_by_source = {}
+        for record in records:
+            source = source_cache.get(record.source_name)
+            if source is None:
+                source = self.repository.get_or_create_source(
+                    record.source_name, record.source_type, "external"
+                )
+                source_cache[record.source_name] = source
+            external_ids_by_source.setdefault(source.id, []).append(record.external_id)
+        existing_by_source = {
+            source.id: self.repository.get_raw_records(
+                source, external_ids_by_source.get(source.id, [])
+            )
+            for source in source_cache.values()
+        }
+        result = {"unchanged": 0, "created": 0, "updated": 0, "stored": 0,
+                  "failed": 0, "event_ids": []}
+        for record, cti_object in zip(records, objects):
+            source = source_cache[record.source_name]
+            raw_item = existing_by_source.get(source.id, {}).get(record.external_id)
+            if raw_item is not None and self.repository.raw_record_is_unchanged(
+                raw_item, source, record
+            ):
+                result["unchanged"] += 1
+                continue
+            result["created" if raw_item is None else "updated"] += 1
+            raw_item = self.repository.upsert_raw_record(
+                source, record, raw_item, flush=False
+            )
+            cti_object.raw_reference["source_severity"] = cti_object.severity or "unknown"
+            risk = self.risk_scorer.score(cti_object)
+            cti_object.severity = risk.severity
+            cti_object.raw_reference["risk_factors"] = risk.factors
+            event = self.repository.upsert_cti_object(
+                source, cti_object, raw_item, risk.score
+            )
+            result["event_ids"].append(event.id)
+            result["failed" if cti_object.processing_status == "failed" else "stored"] += 1
+        self.session.commit()
+        return result
 
     def run_wazuh_files(self, paths: list[str | Path]) -> dict[str, Any]:
         connector = WazuhFileConnector(paths)
