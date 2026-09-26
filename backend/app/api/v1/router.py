@@ -987,10 +987,24 @@ def external_control_review_decision(record_id: str, payload: ExternalReviewDeci
     if payload.decision == "approved":
         export_run_id = result.get("export_run_id")
         if isinstance(export_run_id, str) and export_run_id:
+            dataset_sha256 = None
             try:
+                lifecycle = external_control_call(lambda client: client.review_lifecycle())
+                exact = next((item for item in lifecycle["items"]
+                              if item["record_id"] == record_id
+                              and item["content_sha256"] == payload.expected_content_sha256
+                              and item.get("export_run_id") == export_run_id), None)
+                dataset_sha256 = exact.get("dataset_sha256") if isinstance(exact, dict) else None
+                if not isinstance(dataset_sha256, str) or not re.fullmatch(r"(?:sha256:)?[0-9a-f]{64}", dataset_sha256):
+                    raise RuntimeError("Approved review export identity is incomplete")
+                def import_exact(client):
+                    page = client.accepted_export_page(limit=1, offset=0, run_id=export_run_id)
+                    if str(page["dataset_sha256"]).removeprefix("sha256:") != dataset_sha256.removeprefix("sha256:"):
+                        raise RuntimeError("Approved review export digest changed")
+                    return PipelineService(db).sync_external_run(client, export_run_id)
                 LOGGER.info("external lifecycle boundary stage=central_importing record_id=%s review_id=%s content_hash=%s export_run_id=%s",
                             record_id, record_id, payload.expected_content_sha256, export_run_id)
-                central = external_control_call(lambda client: PipelineService(db).sync_external_run(client, export_run_id))
+                central = external_control_call(import_exact)
                 LOGGER.info("external lifecycle boundary stage=processed record_id=%s review_id=%s content_hash=%s export_run_id=%s central_run_id=%s",
                             record_id, record_id, payload.expected_content_sha256, export_run_id, central.get("run_id"))
             except Exception as exc:
@@ -1005,7 +1019,8 @@ def external_control_review_decision(record_id: str, payload: ExternalReviewDeci
                     "message": "Review approval was saved but Central import must be retried", "retryable": True,
                     "stage": "central_import", "record_id": record_id,
                     "content_sha256": payload.expected_content_sha256,
-                    "export_run_id": export_run_id}) from None
+                    "export_run_id": export_run_id,
+                    "dataset_sha256": dataset_sha256}) from None
     audit(db, user, "decide_external_review", "external_review", record_id,
           decision=payload.decision, reason=payload.reason, content_sha256=payload.expected_content_sha256,
           export_run_id=result.get("export_run_id"),
