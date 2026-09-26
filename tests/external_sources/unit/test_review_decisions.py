@@ -29,6 +29,45 @@ class RecordingExporter:
 
 
 class ReviewDecisionPersistenceTests(unittest.TestCase):
+    def test_review_snapshot_is_reused_for_pagination_and_invalidated_by_new_export(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); state = JsonStateManager(root / "state" / "exports.json")
+            exporter = ExternalDatasetExporter(exports_dir=root / "exports", review_dir=root / "review", state_manager=state)
+            first_manifest = RunManifest()
+            exporter.export(first_manifest, (RunSourceOutput(first_manifest.run_id, "fixture", "completed",
+                review=tuple(export_item(f"cached-{index:03d}", classification="error") for index in range(25))),))
+            service = LocalReviewService(root / "review", LocalValidatedExportReader(root / "exports"), exporter)
+            with patch("backend.app.pipeline.ingestion.external.integration.local.load_json",
+                       wraps=__import__("backend.app.pipeline.ingestion.external.integration.local",
+                                        fromlist=["load_json"]).load_json) as loader:
+                first = service.latest(limit=20)
+                second = service.latest(limit=20, offset=20)
+                review_loads = [call for call in loader.call_args_list
+                                if Path(call.args[0]).name.startswith("external_review_")]
+            self.assertEqual((first["total"], len(first["records"]), len(second["records"])), (25, 20, 5))
+            self.assertEqual(len(review_loads), 1)
+
+            newer_manifest = RunManifest(); newer_record = export_item("cached-new-record", classification="error")
+            exporter.export(newer_manifest, (RunSourceOutput(newer_manifest.run_id, "fixture", "completed",
+                review=(newer_record,)),))
+            refreshed = service.latest(limit=50)
+            self.assertEqual(refreshed["total"], 26)
+            self.assertIn(newer_record.record_id, [item["record_id"] for item in refreshed["records"]])
+
+    def test_exact_export_lookup_does_not_scan_unrelated_manifests(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); _exporter, reader, service, record = self._fixture(root, "exact-export")
+            decided = service.decide(record["record_id"], record["content_sha256"],
+                                     "approved", None, requested_by="analyst")
+            target = decided["export_run_id"]
+            for index in range(20):
+                (root / "exports" / f"external_export_manifest_unrelated-{index:02d}.json").write_text("{}")
+            with patch.object(reader, "_validated", wraps=reader._validated) as validate:
+                page = reader.run_accepted(target, limit=20, offset=0)
+            self.assertEqual(validate.call_count, 1)
+            self.assertEqual(Path(validate.call_args.args[0]).name, f"external_export_manifest_{target}.json")
+            self.assertEqual(page["items"][0]["content_hash"], record["content_sha256"])
+
     def test_unresolved_reviews_are_newest_first_and_stably_paginated(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder); state = JsonStateManager(root / "state" / "exports.json")

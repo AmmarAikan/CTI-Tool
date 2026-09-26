@@ -532,10 +532,9 @@ class LocalValidatedExportReader:
 
     def run_accepted(self, run_id: str, *, limit: int, offset: int) -> dict[str, Any] | None:
         if not run_id or Path(run_id).name != run_id: return None
-        candidates = self.exports_directory.glob("external_export_manifest_*.json")
-        validated = next((value for path in candidates if (value := self._validated(path)) is not None
-                          and str(value[0].get("run_id")) == run_id), None)
-        if validated is None: return None
+        manifest_path = self.exports_directory / f"external_export_manifest_{run_id}.json"
+        validated = self._validated(manifest_path) if manifest_path.is_file() else None
+        if validated is None or str(validated[0].get("run_id")) != run_id: return None
         manifest, dataset = validated
         items = []
         for record in dataset[offset:offset + limit]:
@@ -578,12 +577,43 @@ class LocalReviewService:
                  exporter: ExternalDatasetExporter) -> None:
         self.review_directory, self.export_reader, self.exporter = review_directory, export_reader, exporter
         self._lock = threading.Lock()
+        self._snapshot_lock = threading.Lock()
+        self._snapshot_key: tuple[Any, ...] | None = None
+        self._snapshot_value: tuple[str, tuple[dict[str, Any], ...], int] | None = None
 
     def latest(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any] | None:
         if not 1 <= limit <= 50 or offset < 0:
             raise ValueError("invalid_review_page")
+        snapshot = self._snapshot()
+        if snapshot is None: return None
+        run_id, records, malformed_records = snapshot
+        return {"run_id": run_id, "records": list(records[offset:offset + limit]), "total": len(records),
+                "limit": limit, "offset": offset, "malformed_records": malformed_records}
+
+    def _snapshot_signature(self) -> tuple[Any, ...]:
+        paths = sorted(self.review_directory.glob("external_review_*.json"),
+                       key=lambda value: value.stat().st_mtime_ns, reverse=True)[:100]
+        review_files = tuple((path.name, path.stat().st_mtime_ns, path.stat().st_size) for path in paths)
+        state_path = self.exporter.state_manager.path
+        state_stat = state_path.stat() if state_path.is_file() else None
+        manifests = list(self.export_reader.exports_directory.glob("external_export_manifest_*.json"))
+        newest_manifest = max(manifests, key=lambda value: value.stat().st_mtime_ns) if manifests else None
+        manifest_stat = newest_manifest.stat() if newest_manifest is not None else None
+        return (review_files,
+                (state_stat.st_mtime_ns, state_stat.st_size) if state_stat is not None else None,
+                (newest_manifest.name, manifest_stat.st_mtime_ns, manifest_stat.st_size)
+                if newest_manifest is not None and manifest_stat is not None else None)
+
+    def _snapshot(self) -> tuple[str, tuple[dict[str, Any], ...], int] | None:
+        signature = self._snapshot_signature()
+        with self._snapshot_lock:
+            if signature == self._snapshot_key:
+                return self._snapshot_value
         latest = self.export_reader.latest()
-        if not latest: return None
+        if not latest:
+            with self._snapshot_lock:
+                self._snapshot_key, self._snapshot_value = signature, None
+            return None
         run_id = str(latest["run_id"])
         values: list[dict[str, Any]] = []
         # Review artifacts are immutable run snapshots. Pending work is therefore
@@ -647,17 +677,15 @@ class LocalReviewService:
             raise ValueError("invalid_response")
         records.sort(key=lambda value: (str(value.get("collected_at") or value.get("published") or ""),
                                         value["record_id"]), reverse=True)
-        return {"run_id": run_id, "records": records[offset:offset + limit], "total": len(records),
-                "limit": limit, "offset": offset, "malformed_records": malformed_records}
+        snapshot = (run_id, tuple(records), malformed_records)
+        with self._snapshot_lock:
+            self._snapshot_key, self._snapshot_value = signature, snapshot
+        return snapshot
 
     def lifecycle(self) -> dict[str, Any]:
-        pending: dict[tuple[str, str], dict[str, Any]] = {}
-        page = self.latest(limit=50)
-        while page:
-            pending.update({(item["record_id"], item["content_sha256"]): item for item in page["records"]})
-            next_offset = page["offset"] + len(page["records"])
-            if next_offset >= page["total"]: break
-            page = self.latest(limit=50, offset=next_offset)
+        snapshot = self._snapshot()
+        pending = {(item["record_id"], item["content_sha256"]): item
+                   for item in snapshot[1] if snapshot is not None}
         state = self.exporter.state_manager.load()
         decisions = state.get("review_decisions") if isinstance(state.get("review_decisions"), dict) else {}
         items: list[dict[str, Any]] = []
