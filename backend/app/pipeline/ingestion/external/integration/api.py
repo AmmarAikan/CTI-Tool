@@ -470,10 +470,11 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         404: {"model": IntegrationErrorResponse, "description": "No validated External Sources review artifact is available."},
         503: {"model": IntegrationErrorResponse, "description": "The review read adapter is not configured."},
     })
-    def latest_reviews(_current: Principal = Depends(permitted("reviews:read"))) -> LatestReviewResponse:
+    def latest_reviews(limit: int = Query(20, ge=1, le=50), offset: int = Query(0, ge=0),
+                       _current: Principal = Depends(permitted("reviews:read"))) -> LatestReviewResponse:
         if services.review_service is None:
             raise APIError(503, "review_unavailable", "review read operation is unavailable")
-        value = services.review_service.latest()
+        value = services.review_service.latest(limit=limit, offset=offset)
         if value is None: raise APIError(404, "review_not_found", "no validated review artifact is available")
         return LatestReviewResponse.model_validate(value)
 

@@ -74,8 +74,8 @@ class FakeSources:
 
 
 class FakeReviews:
-    def latest(self):
-        return {"run_id": "ext-review-0000001", "records": [{
+    def latest(self, *, limit=20, offset=0):
+        records = [{
             "record_id": "manual-" + "a" * 32, "canonical_url": "https://example.test/report",
             "title": "Sanitized report", "source_type": "manual_url", "review_reason": "privacy_unresolved",
             "review_reasons": ["collector_review", "privacy_unresolved"],
@@ -86,7 +86,9 @@ class FakeReviews:
             "review_version":"external_review_v2","summary":"Sanitized summary",
             "excerpt": "Sanitized review content", "source": "Example source",
             "category": "advisory", "status": "pending",
-        }]}
+        }]
+        return {"run_id": "ext-review-0000001", "records": records[offset:offset + limit],
+                "total": len(records), "limit": limit, "offset": offset, "malformed_records": 0}
 
     def decide(self, record_id, expected_content_sha256, decision, reason, *, requested_by):
         return {"schema_version": "1.0", "record_id": record_id,

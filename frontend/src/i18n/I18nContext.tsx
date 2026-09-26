@@ -1,6 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 export const ar = {
+  loadMore:'التالي',
   externalResponseIncompatible:'أعادت خدمة المصادر الخارجية استجابة غير متوافقة.',
   importProcessingFailed:'فشلت معالجة الاستيراد المركزي بأمان.',
   importNotReady:'الوظيفة أو التصدير غير جاهز للاستيراد.',
@@ -117,6 +118,7 @@ export const ar = {
 export type TranslationKey = keyof typeof ar;
 
 export const en: Record<TranslationKey, string> = {
+  loadMore:'Load more',
   externalResponseIncompatible:'External Sources returned an incompatible response.',
   importProcessingFailed:'Central import processing failed safely.',
   importNotReady:'The job or export is not ready for import.',

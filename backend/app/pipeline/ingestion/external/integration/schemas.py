@@ -311,7 +311,11 @@ class ReviewRecordResponse(StrictModel):
 
 class LatestReviewResponse(StrictModel):
     run_id: str
-    records: list[ReviewRecordResponse] = Field(default_factory=list, max_length=100)
+    records: list[ReviewRecordResponse] = Field(default_factory=list, max_length=50)
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=50)
+    offset: int = Field(ge=0)
+    malformed_records: int = Field(default=0, ge=0)
 
 
 class ReviewLifecycleItem(StrictModel):

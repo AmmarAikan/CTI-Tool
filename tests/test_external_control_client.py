@@ -189,7 +189,7 @@ class ExternalControlClientTests(unittest.TestCase):
             self.client([FakeResponse(leaked)]).accepted_export_page()
 
     def test_reviews_history_and_cancellation_use_bounded_contracts(self) -> None:
-        review = {"run_id": "ext-run-1234567890", "records": [{
+        review = {"run_id": "ext-run-1234567890", "total": 1, "limit": 20, "offset": 0, "malformed_records": 0, "records": [{
             "record_id": "rec-123", "canonical_url": "https://private.test/report", "title": "Safe",
             "source_type": "rss", "review_reason": "privacy_review", "review_reasons": ["privacy_review"],
             "stage_status": {"privacy": "review"}, "classification_label": "related",
@@ -223,7 +223,8 @@ class ExternalControlClientTests(unittest.TestCase):
             "summary": "Sanitized summary", "excerpt": "Sanitized review content",
             "source": "Safe source", "category": "advisory", "status": "pending"}
         malformed = {**valid, "record_id": "record-malformed-123", "summary": {"secret": "value"}}
-        payload = {"run_id": "ext-run-1234567890", "records": [malformed, valid]}
+        payload = {"run_id": "ext-run-1234567890", "records": [malformed, valid],
+                   "total": 2, "limit": 20, "offset": 0, "malformed_records": 0}
         projected = self.client([FakeResponse(payload)]).latest_reviews()
         self.assertEqual([item["record_id"] for item in projected["records"]], [valid["record_id"]])
         with self.assertRaises(ExternalControlTransportError):

@@ -8,13 +8,13 @@ import { DarkWebWatches } from '../pages/DarkWebWatches';
 import { AcceptedRecords } from '../pages/AcceptedRecords';
 import { renderWithProviders } from './fixtures';
 
-const response = (body: unknown, status = 200) => Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(body) } as Response);
+const response = (body: unknown, status = 200) => { const value=body&&typeof body==='object'&&!Array.isArray(body)&&'run_id' in body&&'records' in body&&!('total' in body)?{...body,total:(body as {records:unknown[]}).records.length,limit:20,offset:0,malformed_records:0}:body;return Promise.resolve({ ok: status < 400, status, json: () => Promise.resolve(value) } as Response); };
 beforeEach(() => { sessionStorage.clear(); clearToken(); vi.restoreAllMocks(); });
 
 describe('external reviews states', () => {
   it('accepts the exact live reviews root with 86 records and nullable classification labels',async()=>{
     sessionStorage.setItem('cti_language','en');const records=Array.from({length:86},(_,index)=>({record_id:`live-review-${String(index).padStart(4,'0')}`,title:`Live review ${index}`,source_type:'rss',review_reason:'classification_review',review_reasons:['classification_review'],classification_label:index===0?null:'cti_related',privacy_status:'reviewed',collected_at:'2026-09-20T00:00:00Z',published:null,content_sha256:`sha256:${index.toString(16).padStart(64,'0')}`,review_version:'external_review_v2',summary:'Safe summary',excerpt:'Sanitized excerpt',source:'Safe source',category:'advisory',status:'pending'}));
-    vi.spyOn(globalThis,'fetch').mockImplementation(()=>response({records,run_id:'live-run-123'}));renderWithProviders(<Reviews/>);expect(await screen.findByText('86 records')).toBeInTheDocument();expect(screen.getByText('Unclassified / Unknown')).toBeInTheDocument();expect(screen.getByText('Live review 85')).toBeInTheDocument();
+    vi.spyOn(globalThis,'fetch').mockImplementation(input=>{const offset=String(input).includes('offset=20')?20:0;return response({records:records.slice(offset,offset+20),run_id:'live-run-123',total:86,limit:20,offset,malformed_records:0})});renderWithProviders(<Reviews/>);expect(await screen.findByText('20 records')).toBeInTheDocument();expect(screen.getByText('Unclassified / Unknown')).toBeInTheDocument();expect(screen.queryByText('Live review 20')).not.toBeInTheDocument();await userEvent.click(screen.getByRole('button',{name:'Load more'}));expect(await screen.findByText('Live review 20')).toBeInTheDocument();
   });
   it('isolates one malformed review while retaining valid records',async()=>{
     sessionStorage.setItem('cti_language','en');sessionStorage.setItem('cti_access_token','token');const valid={record_id:'live-review-valid',title:'Valid review',source_type:'rss',review_reason:'classification_review',review_reasons:['classification_review'],classification_label:null,privacy_status:'reviewed',collected_at:null,published:null,content_sha256:`sha256:${'a'.repeat(64)}`,review_version:'external_review_v2',summary:'Safe',excerpt:'Sanitized',source:'Safe source',category:'advisory',status:'pending'};

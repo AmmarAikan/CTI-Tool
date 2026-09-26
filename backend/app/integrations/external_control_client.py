@@ -305,9 +305,15 @@ class ExternalControlClient:
         if kind in {"list","results"} and value.get("schema_version")!="1.0": raise ExternalControlTransportError("Dark web response contract is invalid")
         return value
 
-    def latest_reviews(self) -> dict[str, Any]:
-        payload = self._request("GET", "/reviews/latest")
-        if not isinstance(payload, dict) or set(payload) != {"run_id", "records"} or not isinstance(payload.get("run_id"), str) or not isinstance(payload.get("records"), list):
+    def latest_reviews(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        if not 1 <= limit <= 50 or offset < 0: raise ValueError("invalid review page")
+        payload = self._request("GET", f"/reviews/latest?limit={limit}&offset={offset}")
+        page_keys = {"run_id", "records", "total", "limit", "offset", "malformed_records"}
+        if (not isinstance(payload, dict) or set(payload) != page_keys or not isinstance(payload.get("run_id"), str)
+                or not isinstance(payload.get("records"), list) or len(payload["records"]) > 50
+                or type(payload.get("total")) is not int or payload["total"] < 0
+                or payload.get("limit") != limit or payload.get("offset") != offset
+                or type(payload.get("malformed_records")) is not int or payload["malformed_records"] < 0):
             raise ExternalControlTransportError("External review contract is invalid")
         allowed = {"record_id", "canonical_url", "title", "source_type", "review_reason", "review_reasons", "stage_status", "classification_label", "privacy_status", "collected_at", "published", "content_sha256", "review_version", "summary", "excerpt", "source", "category", "status"}
         safe_records = []
@@ -323,7 +329,9 @@ class ExternalControlClient:
             safe_records.append({key: item.get(key) for key in allowed if key != "canonical_url" and key != "stage_status"})
         if payload["records"] and not safe_records:
             raise ExternalControlTransportError("External review contract is invalid")
-        return {"run_id": payload["run_id"], "records": safe_records}
+        return {"run_id": payload["run_id"], "records": safe_records, "total": payload["total"],
+                "limit": limit, "offset": offset,
+                "malformed_records": payload["malformed_records"] + len(payload["records"]) - len(safe_records)}
 
     def review_lifecycle(self) -> dict[str, Any]:
         payload = self._request("GET", "/reviews/lifecycle")

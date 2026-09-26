@@ -579,7 +579,9 @@ class LocalReviewService:
         self.review_directory, self.export_reader, self.exporter = review_directory, export_reader, exporter
         self._lock = threading.Lock()
 
-    def latest(self) -> dict[str, Any] | None:
+    def latest(self, *, limit: int = 20, offset: int = 0) -> dict[str, Any] | None:
+        if not 1 <= limit <= 50 or offset < 0:
+            raise ValueError("invalid_review_page")
         latest = self.export_reader.latest()
         if not latest: return None
         run_id = str(latest["run_id"])
@@ -602,9 +604,11 @@ class LocalReviewService:
         decided = {(str(value.get("record_id")), str(value.get("content_sha256"))) for value in decisions.values()
                    if isinstance(value, dict) and value.get("decision") in {"approved", "rejected"}}
         records = []
+        malformed_records = 0
         candidate_count = 0
         for entry in values[:1000]:
-            if not isinstance(entry, dict) or not isinstance(entry.get("record"), dict): continue
+            if not isinstance(entry, dict) or not isinstance(entry.get("record"), dict):
+                malformed_records += 1; continue
             record = entry["record"]
             metadata = record.get("metadata") if isinstance(record.get("metadata"), dict) else {}
             privacy = metadata.get("privacy") if isinstance(metadata.get("privacy"), dict) else {}
@@ -619,7 +623,8 @@ class LocalReviewService:
             record_id=str(record.get("record_id") or "");content_hash=str(record.get("content_hash") or "")
             content = str(record.get("content") or "");summary=str(record.get("summary") or "")
             if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{15,99}",record_id)
-                    or not re.fullmatch(r"sha256:[0-9a-f]{64}",content_hash) or not content.strip()): continue
+                    or not re.fullmatch(r"sha256:[0-9a-f]{64}",content_hash) or not content.strip()):
+                malformed_records += 1; continue
             decision = decisions.get(f"{record_id}:{content_hash}")
             if isinstance(decision, dict) and decision.get("decision") == "rejected": continue
             candidate_count += 1
@@ -637,14 +642,22 @@ class LocalReviewService:
                 "source": safe(record.get("source") or "Unknown",200),
                 "category": str(record.get("category") or "unknown")[:80], "status": status}
             try: records.append(ReviewRecordResponse.model_validate(projected).model_dump())
-            except PydanticValidationError: continue
+            except PydanticValidationError: malformed_records += 1; continue
         if candidate_count and not records:
             raise ValueError("invalid_response")
-        return {"run_id": run_id, "records": sorted(records, key=lambda value: value["record_id"])[:100]}
+        records.sort(key=lambda value: (str(value.get("collected_at") or value.get("published") or ""),
+                                        value["record_id"]), reverse=True)
+        return {"run_id": run_id, "records": records[offset:offset + limit], "total": len(records),
+                "limit": limit, "offset": offset, "malformed_records": malformed_records}
 
     def lifecycle(self) -> dict[str, Any]:
-        latest = self.latest()
-        pending = {(item["record_id"], item["content_sha256"]): item for item in (latest or {}).get("records", [])}
+        pending: dict[tuple[str, str], dict[str, Any]] = {}
+        page = self.latest(limit=50)
+        while page:
+            pending.update({(item["record_id"], item["content_sha256"]): item for item in page["records"]})
+            next_offset = page["offset"] + len(page["records"])
+            if next_offset >= page["total"]: break
+            page = self.latest(limit=50, offset=next_offset)
         state = self.exporter.state_manager.load()
         decisions = state.get("review_decisions") if isinstance(state.get("review_decisions"), dict) else {}
         items: list[dict[str, Any]] = []

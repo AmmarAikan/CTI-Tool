@@ -950,9 +950,18 @@ def external_control_review_lifecycle(db: SessionDep, _: CurrentUser) -> dict[st
 
 
 @router.get("/integrations/external-control/reviews/latest", tags=["external-control"])
-def external_control_latest_reviews(db: SessionDep, _: CurrentUser) -> dict[str, Any]:
-    bundle = external_control_call(lambda client: (client.latest_reviews(), client.review_lifecycle()))
-    reviews, lifecycle = bundle
+def external_control_latest_reviews(db: SessionDep, _: CurrentUser,
+                                    limit: int = Query(20, ge=1, le=50),
+                                    offset: int = Query(0, ge=0)) -> dict[str, Any]:
+    def load_unresolved(client):
+        pages, page_offset, malformed, run_id = [], 0, 0, ""
+        while page_offset < 1000:
+            page = client.latest_reviews(limit=50, offset=page_offset)
+            run_id = page["run_id"]; pages.extend(page["records"]); malformed += page["malformed_records"]
+            page_offset += len(page["records"])
+            if page_offset >= page["total"] or not page["records"]: break
+        return {"run_id": run_id, "records": pages, "malformed_records": malformed}, client.review_lifecycle()
+    reviews, lifecycle = external_control_call(load_unresolved)
     states = {(item["record_id"], item["content_sha256"]): item
               for item in _project_review_lifecycle(db, lifecycle)["items"]}
     records = []
@@ -963,7 +972,8 @@ def external_control_latest_reviews(db: SessionDep, _: CurrentUser) -> dict[str,
         if state and state["state"] in {"approved_processing", "processing_failed"}:
             projected["status"] = state["state"]
         records.append(projected)
-    return {"run_id": reviews["run_id"], "records": records}
+    return {"run_id": reviews["run_id"], "records": records[offset:offset + limit], "total": len(records),
+            "limit": limit, "offset": offset, "malformed_records": reviews["malformed_records"]}
 
 
 @router.post("/integrations/external-control/reviews/{record_id}/decision", tags=["external-control"])
@@ -992,7 +1002,10 @@ def external_control_review_decision(record_id: str, payload: ExternalReviewDeci
                       export_run_id=export_run_id, processing_state="processing_failed", retryable=True)
                 db.commit()
                 raise HTTPException(status_code=502, detail={"code": "review_import_failed",
-                    "message": "Review approval was saved but Central import must be retried", "retryable": True}) from None
+                    "message": "Review approval was saved but Central import must be retried", "retryable": True,
+                    "stage": "central_import", "record_id": record_id,
+                    "content_sha256": payload.expected_content_sha256,
+                    "export_run_id": export_run_id}) from None
     audit(db, user, "decide_external_review", "external_review", record_id,
           decision=payload.decision, reason=payload.reason, content_sha256=payload.expected_content_sha256,
           export_run_id=result.get("export_run_id"),
