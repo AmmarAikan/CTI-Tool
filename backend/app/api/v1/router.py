@@ -957,7 +957,7 @@ def external_control_latest_reviews(db: SessionDep, _: CurrentUser,
         pages, page_offset, malformed, run_id = [], 0, 0, ""
         while page_offset < 1000:
             page = client.latest_reviews(limit=50, offset=page_offset)
-            run_id = page["run_id"]; pages.extend(page["records"]); malformed += page["malformed_records"]
+            run_id = page["run_id"]; pages.extend(page["records"]); malformed = max(malformed, page["malformed_records"])
             page_offset += len(page["records"])
             if page_offset >= page["total"] or not page["records"]: break
         return {"run_id": run_id, "records": pages, "malformed_records": malformed}, client.review_lifecycle()

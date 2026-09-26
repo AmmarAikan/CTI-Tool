@@ -377,6 +377,25 @@ class BackendAPITests(unittest.TestCase):
         rejected_client.decide_review.assert_called_once_with("record-1234567890", digest, "rejected", "duplicate")
         sync.assert_not_called()
 
+    def test_review_pagination_reports_the_snapshot_malformed_count_once(self) -> None:
+        external = unittest.mock.Mock()
+        records = [{"record_id": f"record-{index:04d}", "content_sha256": "sha256:" + f"{index:064x}"}
+                   for index in range(51)]
+        external.latest_reviews.side_effect = lambda limit, offset: {
+            "run_id": "ext-run-pagination", "records": records[offset:offset + limit],
+            "total": len(records), "limit": limit, "offset": offset, "malformed_records": 3,
+        }
+        external.review_lifecycle.return_value = {"schema_version": "1.0", "items": []}
+        with patch("backend.app.api.v1.router.external_control_client", return_value=external):
+            response = self.client.get(
+                "/api/v1/integrations/external-control/reviews/latest?limit=20&offset=0",
+                headers=self.headers,
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["malformed_records"], 3)
+        self.assertEqual(response.json()["total"], 51)
+        self.assertEqual([call.kwargs["offset"] for call in external.latest_reviews.call_args_list], [0, 50])
+
     def test_correlation_projection_explains_safe_cross_source_evidence(self) -> None:
         with SessionLocal() as db:
             external_source = Source(
