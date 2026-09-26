@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import tempfile
 import unittest
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -36,6 +39,11 @@ from backend.app.pipeline.scoring.risk_scorer import RiskScorer
 from backend.app.repositories.cti_repository import normalize_time_bounds
 from backend.app.services.model_evidence_service import ModelEvidenceService
 from backend.app.services.pipeline_service import PipelineService
+from backend.app.pipeline.ingestion.external.common.hashing import sha256_text
+from backend.app.pipeline.ingestion.external.common.models import ExternalCTIItem, ExternalClassification
+from backend.app.pipeline.ingestion.external.common.run_manifest import RunManifest
+from backend.app.pipeline.ingestion.external.common.state_manager import JsonStateManager
+from backend.app.pipeline.ingestion.external.export.final_dataset import ExternalDatasetExporter, RunSourceOutput
 
 
 class FakeResponse:
@@ -90,6 +98,55 @@ def temporary_database_engine():
 
 
 class BackendEnhancementTests(unittest.TestCase):
+    def test_review_retry_imports_exact_export_once_and_reconciles_lifecycle(self) -> None:
+        from backend.app.api.v1.router import _project_review_lifecycle
+        with patch.dict(os.environ, {"EXTERNAL_API_TOKEN": "synthetic-review-import-token"}):
+            from backend.app.pipeline.ingestion.external.integration.local import LocalReviewService, LocalValidatedExportReader
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); state = JsonStateManager(root / "state" / "exports.json")
+            exporter = ExternalDatasetExporter(exports_dir=root / "exports", review_dir=root / "reviews", state_manager=state)
+            content = "CVE-2026-12345 communicates with 198.51.100.42 and malicious.example."
+            record = ExternalCTIItem(record_id="manual-json-" + "a" * 32, source_item_id="json-item-1",
+                source="Manual JSON", source_type="manual_url", category="manual", title="JSON threat report",
+                link="https://example.test/report.json", content=content, summary=content,
+                collected_at="2026-09-26T10:00:00Z", content_hash=sha256_text(content),
+                classification=ExternalClassification(status="error"))
+            source_manifest = RunManifest(); exporter.export(source_manifest, (RunSourceOutput(
+                source_manifest.run_id, "manual-json", "completed", review=(record,)),))
+            reader = LocalValidatedExportReader(root / "exports")
+            reviews = LocalReviewService(root / "reviews", reader, exporter)
+            pending = reviews.latest()["records"][0]
+            first = reviews.decide(pending["record_id"], pending["content_sha256"], "approved", None, requested_by="analyst")
+            retry = reviews.decide(pending["record_id"], pending["content_sha256"], "approved", None, requested_by="analyst")
+            exact_page = reader.run_accepted(first["export_run_id"], limit=250, offset=0)
+
+            class ExactClient:
+                calls = 0
+                def accepted_export_page(self, *, limit, offset, run_id=None):
+                    self.calls += 1
+                    return reader.run_accepted(run_id, limit=limit, offset=offset)
+
+            client = ExactClient(); engine = temporary_database_engine()
+            fake_ner = SimpleNamespace(backend="fake", extract_entities=lambda _text: [])
+            with Session(engine) as session, patch("backend.app.pipeline.orchestrator.get_runtime_ner_extractor", return_value=fake_ner):
+                service = PipelineService(session)
+                imported = service.sync_external_run(client, first["export_run_id"])
+                repeated = service.sync_external_run(client, first["export_run_id"])
+                projected = _project_review_lifecycle(session, reviews.lifecycle())
+                counts = (session.scalar(select(func.count()).select_from(PipelineRun)),
+                          session.scalar(select(func.count()).select_from(ThreatEvent)),
+                          session.scalar(select(func.count()).select_from(IndicatorRecord)))
+                event = session.scalar(select(ThreatEvent))
+            self.assertEqual(first, retry)
+            self.assertEqual(len(state.load()["review_decisions"]), 1)
+            self.assertEqual(len(list((root / "exports").glob(f"external_export_manifest_{first['export_run_id']}.json"))), 1)
+            self.assertEqual(exact_page["dataset_sha256"], reviews.lifecycle()["items"][0]["dataset_sha256"])
+            self.assertEqual((imported["run_id"], repeated["run_id"]), (imported["run_id"], imported["run_id"]))
+            self.assertEqual(counts[:2], (1, 1)); self.assertGreaterEqual(counts[2], 2)
+            self.assertEqual(event.source_record_id, record.record_id)
+            lifecycle = next(item for item in projected["items"] if item["record_id"] == record.record_id)
+            self.assertEqual((lifecycle["state"], lifecycle["stage"], lifecycle["retryable"]), ("processed", "processed", False))
+
     def test_lightweight_security_sensor_maps_auth_and_web_streams(self) -> None:
         secret = "sensor-response-secret"
         auth_payload = {
@@ -514,6 +571,10 @@ class BackendEnhancementTests(unittest.TestCase):
                      "export_run_id":"ext-review-run-1234567890","processing_state":"completed","retryable":False}
         client, db, user = Mock(), Mock(), SimpleNamespace(id="user-1", username="analyst")
         client.decide_review.return_value = confirmed
+        client.review_lifecycle.return_value = {"schema_version":"1.0","items":[{
+            "record_id":"record-1234567890","content_sha256":digest,
+            "export_run_id":"ext-review-run-1234567890","dataset_sha256":"d"*64}]}
+        client.accepted_export_page.return_value = {"dataset_sha256":"d"*64}
         payload = ExternalReviewDecisionRequest(expected_content_sha256=digest, decision="approved", reason=None)
         with patch("backend.app.api.v1.router.external_control_client", return_value=client), \
              patch("backend.app.api.v1.router.PipelineService.sync_external_run",
@@ -525,6 +586,9 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual((failed.exception.status_code, failed.exception.detail["code"], failed.exception.detail["retryable"]),
                          (502, "review_import_failed", True))
         self.assertEqual((retried, client.decide_review.call_count, sync.call_count), (confirmed, 2, 2))
+        self.assertEqual(client.review_lifecycle.call_count, 2)
+        self.assertEqual(client.accepted_export_page.call_args_list[0].kwargs,
+                         {"limit": 1, "offset": 0, "run_id": "ext-review-run-1234567890"})
         self.assertEqual([call.kwargs["processing_state"] for call in audit.call_args_list],
                          ["processing_failed", "completed"])
 

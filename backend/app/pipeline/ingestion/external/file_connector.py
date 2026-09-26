@@ -48,7 +48,8 @@ class ExternalJsonFileConnector(ExternalConnector):
         content = str(item.get("content") or item.get("summary") or title)
         link = item.get("link") or item.get("url")
         external_id = str(
-            item.get("external_id")
+            item.get("record_id")
+            or item.get("external_id")
             or item.get("id")
             or metadata.get("cve_id")
             or link

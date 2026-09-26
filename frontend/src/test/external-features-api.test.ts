@@ -10,7 +10,7 @@ describe('external feature contracts', () => {
   it('uses exact same-origin paths and accepts safe responses', async () => {
     const bodies: Record<string, unknown> = {
       '/api/v1/integrations/external-control/exports/latest': { run_id: 'run-123', status: 'completed', dataset_sha256: 'a'.repeat(64), accepted_records: 2, review_records: 1, completed_at: '2026-09-07T00:00:00Z' },
-      '/api/v1/integrations/external-control/reviews/latest': { run_id: 'run-123', records: [] },
+      '/api/v1/integrations/external-control/reviews/latest': { run_id: 'run-123', records: [], total: 0, limit: 20, offset: 0, malformed_records: 0 },
       '/api/v1/integrations/external-control/jobs?limit=50': { schema_version: '1.0', persistence: 'process_memory', jobs: [] },
     };
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => response(bodies[String(input)]));

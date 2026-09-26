@@ -29,6 +29,20 @@ class RecordingExporter:
 
 
 class ReviewDecisionPersistenceTests(unittest.TestCase):
+    def test_unresolved_reviews_are_newest_first_and_stably_paginated(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder); state = JsonStateManager(root / "state" / "exports.json")
+            exporter = ExternalDatasetExporter(exports_dir=root / "exports", review_dir=root / "review", state_manager=state)
+            records = tuple(export_item(f"paged-{index:03d}", classification="error") for index in range(55))
+            manifest = RunManifest(); exporter.export(manifest, (RunSourceOutput(manifest.run_id, "fixture", "completed", review=records),))
+            service = LocalReviewService(root / "review", LocalValidatedExportReader(root / "exports"), exporter)
+            first, second = service.latest(), service.latest(offset=20)
+            first_ids = [item["record_id"] for item in first["records"]]
+            second_ids = [item["record_id"] for item in second["records"]]
+            self.assertEqual((first["total"], first["limit"], first["offset"], len(first_ids)), (55, 20, 0, 20))
+            self.assertFalse(set(first_ids) & set(second_ids))
+            self.assertEqual(first_ids + second_ids, sorted(first_ids + second_ids, reverse=True))
+
     def _fixture(self, root: Path, identity: str = "review-decision"):
         state = JsonStateManager(root / "state" / "exports.json")
         exporter = ExternalDatasetExporter(exports_dir=root / "exports", review_dir=root / "review", state_manager=state)
