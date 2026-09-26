@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import json
 import unittest
+from unittest.mock import patch
+
+import requests
+from fastapi import HTTPException
 
 from backend.app.integrations.external_control_client import (
     ExternalControlClient,
     ExternalControlRemoteError,
+    ExternalControlResponseTooLargeError,
+    ExternalControlTimeoutError,
     ExternalControlTransportError,
+    ExternalControlUnavailableError,
 )
+from backend.app.pipeline.ingestion.external.integration.diagnostics import EXTERNAL_COLLECTION_METHODS
 
 
 class FakeResponse:
@@ -25,6 +33,14 @@ class FakeSession:
     def request(self, method: str, url: str, **kwargs):
         self.calls.append((method, url, kwargs))
         return self.responses.pop(0)
+
+
+class RaisingSession:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def request(self, *_args, **_kwargs):
+        raise self.error
 
 
 class ExternalControlClientTests(unittest.TestCase):
@@ -325,6 +341,85 @@ class ExternalControlClientTests(unittest.TestCase):
         payload["result"]["sources"]["cisa-advisories"]["failure_categories"] = {"unsafe-url": 1}
         with self.assertRaises(ExternalControlTransportError):
             self.client([FakeResponse(payload)]).get_job("job-1234567890")
+
+    def test_terminal_rss_diagnostics_match_the_canonical_external_contract(self) -> None:
+        base = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+            "state": "completed", "created_at": "2026-09-25T00:00:00Z", "updated_at": "2026-09-25T00:00:01Z",
+            "progress": {}, "error": None}
+        for method in sorted(EXTERNAL_COLLECTION_METHODS):
+            payload = {**base, "result": {"status": "completed", "sources": {"safe-source": {
+                "status": "completed", "collection_method": method}}}}
+            with self.subTest(method=method):
+                projected = self.client([FakeResponse(payload)]).get_job("job-1234567890")
+                self.assertEqual(projected["result"]["sources"]["safe-source"]["collection_method"], method)
+
+        failed = {**base, "state": "failed", "result": {"status": "failed", "sources": {"bleepingcomputer": {
+            "status": "failed", "error_count": 1, "collection_method": "rss",
+            "failure_categories": {"internal_failure": 1}, "collection_stage": "source_execution",
+            "exception_class": "RuntimeError", "retryable": False}}}}
+        source = self.client([FakeResponse(failed)]).get_job("job-1234567890")["result"]["sources"]["bleepingcomputer"]
+        self.assertEqual((source["collection_stage"], source["exception_class"], source["retryable"]),
+                         ("source_execution", "RuntimeError", False))
+
+    def test_terminal_diagnostics_reject_unknown_unsafe_oversized_and_wrong_types(self) -> None:
+        base_source = {"status": "failed", "error_count": 1, "collection_method": "rss",
+                       "failure_categories": {"internal_failure": 1}, "collection_stage": "source_execution",
+                       "exception_class": "RuntimeError", "retryable": False}
+        changes = [
+            {"collection_method": "arbitrary"}, {"collection_stage": "unsafe-stage"},
+            {"collection_stage": "a" * 65}, {"exception_class": "Unsafe.Name"},
+            {"exception_class": "A" * 101}, {"retryable": 1}, {"raw_message": "not allowed"},
+            {"failure_categories": {f"category_{index}": 1 for index in range(21)}},
+            {"failure_categories": {"internal_failure": 10001}},
+        ]
+        for change in changes:
+            payload = {"schema_version": "1.0", "job_id": "job-1234567890", "command_id": "cmd-1234567890",
+                "state": "failed", "created_at": "2026-09-25T00:00:00Z", "updated_at": "2026-09-25T00:00:01Z",
+                "progress": {}, "result": {"status": "failed", "sources": {"safe-source": {**base_source, **change}}},
+                "error": None}
+            with self.subTest(change=change), self.assertRaises(ExternalControlTransportError):
+                self.client([FakeResponse(payload)]).get_job("job-1234567890")
+
+    def test_transport_failures_have_distinct_safe_http_mappings(self) -> None:
+        from backend.app.api.v1.router import external_control_call
+
+        cases = [
+            (ExternalControlTimeoutError("private"), 504, "external_control_timeout", True),
+            (ExternalControlUnavailableError("private"), 503, "external_control_unavailable", True),
+            (ExternalControlTransportError("private"), 502, "external_response_invalid", False),
+            (ExternalControlResponseTooLargeError("private"), 502, "external_response_too_large", False),
+        ]
+        for error, status, code, retryable in cases:
+            with self.subTest(code=code), patch("backend.app.api.v1.router.external_control_client", return_value=object()):
+                with self.assertRaises(HTTPException) as raised:
+                    external_control_call(lambda _client: (_ for _ in ()).throw(error))
+                self.assertEqual((raised.exception.status_code, raised.exception.detail["code"],
+                                  raised.exception.detail["retryable"]), (status, code, retryable))
+                self.assertNotIn("private", str(raised.exception.detail))
+
+        for remote_status, expected in ((401, 401), (403, 403), (404, 404), (503, 502)):
+            error = ExternalControlRemoteError(remote_status, "safe_remote_error", "private", remote_status >= 500)
+            with self.subTest(remote_status=remote_status), patch("backend.app.api.v1.router.external_control_client", return_value=object()):
+                with self.assertRaises(HTTPException) as raised:
+                    external_control_call(lambda _client: (_ for _ in ()).throw(error))
+                self.assertEqual(raised.exception.status_code, expected)
+                self.assertNotIn("private", str(raised.exception.detail))
+
+        with patch("backend.app.api.v1.router.external_control_client", return_value=object()):
+            with self.assertRaises(HTTPException) as raised:
+                external_control_call(lambda _client: (_ for _ in ()).throw(ValueError("private")),
+                                      value_error_status=409)
+            self.assertEqual((raised.exception.status_code, raised.exception.detail["code"]),
+                             (409, "external_job_not_ready"))
+            self.assertNotIn("private", str(raised.exception.detail))
+
+    def test_requests_timeout_and_unavailable_are_classified_before_contract_parsing(self) -> None:
+        for error, expected in ((requests.Timeout(), ExternalControlTimeoutError),
+                                (requests.ConnectionError(), ExternalControlUnavailableError)):
+            client = ExternalControlClient("http://127.0.0.1:18090/api/v1/external-sources", self.token,
+                allow_http=True, session=RaisingSession(error))
+            with self.subTest(expected=expected.__name__), self.assertRaises(expected):
+                client.get_job("job-1234567890")
 
     def test_manual_preview_proxy_contract_and_decision_idempotency(self) -> None:
         preview = {"schema_version": "1.0", "preview_id": "prv-12345678901234567890", "state": "pending",

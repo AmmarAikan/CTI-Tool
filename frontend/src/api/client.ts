@@ -335,7 +335,7 @@ export interface DarkWebProviderStatus { provider_id:string; enabled:boolean; re
 export interface DarkWebDiscoveredSource { source_id:string; watch_id:string; onion_reference:string; enabled:boolean; created_at:string; updated_at:string; }
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) {
+  constructor(public status: number, public code: string, message: string, public retryable = false) {
     super(message);
     this.name = 'ApiError';
   }
@@ -379,7 +379,7 @@ async function request<T>(path: string, options: RequestInit = {}, timeoutMs = D
   let response: Response;
   try { response = await fetch(`${API_BASE_URL}${path}`, { ...options, headers, signal: controller.signal }); }
   catch (error) {
-    if (error instanceof DOMException && error.name === 'AbortError') throw new ApiError(408, 'timeout', 'Request timed out');
+    if (error instanceof DOMException && error.name === 'AbortError') throw new ApiError(408, 'timeout', 'Request timed out', true);
     throw error;
   } finally { window.clearTimeout(timer); externalSignal?.removeEventListener('abort', abortFromCaller); }
   if (response.status === 401 && allowSessionRecovery && path !== '/auth/me' && token) {
@@ -395,12 +395,20 @@ async function request<T>(path: string, options: RequestInit = {}, timeoutMs = D
     window.dispatchEvent(new Event('cti:unauthorized'));
   }
   if (!response.ok) {
-    let body: { detail?: unknown; code?: string; message?: string } = {};
+    let body: { detail?: unknown; code?: unknown; message?: unknown; retryable?: unknown } = {};
     try { body = await response.json(); } catch { /* keep safe fallback */ }
-    const detail = typeof body.detail === 'object' && body.detail !== null ? body.detail as { code?: string; message?: string } : undefined;
-    const code = detail?.code || body.code || 'request_failed';
-    const message = detail?.message || body.message || (typeof body.detail === 'string' ? body.detail : 'Request failed');
-    throw new ApiError(response.status, sanitizeError(code), sanitizeError(message));
+    const detail = isPlainObject(body.detail) ? body.detail : undefined;
+    if (detail && (Object.keys(detail).some((key) => !['code', 'message', 'retryable'].includes(key))
+      || typeof detail.code !== 'string' || !/^[a-z][a-z0-9_]{0,99}$/.test(detail.code)
+      || typeof detail.message !== 'string' || !detail.message || detail.message.length > 300
+      || (detail.retryable !== undefined && typeof detail.retryable !== 'boolean'))) throw new ApiError(response.status, 'invalid_error_response', 'Invalid error response');
+    const bodyCode = typeof body.code === 'string' && /^[a-z][a-z0-9_]{0,99}$/.test(body.code) ? body.code : undefined;
+    const bodyMessage = typeof body.message === 'string' && body.message.length <= 300 ? body.message : undefined;
+    const code = detail?.code as string | undefined || bodyCode || 'request_failed';
+    const message = detail?.message as string | undefined || bodyMessage || (typeof body.detail === 'string' ? body.detail : 'Request failed');
+    const retryable = typeof detail?.retryable === 'boolean' ? detail.retryable
+      : typeof body.retryable === 'boolean' ? body.retryable : [408, 503, 504].includes(response.status);
+    throw new ApiError(response.status, sanitizeError(code), sanitizeError(message), retryable);
   }
   return response.json() as Promise<T>;
 }

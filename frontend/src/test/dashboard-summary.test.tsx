@@ -50,7 +50,10 @@ describe('dashboard summary', () => {
     renderWithProviders(<Dashboard />);
     await waitFor(() => expect(screen.getByText('متاحة')).toBeInTheDocument());
     expect(screen.getByText('أحداث التهديدات')).toBeInTheDocument();
-    for (const value of ['12', '34', '5', '8', '2']) expect(screen.getByText(value)).toBeInTheDocument();
+    for (const value of ['12', '5', '8', '2']) expect(screen.getByText(value)).toBeInTheDocument();
+    expect(screen.getAllByText('34')).toHaveLength(2);
+    expect(screen.getByText('كل القيم المرصودة')).toBeInTheDocument();
+    expect(screen.getByText('المؤشرات المُقيّمة')).toBeInTheDocument();
     expect(screen.queryByText('تشغيلات المعالجة')).not.toBeInTheDocument();
     expect(await screen.findByText('External source event')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /External source event/ })).toHaveAttribute('href', '/intelligence/events/event-1');
