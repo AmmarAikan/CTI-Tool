@@ -345,6 +345,16 @@ class BackendAPITests(unittest.TestCase):
             "decision": "approved", "reason": None, "decided_at": "2026-09-20T00:00:00Z",
             "export_run_id": "ext-run-1234567890", "processing_state": "completed", "retryable": False,
         }
+        approved_client.review_lifecycle.return_value = {"schema_version": "1.0", "items": [{
+            "record_id": "record-1234567890", "content_sha256": digest, "state": "approved_processing",
+            "decision": "approved", "reason": None, "decided_at": "2026-09-20T00:00:00Z",
+            "export_run_id": "ext-run-1234567890", "dataset_sha256": "a" * 64,
+            "central_run_id": None, "processing_error": None,
+        }]}
+        approved_client.accepted_export_page.return_value = {
+            "items": [], "total": 0, "limit": 1, "offset": 0,
+            "run_id": "ext-run-1234567890", "dataset_sha256": "a" * 64,
+        }
         with patch("backend.app.api.v1.router.external_control_client", return_value=approved_client), \
              patch("backend.app.api.v1.router.PipelineService.sync_external_run", return_value={"run_id": "central-run"}) as sync:
             approved = self.client.post("/api/v1/integrations/external-control/reviews/record-1234567890/decision",
