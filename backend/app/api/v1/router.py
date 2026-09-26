@@ -158,7 +158,8 @@ def require_roles(*roles: str):
 def external_control_client() -> ExternalControlClient:
     settings = get_settings()
     if not settings.external_control_configured:
-        raise HTTPException(status_code=503, detail="External Sources control API is not configured")
+        raise HTTPException(status_code=503, detail={"code": "external_control_not_configured", "retryable": False,
+                                                     "message": "External Sources control is not configured"})
     try:
         return ExternalControlClient(
             str(settings.external_control_api_url),
@@ -170,21 +171,30 @@ def external_control_client() -> ExternalControlClient:
             max_response_bytes=settings.external_control_max_bytes,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=503, detail="External Sources control configuration is invalid") from exc
+        raise HTTPException(status_code=503, detail={"code": "external_control_configuration_invalid", "retryable": False,
+                                                     "message": "External Sources control configuration is invalid"}) from exc
 
 
-def external_control_call(callback):
+def external_control_call(callback, *, value_error_status: int = 422):
     try:
         return callback(external_control_client())
     except ExternalControlRemoteError as exc:
         status_code = exc.status_code if 400 <= exc.status_code < 500 else 502
         raise HTTPException(
             status_code=status_code,
-            detail={"code": exc.code, "message": exc.message},
+            detail={"code": exc.code, "retryable": exc.retryable, "message": "External Sources request failed safely"},
         ) from exc
     except ExternalControlError as exc:
-        raise HTTPException(status_code=503, detail="External Sources control API is unreachable") from exc
+        raise HTTPException(status_code=getattr(exc, "status_code", 502), detail={
+            "code": getattr(exc, "code", "external_response_invalid"),
+            "retryable": bool(getattr(exc, "retryable", False)),
+            "message": "External Sources response was invalid" if getattr(exc, "status_code", 502) == 502
+            else "External Sources control is temporarily unavailable",
+        }) from exc
     except ValueError as exc:
+        if value_error_status == 409:
+            raise HTTPException(status_code=409, detail={"code": "external_job_not_ready", "retryable": False,
+                                                         "message": "External job is not ready for import"}) from exc
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
@@ -1083,7 +1093,9 @@ def import_external_job(payload: ExternalJobImportRequest, db: SessionDep,
                         user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
     try:
         result = external_control_call(
-            lambda client: PipelineService(db).orchestrate_external_job(client, payload.job_id))
+            lambda client: PipelineService(db).orchestrate_external_job(client, payload.job_id),
+            value_error_status=409,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail="External job is not ready for import") from exc
     except RuntimeError as exc:

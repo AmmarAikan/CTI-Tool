@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from backend.app.db.database import Base
-from backend.app.db.models import OutlierSessionRecord, RawItem, Source, ThreatEvent
+from backend.app.db.models import IndicatorRecord, OutlierSessionRecord, PipelineRun, RawItem, Source, ThreatEvent
 from backend.app.integrations.misp_client import MISPClient
 from backend.app.integrations.stix_exporter import STIXExporter
 from backend.app.pipeline.extraction.ner_extractor import NERExtractor
@@ -420,6 +420,47 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertEqual((page["total"], page["items"][0]["source"]), (1, "Reviewed External"))
         self.assertEqual((lifecycle["items"][0]["state"], lifecycle["items"][0]["central_run_id"]),
                          ("processed", first["run_id"]))
+
+    def test_exact_terminal_job_import_creates_one_run_and_executes_processing(self) -> None:
+        job_id, export_run_id, digest = "job-rss-1234567890", "ext-rss-run-1234567890", "c" * 64
+        content = "Malware campaign references CVE-2026-12345 and 198.51.100.42."
+        item = {"schema_version":"1.0","record_id":"ext-rss-1234567890abcdef","source_item_id":"rss-source-1",
+            "source":"RSS External","source_type":"rss","category":"advisory","title":"RSS advisory",
+            "link":"https://example.test/rss","content":content,"summary":"Approved summary","published":"2026-09-25T00:00:00Z",
+            "updated_at":None,"author":None,"tags":[],"language":"en","collected_at":"2026-09-25T00:01:00Z",
+            "content_hash":"sha256:"+hashlib.sha256(content.encode()).hexdigest(),
+            "classification":{"status":"accepted","label":"cti_related","score":0.9,"model_version":"test"},
+            "metadata":{"export_run_id":export_run_id}}
+
+        class Client:
+            def get_job(self, requested_job_id):
+                self.requested_job_id = requested_job_id
+                return {"state":"completed","result":{"sources":{"bleepingcomputer":{"status":"completed",
+                    "collection_method":"rss"}},"export":{"run_id":export_run_id,"dataset_sha256":digest}}}
+
+            def accepted_export_page(self, *, limit, offset, run_id=None):
+                self.requested_run_id = run_id
+                return {"schema_version":"1.0","export_run_id":export_run_id,"dataset_sha256":digest,
+                        "items":[] if offset else [item],"total":1,"limit":limit,"offset":offset}
+
+        engine = temporary_database_engine(); client = Client()
+        fake_ner = SimpleNamespace(backend="fake", extract_entities=lambda _text: [])
+        with Session(engine) as session, patch("backend.app.pipeline.orchestrator.get_runtime_ner_extractor", return_value=fake_ner):
+            service = PipelineService(session)
+            first = service.orchestrate_external_job(client, job_id)
+            repeated = service.orchestrate_external_job(client, job_id)
+            runs = session.scalars(select(PipelineRun).where(PipelineRun.pipeline == "external")).all()
+            event_count = session.scalar(select(func.count()).select_from(ThreatEvent))
+            indicator_count = session.scalar(select(func.count()).select_from(IndicatorRecord))
+
+        self.assertEqual((client.requested_job_id, client.requested_run_id), (job_id, export_run_id))
+        self.assertEqual((len(runs), first["run_id"], repeated["run_id"]), (1, first["run_id"], first["run_id"]))
+        self.assertEqual(runs[0].details["external_job_id"], job_id)
+        self.assertEqual(runs[0].details["export_run_id"], export_run_id)
+        self.assertEqual(runs[0].details["dataset_sha256"], digest)
+        self.assertEqual(event_count, 1)
+        self.assertGreaterEqual(indicator_count, 1)
+        self.assertIn("correlation_count", runs[0].details)
 
     def test_review_lifecycle_projection_is_bounded_and_empty_is_normal(self) -> None:
         from sqlalchemy import event as sqlalchemy_event

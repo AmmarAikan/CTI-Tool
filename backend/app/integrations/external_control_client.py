@@ -12,13 +12,39 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from backend.app.pipeline.ingestion.external.integration.diagnostics import (
+    COLLECTION_STAGE_PATTERN,
+    DIAGNOSTIC_IDENTIFIER_PATTERN,
+    EXTERNAL_COLLECTION_METHODS,
+)
+
 
 class ExternalControlError(RuntimeError):
     """Base error for the private VPS External Sources control API."""
 
 
 class ExternalControlTransportError(ExternalControlError):
-    """Raised when the private control API is unreachable or violates its contract."""
+    """A safe, classified failure at the private control API boundary."""
+
+    code = "external_response_invalid"
+    status_code = 502
+    retryable = False
+
+
+class ExternalControlTimeoutError(ExternalControlTransportError):
+    code = "external_control_timeout"
+    status_code = 504
+    retryable = True
+
+
+class ExternalControlUnavailableError(ExternalControlTransportError):
+    code = "external_control_unavailable"
+    status_code = 503
+    retryable = True
+
+
+class ExternalControlResponseTooLargeError(ExternalControlTransportError):
+    code = "external_response_too_large"
 
 
 @dataclass(slots=True)
@@ -26,6 +52,7 @@ class ExternalControlRemoteError(ExternalControlError):
     status_code: int
     code: str
     message: str
+    retryable: bool = False
 
     def __str__(self) -> str:
         return f"{self.code} ({self.status_code})"
@@ -401,15 +428,23 @@ class ExternalControlClient:
                 timeout=timeout_seconds or self.timeout_seconds,
                 verify=self.verify_tls,
             )
+        except requests.Timeout as exc:
+            raise ExternalControlTimeoutError("External control API timed out") from exc
         except requests.RequestException as exc:
-            raise ExternalControlTransportError("External control API is unreachable") from exc
+            raise ExternalControlUnavailableError("External control API is unreachable") from exc
 
         body = self._bounded_body(response)
         value = self._parse_json(body)
         if response.status_code >= 400:
             code = str(value.get("code") or "external_control_error") if isinstance(value, dict) else "external_control_error"
             message = str(value.get("message") or "External control request failed") if isinstance(value, dict) else "External control request failed"
-            raise ExternalControlRemoteError(response.status_code, code[:100], message[:300])
+            retryable = value.get("retryable") if isinstance(value, dict) else None
+            raise ExternalControlRemoteError(
+                response.status_code,
+                code[:100],
+                message[:300],
+                retryable if type(retryable) is bool else response.status_code >= 500,
+            )
         return value
 
     def _bounded_body(self, response: requests.Response) -> bytes:
@@ -417,12 +452,12 @@ class ExternalControlClient:
         if length:
             try:
                 if int(length) > self.max_response_bytes:
-                    raise ExternalControlTransportError("External control response exceeds configured bytes")
+                    raise ExternalControlResponseTooLargeError("External control response exceeds configured bytes")
             except ValueError:
                 raise ExternalControlTransportError("External control Content-Length is invalid") from None
         body = response.content
         if len(body) > self.max_response_bytes:
-            raise ExternalControlTransportError("External control response exceeds configured bytes")
+            raise ExternalControlResponseTooLargeError("External control response exceeds configured bytes")
         content_type = response.headers.get("Content-Type", "").lower()
         if content_type and "json" not in content_type:
             raise ExternalControlTransportError("External control API must return JSON")
@@ -512,18 +547,31 @@ class ExternalControlClient:
         for source_id, summary in value.items():
             if not cls._safe_id(source_id, minimum=1) or not isinstance(summary, dict):
                 raise ExternalControlTransportError("External source result contract is invalid")
-            allowed = cls.COUNT_KEYS | {"status", "collection_method", "failure_categories"}
+            allowed = cls.COUNT_KEYS | {
+                "status", "collection_method", "failure_categories", "collection_stage", "exception_class", "retryable",
+            }
             if not set(summary) <= allowed or not cls._safe_text(summary.get("status"), 40):
                 raise ExternalControlTransportError("External source result contract is invalid")
             projected[source_id] = {"status": summary["status"], **cls._counts(
                 {key: summary[key] for key in cls.COUNT_KEYS if key in summary}, "External source result contract is invalid")}
             if "collection_method" in summary:
-                if summary["collection_method"] not in {"reddit_public_rss", "reddit_browser_fallback", "reddit_oauth",
-                                                         "official_csaf", "official_rss", "official_listing"}:
+                if summary["collection_method"] not in EXTERNAL_COLLECTION_METHODS:
                     raise ExternalControlTransportError("External source result contract is invalid")
                 projected[source_id]["collection_method"] = summary["collection_method"]
             if "failure_categories" in summary:
                 projected[source_id]["failure_categories"] = cls._failure_categories(summary["failure_categories"])
+            if "collection_stage" in summary:
+                if not isinstance(summary["collection_stage"], str) or not re.fullmatch(COLLECTION_STAGE_PATTERN, summary["collection_stage"]):
+                    raise ExternalControlTransportError("External source result contract is invalid")
+                projected[source_id]["collection_stage"] = summary["collection_stage"]
+            if "exception_class" in summary:
+                if not isinstance(summary["exception_class"], str) or not re.fullmatch(DIAGNOSTIC_IDENTIFIER_PATTERN, summary["exception_class"]):
+                    raise ExternalControlTransportError("External source result contract is invalid")
+                projected[source_id]["exception_class"] = summary["exception_class"]
+            if "retryable" in summary:
+                if type(summary["retryable"]) is not bool:
+                    raise ExternalControlTransportError("External source result contract is invalid")
+                projected[source_id]["retryable"] = summary["retryable"]
         return projected
 
     @staticmethod

@@ -1,6 +1,11 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 
 export const ar = {
+  externalResponseIncompatible:'أعادت خدمة المصادر الخارجية استجابة غير متوافقة.',
+  importProcessingFailed:'فشلت معالجة الاستيراد المركزي بأمان.',
+  importNotReady:'الوظيفة أو التصدير غير جاهز للاستيراد.',
+  assessedIndicators:'المؤشرات المُقيّمة',
+  indicatorCounterExplanation:'القيم المرصودة هي كل قيم IOC المستخرجة والمحفوظة. المؤشرات المُقيّمة لها نتيجة إثراء صريحة.',
   delete:'حذف',
   outlierEvidence:'عوامل التفسير',outlierAlertVolume:'حجم التنبيهات',outlierRuleSeverity:'أقصى شدة قاعدة',outlierRuleDiversity:'تنوع القواعد',outlierFailedActions:'الأفعال الفاشلة',outlierCredentialAttempts:'محاولات الاعتماد',
   demoMispDisabledTitle:'وضع عرض غير ناقل',demoMispDisabledDescription:'المعاينة والاختيار متاحان، لكن التسليم الحي معطل في بيئة الدفاع المعزولة.',
@@ -112,6 +117,11 @@ export const ar = {
 export type TranslationKey = keyof typeof ar;
 
 export const en: Record<TranslationKey, string> = {
+  externalResponseIncompatible:'External Sources returned an incompatible response.',
+  importProcessingFailed:'Central import processing failed safely.',
+  importNotReady:'The job or export is not ready for import.',
+  assessedIndicators:'Assessed indicators',
+  indicatorCounterExplanation:'Observables are all persisted extracted IOC values. Assessed indicators have an explicit enrichment verdict.',
   delete:'Delete',
   outlierEvidence:'Explanation factors',outlierAlertVolume:'Alert volume',outlierRuleSeverity:'Maximum rule severity',outlierRuleDiversity:'Rule diversity',outlierFailedActions:'Failed actions',outlierCredentialAttempts:'Credential attempts',
   demoMispDisabledTitle:'Non-delivery demo mode',demoMispDisabledDescription:'Preview and selection remain available, but live delivery is disabled in the isolated defense environment.',
