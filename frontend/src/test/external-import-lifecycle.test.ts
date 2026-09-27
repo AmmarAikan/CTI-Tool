@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, clearToken, type ExternalJob } from '../api/client';
-import { externalImportIdentity, refreshAfterExternalImport } from '../api/externalImportLifecycle';
+import { externalImportBlockReason, externalImportIdentity, isAbortError, refreshAfterExternalImport } from '../api/externalImportLifecycle';
 
 const methods = ['cert','configured_onion_get','dark_web','hackernews','official_csaf','official_listing','official_rss','reddit','reddit_browser_fallback','reddit_oauth','reddit_public_rss','rss','telegram','vulnerability'];
 const response=(body:unknown)=>Promise.resolve(new Response(JSON.stringify(body),{status:200,headers:{'Content-Type':'application/json'}}));
@@ -16,12 +16,23 @@ describe('shared exact External import lifecycle',()=>{
   });
 
   it('requires job, export run, and digest and awaits all active refresh targets',async()=>{
-    const job={job_id:'job-identity-123456',state:'completed',export:{run_id:'export-identity-123456',dataset_sha256:'b'.repeat(64)}} as ExternalJob;
+    const job={job_id:'job-identity-123456',state:'completed',export:{status:'completed',run_id:'export-identity-123456',dataset_sha256:'b'.repeat(64)}} as ExternalJob;
     expect(externalImportIdentity(job)).toBe(`job-identity-123456:export-identity-123456:${'b'.repeat(64)}`);
     expect(externalImportIdentity({...job,export:undefined})).toBeUndefined();
     const client=new QueryClient();const invalidate=vi.spyOn(client,'invalidateQueries').mockResolvedValue();
     await refreshAfterExternalImport(client,{run_id:'central-run-123',status:'completed',imported:1,updated:0,unchanged:0,failed:0,total:1});
     expect(invalidate).toHaveBeenCalledTimes(8);
     expect(invalidate.mock.calls.every(([filters])=>filters?.refetchType==='active')).toBe(true);
+  });
+
+  it('imports only a completed export with its exact identity, independently of collection counts',()=>{
+    const job={job_id:'job-607dbdb2a1a8b00e64c52f1c',state:'completed',counts:{accepted_records:0},export:{status:'completed',run_id:'ext-20260927T083110Z-d656e0bb4a3c',dataset_sha256:'c'.repeat(64),accepted_records:15,review_records:0}} as ExternalJob;
+    expect(externalImportIdentity(job)).toBe(`${job.job_id}:${job.export!.run_id}:${job.export!.dataset_sha256}`);
+    expect(externalImportBlockReason({...job,export:{...job.export!,status:'running'}})).toBe('export_incomplete');
+    expect(externalImportIdentity({...job,export:{...job.export!,status:'running'}})).toBeUndefined();
+    expect(externalImportBlockReason({...job,export:{...job.export!,run_id:''}})).toBe('export_identity_missing');
+    expect(externalImportBlockReason({...job,export:{...job.export!,dataset_sha256:undefined}})).toBe('export_identity_missing');
+    expect(isAbortError(new DOMException('cancelled','AbortError'))).toBe(true);
+    expect(isAbortError(new TypeError('network'))).toBe(false);
   });
 });
