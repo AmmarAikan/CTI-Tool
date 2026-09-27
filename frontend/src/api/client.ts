@@ -279,6 +279,7 @@ export interface ExternalJob {
   updated_at: string;
   counts: Partial<Record<'accepted_records' | 'review_records' | 'rejected_records' | 'skipped_records' | 'error_count' | 'discovered' | 'rejected' | 'unreachable' | 'verified' | 'matched' | 'new' | 'unchanged' | 'privacy_blocked' | 'errors', number>>;
   sources: Record<string, { status: string; counts: ExternalJob['counts']; collection_method?: string; failure_categories?: Record<string, number> }>;
+  export?: ExportSummary;
   error?: { code: string; message: string; retryable: boolean };
 }
 
@@ -924,7 +925,8 @@ function parseExternalJob(value: unknown): ExternalJob {
   }
   if (body.error && (Object.keys(body.error).some((key) => !['code', 'message', 'retryable', 'details'].includes(key)) || typeof body.error.code !== 'string' || typeof body.error.message !== 'string' || typeof body.error.retryable !== 'boolean' || !isPlainObject(body.error.details) || Object.keys(body.error.details).length > 0)) throw new ApiError(502, 'invalid_response', 'Invalid external job response');
   const error = body.error ? { code: body.error.code as string, message: sanitizeError(body.error.message as string), retryable: body.error.retryable as boolean } : undefined;
-  return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at as string, updated_at: body.updated_at as string, counts, sources, error };
+  const exportSummary = body.result && body.result.export !== undefined ? parseExportSummary(body.result.export) : undefined;
+  return { job_id: body.job_id, command_id: body.command_id, state: body.state as JobState, created_at: body.created_at as string, updated_at: body.updated_at as string, counts, sources, export: exportSummary, error };
 }
 
 function validCounts(value: unknown): value is Record<string, number> { return isPlainObject(value) && Object.keys(value).every((key) => JOB_COUNT_KEYS.includes(key as typeof JOB_COUNT_KEYS[number])) && Object.values(value).every((amount) => Number.isSafeInteger(amount) && (amount as number) >= 0); }
