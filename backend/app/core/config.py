@@ -53,6 +53,10 @@ class Settings:
     external_feed_max_bytes: int = int(os.getenv("EXTERNAL_FEED_MAX_BYTES", str(20 * 1024 * 1024)))
     external_feed_max_pages: int = int(os.getenv("EXTERNAL_FEED_MAX_PAGES", "20"))
     external_feed_page_size: int = int(os.getenv("EXTERNAL_FEED_PAGE_SIZE", "250"))
+    external_feed_publish_token: str | None = os.getenv("EXTERNAL_FEED_PUBLISH_TOKEN")
+    external_ingestion_worker_enabled: bool = _as_bool(os.getenv("EXTERNAL_INGESTION_WORKER_ENABLED"), True)
+    external_ingestion_poll_seconds: int = int(os.getenv("EXTERNAL_INGESTION_POLL_SECONDS", "5"))
+    external_ingestion_lease_seconds: int = int(os.getenv("EXTERNAL_INGESTION_LEASE_SECONDS", "3600"))
     external_feed_processing_batch_size: int = int(
         os.getenv("EXTERNAL_FEED_PROCESSING_BATCH_SIZE", "100")
     )

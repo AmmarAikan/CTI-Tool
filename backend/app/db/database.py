@@ -95,9 +95,11 @@ def dispose_test_database(database_url: str) -> None:
 
 def initialize_database() -> None:
     from backend.app.db import models  # noqa: F401
+    from backend.app.db.migrations import apply_additive_migrations
 
     if engine is None:
         raise RuntimeError("database engine is not configured")
+    apply_additive_migrations(engine)
     Base.metadata.create_all(bind=engine)
 
 

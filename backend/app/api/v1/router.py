@@ -32,6 +32,7 @@ from backend.app.db.models import (
     IndicatorRecord,
     OutlierSessionRecord,
     PipelineRun,
+    ExternalIngestionOperation,
     RawItem,
     Source,
     ThreatEvent,
@@ -70,6 +71,7 @@ from backend.app.schemas.api import (
     ExternalPullResponse,
     ExternalAcceptedSyncResponse,
     ExternalJobImportRequest,
+    ExternalIngestionResponse,
     AcceptedRecordDetailResponse,
     AcceptedRecordPageResponse,
     IntelligenceCorrelationPageResponse,
@@ -111,8 +113,27 @@ from backend.app.pipeline.enrichment.observable_assessor import ObservableAssess
 LOGGER = logging.getLogger(__name__)
 from backend.app.services.attack_mapping_service import AttackMappingService
 from backend.app.services.pipeline_service import PipelineService
+from backend.app.services.external_ingestion_service import ExternalIngestionService, _retry_state, notify_external_ingestion_worker
 
 router = APIRouter()
+
+
+def _external_ingestion_response(value: ExternalIngestionOperation) -> dict[str, Any]:
+    error = None
+    if value.error_code:
+        error = {"code": value.error_code, "stage": value.stage,
+                 "retryable": value.retryable, "message": "External ingestion did not complete."}
+    return {"operation_id": value.id, "operation_type": value.operation_type,
+            "state": value.state, "stage": value.stage, "retryable": value.retryable,
+            "attempt_count": value.attempt_count, "external_job_id": value.external_job_id,
+            "export_run_id": value.export_run_id, "dataset_sha256": value.dataset_sha256,
+            "gateway_checkpoint": value.gateway_checkpoint, "pipeline_run_id": value.pipeline_run_id,
+            "collected": value.collected_count, "exported": value.exported_count,
+            "imported": value.imported_count, "created": value.created_count,
+            "updated": value.updated_count, "unchanged": value.unchanged_count,
+            "failed": value.failed_count, "acknowledged": value.acknowledged_count,
+            "error": error, "created_at": value.created_at, "started_at": value.started_at,
+            "updated_at": value.updated_at, "completed_at": value.completed_at}
 security = HTTPBearer(auto_error=False)
 AUTH_RATE_LIMITER = SlidingWindowRateLimiter()
 DUMMY_PASSWORD_HASH = "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
@@ -1087,55 +1108,68 @@ def pull_external_feed(
     db: SessionDep,
     user: Annotated[User, Depends(require_roles("admin", "analyst"))],
 ) -> dict[str, Any]:
-    try:
-        result = PipelineService(db).run_external_feed()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"External feed pull failed: {type(exc).__name__}") from exc
-    audit(db, user, "pull_external_feed", "pipeline_run", result["run_id"], details=result["details"])
-    db.commit()
-    return {key: result[key] for key in ("run_id", "pipeline", "status", "collected_count",
-                                          "processed_count", "stored_count", "failed_count")}
+    raise HTTPException(status_code=410, detail={"code": "legacy_writer_disabled",
+        "stage": "command", "retryable": False,
+        "message": "Use the durable external ingestion operation endpoint."})
 
 
 @router.post("/integrations/external-control/exports/sync", tags=["external-control"],
              response_model=ExternalAcceptedSyncResponse)
 def sync_external_accepted(db: SessionDep,
                            user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
+    raise HTTPException(status_code=410, detail={"code": "legacy_writer_disabled",
+        "stage": "command", "retryable": False,
+        "message": "Use the durable external ingestion operation endpoint."})
+
+@router.post("/integrations/external-ingestions", tags=["external-control"],
+             response_model=ExternalIngestionResponse, status_code=status.HTTP_202_ACCEPTED)
+def create_external_ingestion(payload: ExternalJobImportRequest, db: SessionDep,
+                              user: Annotated[User, Depends(require_roles("admin", "analyst"))]):
     try:
-        result = external_control_call(lambda client: PipelineService(db).sync_external_accepted(client))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail="External accepted synchronization failed safely") from exc
-    details = result.get("details") if isinstance(result.get("details"), dict) else {}
-    response = {"run_id": result["run_id"], "status": result["status"],
-                "imported": int(details.get("created_items", 0)),
-                "unchanged": int(details.get("database_unchanged_items", 0)),
-                "updated": int(details.get("updated_items", 0)),
-                "failed": int(result["failed_count"]), "total": int(result["collected_count"])}
-    audit(db, user, "sync_external_accepted", "pipeline_run", result["run_id"], **response)
-    db.commit()
-    return response
+        operation = ExternalIngestionService(db, external_control_client()).create_or_resume(payload.job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail={"code": str(exc)[:100], "stage": "export_ready",
+            "retryable": False, "message": "External job identity is not ready."}) from None
+    audit(db, user, "create_external_ingestion", "external_ingestion", operation.id,
+          external_job_id=operation.external_job_id); db.commit()
+    return _external_ingestion_response(operation)
+
+
+@router.get("/integrations/external-ingestions/{operation_id}", tags=["external-control"],
+            response_model=ExternalIngestionResponse)
+def external_ingestion_status(operation_id: str, db: SessionDep, _: CurrentUser):
+    operation = db.get(ExternalIngestionOperation, operation_id)
+    if operation is None: raise HTTPException(status_code=404, detail={"code":"operation_not_found",
+        "stage":"status", "retryable":False, "message":"External ingestion operation was not found."})
+    return _external_ingestion_response(operation)
+
+
+@router.post("/integrations/external-ingestions/{operation_id}/retry", tags=["external-control"],
+             response_model=ExternalIngestionResponse, status_code=status.HTTP_202_ACCEPTED)
+def retry_external_ingestion(operation_id: str, db: SessionDep,
+                             user: Annotated[User, Depends(require_roles("admin", "analyst"))]):
+    operation = db.get(ExternalIngestionOperation, operation_id)
+    if operation is None: raise HTTPException(status_code=404, detail={"code":"operation_not_found",
+        "stage":"retry", "retryable":False, "message":"External ingestion operation was not found."})
+    if operation.state == "failed_retryable":
+        operation.state = _retry_state(operation.stage)
+        operation.error_code, operation.error_category = None, None
+        db.commit(); notify_external_ingestion_worker()
+    return _external_ingestion_response(operation)
+
 
 @router.post("/integrations/external-control/jobs/import", tags=["external-control"],
-             response_model=ExternalAcceptedSyncResponse)
+             response_model=ExternalIngestionResponse, status_code=status.HTTP_202_ACCEPTED)
 def import_external_job(payload: ExternalJobImportRequest, db: SessionDep,
                         user: Annotated[User, Depends(require_roles("admin", "analyst"))]) -> dict[str, Any]:
     try:
-        result = external_control_call(
-            lambda client: PipelineService(db).orchestrate_external_job(client, payload.job_id),
-            value_error_status=409,
-        )
+        operation = ExternalIngestionService(db, external_control_client()).create_or_resume(payload.job_id)
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail="External job is not ready for import") from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail="External job import failed safely") from exc
-    details = result.get("details") if isinstance(result.get("details"), dict) else {}
-    response = {"run_id": result["run_id"], "status": result["status"],
-                "imported": int(details.get("created_items", 0)),
-                "unchanged": int(details.get("database_unchanged_items", 0)),
-                "updated": int(details.get("updated_items", 0)),
-                "failed": int(result["failed_count"]), "total": int(result["collected_count"])}
-    audit(db, user, "import_external_job", "pipeline_run", result["run_id"], external_job_id=payload.job_id)
-    db.commit(); return response
+        raise HTTPException(status_code=409, detail={"code":str(exc)[:100],"stage":"export_ready",
+            "retryable":False,"message":"External job identity is not ready."}) from None
+    audit(db, user, "legacy_import_adapter", "external_ingestion", operation.id,
+          external_job_id=payload.job_id); db.commit()
+    return _external_ingestion_response(operation)
 
 
 @router.get("/integrations/wazuh/health", tags=["integrations"])

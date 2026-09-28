@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,9 @@ class ExternalFeedResult:
     not_modified: bool = False
     response_bytes: int = 0
     duplicate_items: int = 0
+    external_job_id: str | None = None
+    export_run_id: str | None = None
+    dataset_sha256: str | None = None
 
     def details(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,9 @@ class ExternalFeedResult:
             "response_bytes": self.response_bytes,
             "not_modified": self.not_modified,
             "duplicate_items": self.duplicate_items,
+            "external_job_id": self.external_job_id,
+            "export_run_id": self.export_run_id,
+            "dataset_sha256": self.dataset_sha256,
         }
 
 
@@ -147,6 +154,9 @@ class ExternalFeedAPIConnector(ExternalConnector):
                 raise ExternalFeedContractError("ETag changed between pages")
             result.etag = response_etag or result.etag
             result.checkpoint = envelope.get("checkpoint") or result.checkpoint
+            result.external_job_id = envelope.get("external_job_id") or result.external_job_id
+            result.export_run_id = envelope.get("export_run_id") or result.export_run_id
+            result.dataset_sha256 = envelope.get("dataset_sha256") or result.dataset_sha256
 
             if not envelope["has_more"]:
                 return result
@@ -312,6 +322,15 @@ class ExternalFeedAPIConnector(ExternalConnector):
             datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         except ValueError as exc:
             raise ExternalFeedContractError("generated_at must be a valid ISO-8601 timestamp") from exc
+        external_job_id = str(payload.get("external_job_id") or "") or None
+        export_run_id = str(payload.get("export_run_id") or "") or None
+        dataset_sha256 = str(payload.get("dataset_sha256") or "").removeprefix("sha256:") or None
+        if external_job_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", external_job_id):
+            raise ExternalFeedContractError("external_job_id is invalid")
+        if export_run_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", export_run_id):
+            raise ExternalFeedContractError("export_run_id is invalid")
+        if dataset_sha256 and not re.fullmatch(r"[0-9a-f]{64}", dataset_sha256):
+            raise ExternalFeedContractError("dataset_sha256 is invalid")
         return {
             "schema_version": schema_version,
             "feed_id": feed_id,
@@ -320,6 +339,9 @@ class ExternalFeedAPIConnector(ExternalConnector):
             "has_more": bool(payload.get("has_more", False)),
             "next_cursor": str(payload["next_cursor"]) if payload.get("next_cursor") else None,
             "checkpoint": str(payload["checkpoint"]) if payload.get("checkpoint") else None,
+            "external_job_id": external_job_id,
+            "export_run_id": export_run_id,
+            "dataset_sha256": dataset_sha256,
         }
 
     def _validate_items(self, items: Any) -> list[dict[str, Any]]:

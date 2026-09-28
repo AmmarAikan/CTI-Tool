@@ -198,7 +198,32 @@ class PipelineService:
             details={"transport": "file_upload", "paths": [str(path) for path in paths]},
         )
 
-    def run_external_feed(self, connector: ExternalFeedAPIConnector | None = None) -> dict[str, Any]:
+    @staticmethod
+    def external_feed_connector(*, state: dict[str, Any] | None = None) -> ExternalFeedAPIConnector:
+        settings = get_settings()
+        if not settings.external_feed_configured:
+            raise RuntimeError("EXTERNAL_FEED_URL and EXTERNAL_FEED_TOKEN must be configured")
+        state = state or {}
+        return ExternalFeedAPIConnector(
+            str(settings.external_feed_url), str(settings.external_feed_token),
+            hmac_secret=settings.external_feed_hmac_secret,
+            verify_tls=settings.external_feed_verify_tls,
+            allow_http=settings.external_feed_allow_http,
+            require_contract=settings.external_feed_require_contract,
+            connect_timeout=settings.external_feed_connect_timeout_seconds,
+            read_timeout=settings.external_feed_read_timeout_seconds,
+            max_bytes=settings.external_feed_max_bytes,
+            max_pages=settings.external_feed_max_pages,
+            page_size=settings.external_feed_page_size,
+            if_none_match=state.get("etag"), checkpoint=state.get("checkpoint"),
+        )
+
+    def run_external_feed(self, connector: ExternalFeedAPIConnector | None = None,
+                          expected_identity: tuple[str, str, str] | None = None,
+                          *, acknowledge: bool = True,
+                          pipeline_run_id: str | None = None,
+                          expected_checkpoint: str | None = None,
+                          require_unidentified: bool = False) -> dict[str, Any]:
         settings = get_settings()
         state_source = self.repository.get_or_create_source(
             "Remote External Feed API",
@@ -211,29 +236,22 @@ class PipelineService:
         # downloaded or while CPU-heavy CTI transformation runs.
         self.session.commit()
         if connector is None:
-            if not settings.external_feed_configured:
-                raise RuntimeError("EXTERNAL_FEED_URL and EXTERNAL_FEED_TOKEN must be configured")
-            connector = ExternalFeedAPIConnector(
-                str(settings.external_feed_url),
-                str(settings.external_feed_token),
-                hmac_secret=settings.external_feed_hmac_secret,
-                verify_tls=settings.external_feed_verify_tls,
-                allow_http=settings.external_feed_allow_http,
-                require_contract=settings.external_feed_require_contract,
-                connect_timeout=settings.external_feed_connect_timeout_seconds,
-                read_timeout=settings.external_feed_read_timeout_seconds,
-                max_bytes=settings.external_feed_max_bytes,
-                max_pages=settings.external_feed_max_pages,
-                page_size=settings.external_feed_page_size,
-                if_none_match=state.get("etag"),
-                checkpoint=state.get("checkpoint"),
-            )
+            connector = self.external_feed_connector(state=state)
         records = list(connector.collect())
         result = connector.last_result
         if result is None:
             raise RuntimeError("External feed connector returned no collection result")
+        if expected_identity is not None and (result.external_job_id, result.export_run_id,
+                                               result.dataset_sha256) != expected_identity:
+            raise ValueError("external_feed_identity_mismatch")
+        if require_unidentified and any((result.external_job_id, result.export_run_id,
+                                         result.dataset_sha256)):
+            raise ValueError("legacy_external_feed_identity_changed")
+        if expected_checkpoint is not None and result.checkpoint != expected_checkpoint:
+            raise ValueError("external_feed_checkpoint_mismatch")
         state_source = self.session.get(Source, state_source_id)
-        summary = self._run_external_records(records, details=result.details(), run_source=state_source)
+        summary = self._run_external_records(records, details=result.details(), run_source=state_source,
+                                             existing_run_id=pipeline_run_id)
         effective_checkpoint = result.checkpoint or (
             state.get("checkpoint") if getattr(result, "not_modified", False) else None
         )
@@ -242,6 +260,14 @@ class PipelineService:
             and state.get("gateway_ack_status") == "acknowledged"
             and state.get("gateway_ack_checkpoint") == effective_checkpoint
         )
+        if not acknowledge:
+            run = self.session.get(PipelineRun, summary["run_id"])
+            if run is not None:
+                run.details = {**dict(run.details or {}), "gateway_ack_status": "pending",
+                               "gateway_ack_checkpoint": effective_checkpoint}
+            self.session.commit()
+            summary["details"] = dict(run.details if run is not None else summary["details"])
+            return summary
         try:
             acknowledgement = (
                 {"status": "acknowledged", "checkpoint": effective_checkpoint, "replayed": True}
@@ -290,6 +316,23 @@ class PipelineService:
             "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
         }
         return summary
+
+    def acknowledge_external_feed(self, connector: ExternalFeedAPIConnector, checkpoint: str,
+                                  pipeline_run_id: str) -> dict[str, Any]:
+        acknowledgement = connector.acknowledge(checkpoint)
+        state_source = self.repository.get_or_create_source("Remote External Feed API", "api", "external")
+        state_source.config = {**dict(state_source.config or {}), "etag": checkpoint,
+            "checkpoint": checkpoint, "last_run_id": pipeline_run_id,
+            "gateway_ack_status": acknowledgement.get("status"),
+            "gateway_ack_checkpoint": acknowledgement.get("checkpoint")}
+        run = self.session.get(PipelineRun, pipeline_run_id)
+        if run is None:
+            raise RuntimeError("External pipeline run disappeared")
+        run.details = {**dict(run.details or {}), "gateway_ack_status": acknowledgement.get("status"),
+                       "gateway_ack_checkpoint": acknowledgement.get("checkpoint"),
+                       "gateway_ack_replayed": bool(acknowledgement.get("replayed"))}
+        self.session.commit()
+        return acknowledgement
 
     def sync_external_accepted(self, client: Any) -> dict[str, Any]:
         return self._sync_external_export(client)
@@ -352,23 +395,29 @@ class PipelineService:
         *,
         details: dict[str, Any],
         run_source=None,
+        existing_run_id: str | None = None,
     ) -> dict[str, Any]:
         records = list(records)
         batch_size = max(
             1,
             min(get_settings().external_feed_processing_batch_size, 1000),
         )
-        run = self.repository.create_run(
-            "external",
-            run_source,
-            details={
+        initial_details = {
                 **details,
                 "processing_batch_size": batch_size,
                 "committed_batches": 0,
                 "correlation_status": "deferred_bounded_ingestion",
                 "correlation_count": 0,
-            },
-        )
+            }
+        run = self.session.get(PipelineRun, existing_run_id) if existing_run_id else None
+        if run is None:
+            run = self.repository.create_run("external", run_source, details=initial_details)
+        else:
+            if run.pipeline != "external":
+                raise RuntimeError("Pipeline run identity is not external")
+            run.status = "running"
+            run.source = run_source
+            run.details = {**dict(run.details or {}), **initial_details}
         run_id = run.id
         # Make the run observable without retaining a transaction throughout
         # remote processing. Each completed batch is committed independently.

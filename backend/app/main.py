@@ -11,6 +11,7 @@ from backend.app.core.config import get_settings
 from backend.app.core.security import hash_password
 from backend.app.db.database import SessionLocal, initialize_database
 from backend.app.db.models import User
+from backend.app.services.external_ingestion_service import start_external_ingestion_worker, stop_external_ingestion_worker
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +41,11 @@ async def lifespan(_: FastAPI):
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     initialize_database()
     bootstrap_admin_from_environment()
-    yield
+    start_external_ingestion_worker()
+    try:
+        yield
+    finally:
+        stop_external_ingestion_worker()
 
 
 def create_app() -> FastAPI:
