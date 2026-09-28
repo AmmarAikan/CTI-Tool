@@ -20,6 +20,7 @@ export interface HealthResponse {
   api_version?: string;
   contract_valid?: boolean;
   hmac_verification?: boolean;
+  availability_state?: 'available'|'disabled'|'unavailable'|'running_without_docker_healthcheck';
 }
 
 export interface SystemHealth { status: 'ok' | 'degraded'; database: boolean; }
@@ -423,12 +424,14 @@ function parseLogin(value: unknown): LoginResponse {
 }
 
 function parseHealth(value: unknown): HealthResponse {
-  if (!isPlainObject(value) || Object.keys(value).some((key) => !['configured', 'reachable', 'service', 'api_version', 'contract_valid', 'hmac_verification', 'error_type'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid health response');
+  if (!isPlainObject(value) || Object.keys(value).some((key) => !['configured', 'reachable', 'service', 'api_version', 'contract_valid', 'hmac_verification', 'error_type', 'availability_state'].includes(key))) throw new ApiError(502, 'invalid_response', 'Invalid health response');
   const body = value as Partial<HealthResponse>;
   if (typeof body.configured !== 'boolean' || typeof body.reachable !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
   if (body.contract_valid !== undefined && typeof body.contract_valid !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
   if (body.hmac_verification !== undefined && typeof body.hmac_verification !== 'boolean') throw new ApiError(502, 'invalid_response', 'Invalid health response');
-  return { configured: body.configured, reachable: body.reachable, service: safeText(body.service), api_version: safeText(body.api_version), contract_valid: body.contract_valid, hmac_verification: body.hmac_verification };
+  const availability = body.availability_state;
+  if (availability !== undefined && !['available','disabled','unavailable','running_without_docker_healthcheck'].includes(availability)) throw new ApiError(502, 'invalid_response', 'Invalid health response');
+  return { configured: body.configured, reachable: body.reachable, service: safeText(body.service), api_version: safeText(body.api_version), contract_valid: body.contract_valid, hmac_verification: body.hmac_verification, availability_state: availability };
 }
 
 function parseSystemHealth(value: unknown): SystemHealth {

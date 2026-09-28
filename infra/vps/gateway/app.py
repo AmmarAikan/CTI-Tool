@@ -16,8 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Header, HTTPException, Query, Request, Response, status
+from fastapi import Body, FastAPI, Header, HTTPException, Query, Request, Response, status
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.requests import Request as StarletteRequest
 
 SENSITIVE_KEY_PARTS = ("authorization", "cookie", "password", "secret", "token", "api_key", "apikey")
 STREAM_NAMES = frozenset({"dionaea", "host-auth", "web-access"})
@@ -26,7 +27,9 @@ WEB_LOG_RESERVATION_BYTES = 16 * 1024
 WEB_PAGE_MAX_BYTES = 8 * 1024 * 1024
 JSON_WRITE_BUFFER_BYTES = 1024 * 1024
 FEED_DELIVERY_STATE_VERSION = "1.0"
+FEED_BATCH_STATE_VERSION = "2.0"
 FEED_ACK_SIGNATURE_HEADER = "X-CTI-Ack-Signature"
+FEED_PAGE_MAX_BYTES = 8 * 1024 * 1024
 
 
 def utc_now() -> str:
@@ -51,6 +54,8 @@ class GatewaySettings:
     max_sensor_bytes: int = 50 * 1024 * 1024
     max_feed_items: int = 20_000
     max_web_log_bytes: int = 64 * 1024 * 1024
+    dionaea_enabled: bool = True
+    dionaea_container_running: bool = False
 
     @classmethod
     def from_env(cls) -> GatewaySettings:
@@ -79,95 +84,117 @@ class GatewaySettings:
             max_sensor_bytes=int(os.getenv("MAX_SENSOR_BYTES", str(50 * 1024 * 1024))),
             max_feed_items=int(os.getenv("MAX_FEED_ITEMS", "20000")),
             max_web_log_bytes=int(os.getenv("MAX_WEB_LOG_BYTES", str(64 * 1024 * 1024))),
+            dionaea_enabled=os.getenv("DIONAEA_ENABLED", "true").strip().lower()
+            not in {"0", "false", "no", "off"},
+            dionaea_container_running=os.getenv("DIONAEA_CONTAINER_RUNNING", "false").strip().lower()
+            in {"1", "true", "yes", "on"},
         )
+
+
+class WebAccessLogMiddleware:
+    """Pure-ASGI access logger; avoids BaseHTTPMiddleware response buffering."""
+    def __init__(self, app, *, settings: GatewaySettings, lock: threading.Lock) -> None:
+        self.app, self.settings, self.lock = app, settings, lock
+        self.reserved_bytes = 0
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        request = StarletteRequest(scope)
+        started = time.perf_counter()
+        loggable = request.url.path not in {
+            "/health", "/api/v1/sensors/web-access", "/api/v1/sensors/dionaea",
+            "/api/v1/sensors/host-auth", "/api/v1/external-feed",
+            "/api/v1/external-feed/publish", "/api/v1/external-feed/ack",
+        }
+        if not loggable:
+            await self.app(scope, receive, send)
+            return
+        with self.lock:
+            path = _web_path(self.settings)
+            size = path.stat().st_size if path.exists() else 0
+            if size + self.reserved_bytes + WEB_LOG_RESERVATION_BYTES > self.settings.max_web_log_bytes:
+                response = Response(status_code=503, headers={"Retry-After": "60"})
+                await response(scope, receive, send)
+                return
+            self.reserved_bytes += WEB_LOG_RESERVATION_BYTES
+        status_code = 500
+
+        async def capture(message):
+            nonlocal status_code
+            if message.get("type") == "http.response.start":
+                status_code = int(message.get("status") or 500)
+            await send(message)
+
+        try:
+            await self.app(scope, receive, capture)
+        finally:
+            try:
+                _append_web_event(self.settings, self.lock, request, status_code, started)
+            finally:
+                with self.lock:
+                    self.reserved_bytes -= WEB_LOG_RESERVATION_BYTES
 
 
 def create_app(settings: GatewaySettings) -> FastAPI:
     app = FastAPI(title="CTI VPS Gateway", version="1.0.0", docs_url=None, redoc_url=None)
+    write_lock = threading.Lock()
     app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+    app.add_middleware(WebAccessLogMiddleware, settings=settings, lock=write_lock)
     app.state.settings = settings
-    app.state.write_lock = threading.Lock()
+    app.state.write_lock = write_lock
     app.state.web_reserved_bytes = 0
-
-    @app.middleware("http")
-    async def web_access_log(request: Request, call_next):
-        started = time.perf_counter()
-        loggable = request.url.path not in {
-            "/health",
-            "/api/v1/sensors/web-access",
-            "/api/v1/sensors/dionaea",
-            "/api/v1/sensors/host-auth",
-            "/api/v1/external-feed",
-            "/api/v1/external-feed/publish",
-            "/api/v1/external-feed/ack",
-        }
-        if loggable:
-            with app.state.write_lock:
-                path = _web_path(settings)
-                size = path.stat().st_size if path.exists() else 0
-                if size + app.state.web_reserved_bytes + WEB_LOG_RESERVATION_BYTES > settings.max_web_log_bytes:
-                    return Response(status_code=503, headers={"Retry-After": "60"})
-                app.state.web_reserved_bytes += WEB_LOG_RESERVATION_BYTES
-        try:
-            try:
-                response = await call_next(request)
-            except Exception:
-                if loggable:
-                    _append_web_event(settings, app.state.write_lock, request, 500, started)
-                raise
-            if loggable:
-                _append_web_event(settings, app.state.write_lock, request, response.status_code, started)
-            return response
-        finally:
-            if loggable:
-                with app.state.write_lock:
-                    app.state.web_reserved_bytes -= WEB_LOG_RESERVATION_BYTES
+    app.state.feed_cache = {}
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
+    async def health() -> dict[str, Any]:
+        dionaea_state = _dionaea_state(settings)
         return {
             "status": "ok",
             "service": "cti-vps-gateway",
-            "feed_ready": _feed_path(settings).is_file(),
+            "feed_ready": (_feed_path(settings).is_file()
+                           or _feed_delivery_state_path(settings).is_file()),
+            "dionaea_state": dionaea_state,
             "streams": {
-                "dionaea": _safe_is_file(settings.dionaea_path),
+                "dionaea": dionaea_state == "available",
                 "host-auth": _safe_is_file(settings.host_auth_path),
                 "web-access": _safe_is_file(_web_path(settings)),
             },
         }
 
     @app.post("/api/v1/external-feed/publish", status_code=status.HTTP_202_ACCEPTED)
-    async def publish_external_feed(request: Request, authorization: str | None = Header(default=None)):
+    async def publish_external_feed(payload: Any = Body(...),
+                                    authorization: str | None = Header(default=None),
+                                    content_length: str | None = Header(default=None, alias="Content-Length")):
         _authorize(authorization, settings.feed_publish_token)
-        length = request.headers.get("content-length")
-        if length and _safe_int(length, settings.max_publish_bytes + 1) > settings.max_publish_bytes:
+        if content_length and _safe_int(content_length, settings.max_publish_bytes + 1) > settings.max_publish_bytes:
             raise HTTPException(status_code=413, detail="publish body exceeds configured limit")
-        body = await request.body()
-        if len(body) > settings.max_publish_bytes:
-            raise HTTPException(status_code=413, detail="publish body exceeds configured limit")
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise HTTPException(status_code=422, detail="publish body must be UTF-8 JSON") from exc
         incoming = _normalize_publish(payload, settings)
+        identity = _identity(incoming)
         with app.state.write_lock:
-            envelope, merge_counts, unacknowledged_ids = _merge_feed_snapshot(
-                _feed_path(settings), incoming, settings
-            )
-            digest, _ = _atomic_write_json(
-                _feed_path(settings), envelope, settings.max_feed_snapshot_bytes
-            )
-            _write_feed_delivery_state(
-                settings,
-                digest,
-                unacknowledged_ids,
-                last_publish=merge_counts,
-            )
+            if all(value is None for value in identity):
+                envelope, merge_counts, pending = _merge_feed_snapshot(
+                    _feed_path(settings), incoming, settings)
+                digest, byte_count = _atomic_write_json(
+                    _feed_path(settings), envelope, settings.max_feed_snapshot_bytes)
+                _write_feed_delivery_state(settings, digest, pending, last_publish=merge_counts)
+                item_count, published_count = len(envelope["items"]), len(incoming["items"])
+            elif None in identity:
+                raise HTTPException(status_code=422, detail="complete export identity is required")
+            else:
+                digest, byte_count, created = _publish_batch(settings, incoming)
+                merge_counts = {"inserted_items": len(incoming["items"]) if created else 0,
+                                "updated_items": 0,
+                                "unchanged_items": 0 if created else len(incoming["items"])}
+                item_count = published_count = len(incoming["items"])
+            app.state.feed_cache[digest] = envelope if all(value is None for value in identity) else incoming
         return {
             "status": "accepted",
             "feed_id": settings.feed_id,
-            "item_count": len(envelope["items"]),
-            "published_items": len(incoming["items"]),
+            "item_count": item_count,
+            "published_items": published_count,
+            "stored_bytes": byte_count,
             **merge_counts,
             "etag": digest,
         }
@@ -204,27 +231,48 @@ def create_app(settings: GatewaySettings) -> FastAPI:
         if external_ids_value is not None and not isinstance(external_ids_value, list):
             raise HTTPException(status_code=422, detail="ack external_ids must be an array")
         with app.state.write_lock:
-            result = _acknowledge_feed_delivery(settings, checkpoint, external_ids_value)
+            supplied = (payload.get("external_job_id"), payload.get("export_run_id"),
+                        str(payload.get("dataset_sha256") or "").removeprefix("sha256:") or None)
+            if any(supplied) and not all(supplied):
+                raise HTTPException(status_code=422, detail="complete export identity is required")
+            result = (_acknowledge_batch(settings, supplied, checkpoint, external_ids_value)
+                      if all(supplied) else
+                      _acknowledge_feed_delivery(settings, checkpoint, external_ids_value))
         return _signed_json(result, settings.feed_hmac_secret)
 
     @app.get("/api/v1/external-feed")
-    def external_feed(
+    async def external_feed(
         authorization: str | None = Header(default=None),
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
         limit: int = Query(250, ge=1, le=1000),
         cursor: str | None = None,
+        external_job_id: str | None = None,
+        export_run_id: str | None = None,
+        dataset_sha256: str | None = None,
     ):
         _authorize(authorization, settings.feed_read_token)
-        path = _feed_path(settings)
+        supplied = (external_job_id, export_run_id,
+                    str(dataset_sha256 or "").removeprefix("sha256:") or None)
+        if any(supplied) and not all(supplied):
+            raise HTTPException(status_code=422, detail="complete export identity is required")
+        path = _batch_for_identity(settings, supplied) if all(supplied) else _feed_path(settings)
         if not path.is_file():
-            raise HTTPException(status_code=404, detail="no external feed has been published")
-        raw = _bounded_read(path, settings.max_feed_snapshot_bytes)
-        etag = hashlib.sha256(raw).hexdigest()
+            raise HTTPException(status_code=404, detail="external export was not found")
+        etag = _known_feed_checkpoint(settings, path) or _sha256_file(path)
         quoted_etag = f'"{etag}"'
         if cursor is None and if_none_match and if_none_match.strip() in {etag, quoted_etag}:
             return Response(status_code=304, headers={"ETag": quoted_etag})
-        payload = json.loads(raw.decode("utf-8"))
-        start = _decode_cursor(cursor, "external-feed", settings.cursor_secret) if cursor else 0
+        payload = app.state.feed_cache.get(etag)
+        if payload is None:
+            payload = _bounded_json_load(path, settings.max_feed_snapshot_bytes)
+            if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+                raise HTTPException(status_code=500, detail="stored external feed contract is invalid")
+            app.state.feed_cache = {etag: payload}
+        actual_identity = _identity(payload)
+        if all(supplied) and actual_identity != supplied:
+            raise HTTPException(status_code=409, detail="stored export identity changed")
+        cursor_scope = _cursor_scope(actual_identity, etag)
+        start = _decode_cursor(cursor, cursor_scope, settings.cursor_secret) if cursor else 0
         items = payload["items"]
         page = items[start : start + limit]
         end = start + len(page)
@@ -238,13 +286,15 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             "dataset_sha256": payload.get("dataset_sha256"),
             "items": page,
             "has_more": has_more,
-            "next_cursor": _encode_cursor(end, "external-feed", settings.cursor_secret) if has_more else None,
+            "next_cursor": _encode_cursor(end, cursor_scope, settings.cursor_secret) if has_more else None,
             "checkpoint": etag,
         }
+        if len(_json_bytes(response_payload)) > FEED_PAGE_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="external feed page exceeds response limit")
         return _signed_json(response_payload, settings.feed_hmac_secret, {"ETag": quoted_etag})
 
     @app.get("/api/v1/sensors/{stream_name}")
-    def sensor_stream(
+    async def sensor_stream(
         stream_name: str,
         authorization: str | None = Header(default=None),
         limit: int = Query(500, ge=1, le=1000),
@@ -282,6 +332,8 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             "next_cursor": _encode_cursor(end, stream_name, settings.cursor_secret) if has_more else None,
             "checkpoint": _encode_cursor(end, stream_name, settings.cursor_secret),
         }
+        if stream_name == "dionaea":
+            payload["availability_state"] = _dionaea_state(settings)
         return _signed_json(payload, settings.sensor_hmac_secret)
 
     return app
@@ -306,7 +358,9 @@ def _normalize_publish(payload: Any, settings: GatewaySettings) -> dict[str, Any
     generated_at = str(payload.get("generated_at") or payload.get("completed_at") or utc_now())
     _validate_timestamp(generated_at)
     external_job_id = str(payload.get("external_job_id") or "")
-    export_run_id = str(payload.get("export_run_id") or payload.get("run_id") or "")
+    # Historical publishers used run_id without a complete delivery identity;
+    # keep those snapshots on the isolated legacy backlog path.
+    export_run_id = str(payload.get("export_run_id") or "")
     dataset_sha256 = str(payload.get("dataset_sha256") or "").removeprefix("sha256:")
     if external_job_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", external_job_id):
         raise HTTPException(status_code=422, detail="external job identity is invalid")
@@ -721,12 +775,164 @@ def _safe_is_file(path: Path) -> bool:
         return False
 
 
+def _dionaea_state(settings: GatewaySettings) -> str:
+    if not settings.dionaea_enabled:
+        return "disabled"
+    if _safe_is_file(settings.dionaea_path):
+        return "available"
+    if settings.dionaea_container_running:
+        return "running_without_docker_healthcheck"
+    return "unavailable"
+
+
 def _feed_path(settings: GatewaySettings) -> Path:
     return settings.data_dir / "external_feed.json"
 
 
 def _feed_delivery_state_path(settings: GatewaySettings) -> Path:
     return settings.data_dir / "external_feed_delivery.json"
+
+
+def _identity(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
+    return (payload.get("external_job_id"), payload.get("export_run_id"),
+            str(payload.get("dataset_sha256") or "").removeprefix("sha256:") or None)
+
+
+def _batch_key(identity: tuple[str | None, str | None, str | None]) -> str:
+    canonical = json.dumps(identity, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _batch_path(settings: GatewaySettings, key: str) -> Path:
+    return settings.data_dir / "external_feed_batches" / f"{key}.json"
+
+
+def _cursor_scope(identity: tuple[str | None, str | None, str | None], checkpoint: str) -> str:
+    return f"external-feed:{_batch_key(identity)}:{checkpoint}"
+
+
+def _load_batch_state(settings: GatewaySettings) -> dict[str, Any]:
+    path = _feed_delivery_state_path(settings)
+    if path.is_file():
+        try:
+            value = _bounded_json_load(path, settings.max_feed_snapshot_bytes)
+            if isinstance(value, dict) and value.get("schema_version") == FEED_BATCH_STATE_VERSION \
+                    and isinstance(value.get("batches"), dict):
+                return value
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+            pass
+    # Version 1 remains on disk until the first v2 publish. It is represented as
+    # a protected backlog reference; its snapshot and every protected ID remain unchanged.
+    legacy = None
+    if _feed_path(settings).is_file():
+        checkpoint = _sha256_file(_feed_path(settings))
+        protected_ids: list[str] = []
+        try:
+            previous = _bounded_json_load(path, settings.max_feed_snapshot_bytes) if path.is_file() else {}
+            if (isinstance(previous, dict) and previous.get("schema_version") == FEED_DELIVERY_STATE_VERSION
+                    and previous.get("snapshot_etag") == checkpoint
+                    and isinstance(previous.get("unacknowledged_ids"), list)):
+                protected_ids = sorted({str(value) for value in previous["unacknowledged_ids"]})
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+            protected_ids = []
+        if not protected_ids:
+            try:
+                snapshot = _bounded_json_load(_feed_path(settings), settings.max_feed_snapshot_bytes)
+                protected_ids = sorted({str(item["external_id"]) for item in snapshot.get("items", [])})
+            except (KeyError, TypeError, OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+                protected_ids = []
+        legacy = {"path": _feed_path(settings).name, "checkpoint": checkpoint,
+                  "status": "pending", "priority": "backlog",
+                  "protected_ids": protected_ids, "item_count": len(protected_ids)}
+    return {"schema_version": FEED_BATCH_STATE_VERSION, "batches": {}, "legacy_backlog": legacy}
+
+
+def _write_batch_state(settings: GatewaySettings, state: dict[str, Any]) -> None:
+    _atomic_write_json(_feed_delivery_state_path(settings), state, settings.max_feed_snapshot_bytes)
+
+
+def _batch_for_identity(settings: GatewaySettings,
+                        identity: tuple[str | None, str | None, str | None]) -> Path:
+    state = _load_batch_state(settings)
+    entry = state["batches"].get(_batch_key(identity))
+    if not isinstance(entry, dict) or tuple(entry.get("identity") or ()) != identity:
+        return _batch_path(settings, "missing")
+    return _batch_path(settings, _batch_key(identity))
+
+
+def _known_feed_checkpoint(settings: GatewaySettings, path: Path) -> str | None:
+    """Resolve a durable checkpoint from the small state file without hashing a large feed."""
+    state_path = _feed_delivery_state_path(settings)
+    if not state_path.is_file():
+        return None
+    try:
+        state = _bounded_json_load(state_path, settings.max_feed_snapshot_bytes)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+        return None
+    if not isinstance(state, dict):
+        return None
+    if state.get("schema_version") == FEED_DELIVERY_STATE_VERSION and path == _feed_path(settings):
+        value = state.get("snapshot_etag")
+        return str(value) if isinstance(value, str) else None
+    if state.get("schema_version") != FEED_BATCH_STATE_VERSION:
+        return None
+    legacy = state.get("legacy_backlog")
+    if path == _feed_path(settings) and isinstance(legacy, dict):
+        value = legacy.get("checkpoint")
+        return str(value) if isinstance(value, str) else None
+    for entry in (state.get("batches") or {}).values():
+        if isinstance(entry, dict) and path.name == entry.get("path"):
+            value = entry.get("checkpoint")
+            return str(value) if isinstance(value, str) else None
+    return None
+
+
+def _publish_batch(settings: GatewaySettings, incoming: dict[str, Any]) -> tuple[str, int, bool]:
+    identity = _identity(incoming)
+    key = _batch_key(identity)
+    path = _batch_path(settings, key)
+    state = _load_batch_state(settings)
+    existing = state["batches"].get(key)
+    if existing is not None:
+        if tuple(existing.get("identity") or ()) != identity:
+            raise HTTPException(status_code=409, detail="export identity collision")
+        if str(existing.get("dataset_sha256")) != identity[2]:
+            raise HTTPException(status_code=409, detail="export digest changed")
+        return str(existing["checkpoint"]), int(existing["bytes"]), False
+    checkpoint, byte_count = _atomic_write_json(path, incoming, settings.max_feed_snapshot_bytes)
+    state["batches"][key] = {
+        "identity": list(identity), "dataset_sha256": identity[2], "checkpoint": checkpoint,
+        "path": path.name, "item_count": len(incoming["items"]), "bytes": byte_count,
+        "status": "pending", "priority": "interactive", "created_at": utc_now(),
+    }
+    _write_batch_state(settings, state)
+    return checkpoint, byte_count, True
+
+
+def _acknowledge_batch(settings: GatewaySettings,
+                       identity: tuple[str | None, str | None, str | None], checkpoint: str,
+                       external_ids_value: list[Any] | None) -> dict[str, Any]:
+    state = _load_batch_state(settings)
+    key = _batch_key(identity)
+    entry = state["batches"].get(key)
+    if not isinstance(entry, dict) or tuple(entry.get("identity") or ()) != identity:
+        raise HTTPException(status_code=404, detail="external export was not found")
+    if not hmac.compare_digest(str(entry.get("checkpoint") or ""), checkpoint):
+        raise HTTPException(status_code=409, detail="external export acknowledgement is stale")
+    if external_ids_value is not None:
+        snapshot = _bounded_json_load(_batch_path(settings, key), settings.max_feed_snapshot_bytes)
+        existing_ids = {str(item.get("external_id") or "") for item in snapshot["items"]}
+        supplied_ids = {str(value).strip() for value in external_ids_value}
+        if "" in supplied_ids or not supplied_ids.issubset(existing_ids):
+            raise HTTPException(status_code=422, detail="ack contains unknown identities")
+        if supplied_ids != existing_ids:
+            raise HTTPException(status_code=409, detail="partial batch acknowledgement is unsupported")
+    newly = int(entry.get("item_count") or 0) if entry.get("status") != "acknowledged" else 0
+    entry["status"] = "acknowledged"
+    entry["acknowledged_at"] = utc_now()
+    _write_batch_state(settings, state)
+    return {"status": "acknowledged", "checkpoint": checkpoint,
+            "newly_acknowledged_items": newly, "remaining_unacknowledged_items": 0}
 
 
 def _canonical_json_encoder() -> json.JSONEncoder:

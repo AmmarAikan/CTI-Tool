@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import requests
@@ -147,7 +147,8 @@ class PipelineService:
     def dionaea_api_health() -> dict[str, Any]:
         settings = get_settings()
         if not settings.dionaea_api_configured:
-            return {"configured": False, "reachable": False}
+            return {"configured": False, "reachable": False,
+                    "availability_state": "disabled"}
         return DionaeaAPIConnector(
             str(settings.dionaea_api_url),
             str(settings.dionaea_api_token),
@@ -199,7 +200,8 @@ class PipelineService:
         )
 
     @staticmethod
-    def external_feed_connector(*, state: dict[str, Any] | None = None) -> ExternalFeedAPIConnector:
+    def external_feed_connector(*, state: dict[str, Any] | None = None,
+                                expected_identity: tuple[str, str, str] | None = None) -> ExternalFeedAPIConnector:
         settings = get_settings()
         if not settings.external_feed_configured:
             raise RuntimeError("EXTERNAL_FEED_URL and EXTERNAL_FEED_TOKEN must be configured")
@@ -216,6 +218,7 @@ class PipelineService:
             max_pages=settings.external_feed_max_pages,
             page_size=settings.external_feed_page_size,
             if_none_match=state.get("etag"), checkpoint=state.get("checkpoint"),
+            expected_identity=expected_identity,
         )
 
     def run_external_feed(self, connector: ExternalFeedAPIConnector | None = None,
@@ -223,7 +226,10 @@ class PipelineService:
                           *, acknowledge: bool = True,
                           pipeline_run_id: str | None = None,
                           expected_checkpoint: str | None = None,
-                          require_unidentified: bool = False) -> dict[str, Any]:
+                          require_unidentified: bool = False,
+                          start_offset: int = 0,
+                          max_batches: int | None = None,
+                          progress_callback: Callable[[int, dict[str, int]], None] | None = None) -> dict[str, Any]:
         settings = get_settings()
         state_source = self.repository.get_or_create_source(
             "Remote External Feed API",
@@ -236,7 +242,7 @@ class PipelineService:
         # downloaded or while CPU-heavy CTI transformation runs.
         self.session.commit()
         if connector is None:
-            connector = self.external_feed_connector(state=state)
+            connector = self.external_feed_connector(state=state, expected_identity=expected_identity)
         records = list(connector.collect())
         result = connector.last_result
         if result is None:
@@ -251,7 +257,9 @@ class PipelineService:
             raise ValueError("external_feed_checkpoint_mismatch")
         state_source = self.session.get(Source, state_source_id)
         summary = self._run_external_records(records, details=result.details(), run_source=state_source,
-                                             existing_run_id=pipeline_run_id)
+                                             existing_run_id=pipeline_run_id,
+                                             start_offset=start_offset, max_batches=max_batches,
+                                             progress_callback=progress_callback)
         effective_checkpoint = result.checkpoint or (
             state.get("checkpoint") if getattr(result, "not_modified", False) else None
         )
@@ -396,12 +404,17 @@ class PipelineService:
         details: dict[str, Any],
         run_source=None,
         existing_run_id: str | None = None,
+        start_offset: int = 0,
+        max_batches: int | None = None,
+        progress_callback: Callable[[int, dict[str, int]], None] | None = None,
     ) -> dict[str, Any]:
         records = list(records)
         batch_size = max(
             1,
             min(get_settings().external_feed_processing_batch_size, 1000),
         )
+        if start_offset < 0 or start_offset > len(records):
+            raise ValueError("external_processing_offset_invalid")
         initial_details = {
                 **details,
                 "processing_batch_size": batch_size,
@@ -417,17 +430,24 @@ class PipelineService:
                 raise RuntimeError("Pipeline run identity is not external")
             run.status = "running"
             run.source = run_source
-            run.details = {**dict(run.details or {}), **initial_details}
+            # Preserve durable aggregate counters when a partially completed run resumes.
+            run.details = {**initial_details, **dict(run.details or {})}
         run_id = run.id
         # Make the run observable without retaining a transaction throughout
         # remote processing. Each completed batch is committed independently.
         self.session.commit()
-        stored = failed = unchanged = created = updated = 0
-        event_ids: list[str] = []
-        committed_batches = 0
+        prior = dict(run.details or {})
+        stored = int(run.stored_count or 0)
+        failed = int(run.failed_count or 0)
+        unchanged = int(prior.get("database_unchanged_items") or 0)
+        created = int(prior.get("created_items") or 0)
+        updated = int(prior.get("updated_items") or 0)
+        event_ids: list[str] = list(prior.get("event_ids") or [])[:500]
+        committed_batches = int(prior.get("committed_batches") or 0)
+        batches_this_call = 0
         pipeline = None
         try:
-            for start in range(0, len(records), batch_size):
+            for start in range(start_offset, len(records), batch_size):
                 batch = records[start : start + batch_size]
                 processable_records, batch_unchanged = self._external_batch_changes(batch)
                 # _external_batch_changes commits its short comparison transaction.
@@ -445,6 +465,7 @@ class PipelineService:
                 failed += batch_result["failed"]
                 event_ids.extend(batch_result["event_ids"])
                 committed_batches += 1
+                batches_this_call += 1
 
                 run = self.session.get(PipelineRun, run_id)
                 if run is None:
@@ -461,8 +482,22 @@ class PipelineService:
                     "created_items": created,
                     "updated_items": updated,
                     "event_ids": event_ids[:500],
+                    "processed_offset": min(start + len(batch), len(records)),
                 }
+                if progress_callback is not None:
+                    progress_callback(min(start + len(batch), len(records)), {
+                        "stored": stored, "failed": failed, "unchanged": unchanged,
+                        "created": created, "updated": updated,
+                    })
                 self.session.commit()
+                if max_batches is not None and batches_this_call >= max_batches \
+                        and start + len(batch) < len(records):
+                    run.status = "running"
+                    self.session.commit()
+                    summary = self._run_summary(run)
+                    summary["details"] = {**dict(summary.get("details") or {}),
+                                          "processing_complete": False}
+                    return summary
 
             status = "partial" if failed and stored else "failed" if failed else "completed"
             run = self.session.get(PipelineRun, run_id)
@@ -487,6 +522,7 @@ class PipelineService:
                     "committed_batches": committed_batches,
                     "correlation_status": "deferred_bounded_ingestion",
                     "correlation_count": 0,
+                    "processing_complete": True,
                 },
             )
             self.session.commit()
@@ -596,7 +632,7 @@ class PipelineService:
             )
             result["event_ids"].append(event.id)
             result["failed" if cti_object.processing_status == "failed" else "stored"] += 1
-        self.session.commit()
+        self.session.flush()
         return result
 
     def run_wazuh_files(self, paths: list[str | Path]) -> dict[str, Any]:

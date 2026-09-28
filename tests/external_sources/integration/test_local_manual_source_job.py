@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import TestClient
 
 from backend.app.pipeline.ingestion.external.classification.classification_service import ClassifiedItemResult
 from backend.app.pipeline.ingestion.external.application.collection_service import SourceExecutionResult

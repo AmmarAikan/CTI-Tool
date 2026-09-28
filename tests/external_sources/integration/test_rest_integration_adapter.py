@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import TestClient
 from jsonschema import Draft202012Validator
 
 import backend.app.pipeline.ingestion.external.integration.api as api_module
