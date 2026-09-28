@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api, clearToken } from '../api/client';
@@ -82,15 +82,15 @@ describe('single external source job', () => {
     await userEvent.setup().click(button); expect(button).toBeDisabled(); await userEvent.setup().click(button);
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/sources/source-one/jobs'))).toHaveLength(1);
     expect(fetchMock.mock.calls.some(([input]) => String(input).includes('source-two/jobs'))).toBe(false);
-    resolveStart(await response(job('queued'))); await screen.findByText(/في الانتظار/);
+    await act(async () => { resolveStart(await response(job('queued'))); }); await screen.findByText(/في الانتظار/);
   });
 
-  it('keeps job state and result counts on the selected source row only', async () => {    let resolveStart!: (value: Response) => void; const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? pendingStart : response(job('completed', { accepted_records: 7 }))); vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />);    const selectedButton = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` }); const otherButton = screen.getByRole('button', { name: `تشغيل ${otherEnabled.name}` });    await userEvent.setup().click(selectedButton); expect(selectedButton).toBeDisabled(); expect(selectedButton).toHaveTextContent('جار الإرسال'); expect(otherButton).toBeEnabled(); expect(otherButton).toHaveTextContent('تشغيل');    resolveStart(await response(job('completed', { accepted_records: 7 }))); await waitFor(() => { const selectedRow = screen.getAllByText(enabled.name)[0].closest('tr')!; const detailRow = selectedRow.nextElementSibling as HTMLElement; expect(within(detailRow).getByText(/مكتملة/)).toBeInTheDocument(); expect(within(detailRow).getByText('7')).toBeInTheDocument(); }); const otherRow = screen.getByText(otherEnabled.name).closest('tr')!; expect(within(otherRow).queryByText(/مكتملة|قيد التشغيل/)).not.toBeInTheDocument(); expect(within(otherRow).getByRole('button',{name:`تشغيل ${otherEnabled.name}`})).toBeEnabled();  });
+  it('keeps job state and result counts on the selected source row only', async () => {    let resolveStart!: (value: Response) => void; const pendingStart = new Promise<Response>((resolve) => { resolveStart = resolve; });    mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? pendingStart : response(job('completed', { accepted_records: 7 }))); vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />);    const selectedButton = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` }); const otherButton = screen.getByRole('button', { name: `تشغيل ${otherEnabled.name}` });    await userEvent.setup().click(selectedButton); expect(selectedButton).toBeDisabled(); expect(selectedButton).toHaveTextContent('جار الإرسال'); expect(otherButton).toBeEnabled(); expect(otherButton).toHaveTextContent('تشغيل');    await act(async () => { resolveStart(await response(job('completed', { accepted_records: 7 }))); }); await waitFor(() => { const selectedRow = screen.getAllByText(enabled.name)[0].closest('tr')!; const detailRow = selectedRow.nextElementSibling as HTMLElement; expect(within(detailRow).getByText(/مكتملة/)).toBeInTheDocument(); expect(within(detailRow).getByText('7')).toBeInTheDocument(); }); const otherRow = screen.getByText(otherEnabled.name).closest('tr')!; expect(within(otherRow).queryByText(/مكتملة|قيد التشغيل/)).not.toBeInTheDocument(); expect(within(otherRow).getByRole('button',{name:`تشغيل ${otherEnabled.name}`})).toBeEnabled();  });
   it('polls queued to running to completed and displays returned counts', async () => {
     let poll = 0;
     mockRole('analyst', (path) => path.endsWith('/sources/source-one/jobs') ? response(job('queued')) : response(++poll === 1 ? job('running') : job('completed', { accepted_records: 3, review_records: 1, rejected_records: 2, skipped_records: 4, error_count: 0 })));
     vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />); const button = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` });
-    button.click(); await screen.findByText(/قيد التشغيل/)
+    await userEvent.setup().click(button); await screen.findByText(/قيد التشغيل/)
     await screen.findByText(/مكتملة/, {}, { timeout: JOB_POLL_INTERVAL_MS * 2 }); expect(screen.getByText('3')).toBeInTheDocument(); expect(screen.getByText('للمراجعة')).toBeInTheDocument();
   });
 
@@ -136,7 +136,7 @@ describe('single external source job', () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/integrations/external-control/jobs'))).toHaveLength(1);
     const body = JSON.parse(String((fetchMock.mock.calls.find(([input]) => String(input).endsWith('/integrations/external-control/jobs'))?.[1] as RequestInit).body));
     expect(body).toEqual({ source_ids: [], scope: 'all_enabled', force: false });
-    resolveStart(await response(job('completed', { accepted_records: 4, sources: { 'source-one': { status: 'completed', accepted_records: 4 } } })));
+    await act(async () => { resolveStart(await response(job('completed', { accepted_records: 4, sources: { 'source-one': { status: 'completed', accepted_records: 4 } } }))); });
     expect(await screen.findByText('4')).toBeInTheDocument();
   });
 
