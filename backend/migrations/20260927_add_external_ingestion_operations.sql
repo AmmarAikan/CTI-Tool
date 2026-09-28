@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS external_ingestion_operations (
     CONSTRAINT uq_external_ingestion_identity UNIQUE
         (external_job_id, export_run_id, dataset_sha256)
 );
+
+-- CREATE TABLE IF NOT EXISTS does not evolve an already-existing table.
+-- Add newer scheduler/checkpoint columns before any index references them.
+ALTER TABLE external_ingestion_operations
+    ADD COLUMN IF NOT EXISTS priority INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE external_ingestion_operations
+    ADD COLUMN IF NOT EXISTS processed_offset INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE external_ingestion_operations
+    ADD COLUMN IF NOT EXISTS fairness_skips INTEGER NOT NULL DEFAULT 0;
+
 CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_state
     ON external_ingestion_operations (state);
 CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_stage

@@ -3,6 +3,9 @@ from __future__ import annotations
 import threading
 import tempfile
 import unittest
+import re
+import sqlite3
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -21,6 +24,28 @@ from backend.app.services.external_ingestion_service import (FAIRNESS_INTERACTIV
 
 
 IDENTITY = ("job-operation-123456", "ext-operation-123456", "a" * 64)
+SQL_MIGRATION = (Path(__file__).resolve().parents[1]
+                 / "backend/migrations/20260927_add_external_ingestion_operations.sql")
+
+
+def execute_postgres_migration_on_sqlite(connection: sqlite3.Connection) -> None:
+    """Execute the checked-in SQL, adapting only SQLite's missing IF NOT EXISTS syntax."""
+    sql = re.sub(r"(?m)^\s*--.*$", "", SQL_MIGRATION.read_text(encoding="utf-8"))
+    for raw_statement in sql.split(";"):
+        statement = raw_statement.strip()
+        if not statement:
+            continue
+        match = re.fullmatch(
+            r"ALTER TABLE\s+(\w+)\s+ADD COLUMN IF NOT EXISTS\s+(\w+)\s+(.+)",
+            statement, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            table, column, declaration = match.groups()
+            existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if column not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+            continue
+        connection.execute(statement)
+    connection.commit()
 
 
 def engine():
@@ -61,6 +86,87 @@ class ExternalIngestionOperationTests(unittest.TestCase):
         apply_additive_migrations(existing)
         with Session(existing) as session:
             self.assertIsNotNone(session.get(PipelineRun, "preserved-run"))
+
+    def test_actual_sql_migration_evolves_existing_table_idempotently(self):
+        sql = SQL_MIGRATION.read_text(encoding="utf-8")
+        priority_column = sql.index("ADD COLUMN IF NOT EXISTS priority")
+        priority_index = sql.index("CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_priority")
+        self.assertLess(priority_column, priority_index)
+
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        connection.executescript("""
+            CREATE TABLE pipeline_runs (id VARCHAR(36) PRIMARY KEY);
+            CREATE TABLE external_ingestion_operations (
+                id VARCHAR(36) PRIMARY KEY,
+                operation_type VARCHAR(40) NOT NULL DEFAULT 'external_ingestion',
+                state VARCHAR(30) NOT NULL DEFAULT 'queued',
+                stage VARCHAR(40) NOT NULL DEFAULT 'export_ready',
+                retryable BOOLEAN NOT NULL DEFAULT TRUE,
+                attempt_count INTEGER NOT NULL DEFAULT 0,
+                external_job_id VARCHAR(200) NOT NULL,
+                export_run_id VARCHAR(200) NOT NULL,
+                dataset_sha256 VARCHAR(64) NOT NULL,
+                gateway_checkpoint VARCHAR(200),
+                pipeline_run_id VARCHAR(36),
+                collected_count INTEGER NOT NULL DEFAULT 0,
+                exported_count INTEGER NOT NULL DEFAULT 0,
+                imported_count INTEGER NOT NULL DEFAULT 0,
+                created_count INTEGER NOT NULL DEFAULT 0,
+                updated_count INTEGER NOT NULL DEFAULT 0,
+                unchanged_count INTEGER NOT NULL DEFAULT 0,
+                failed_count INTEGER NOT NULL DEFAULT 0,
+                acknowledged_count INTEGER NOT NULL DEFAULT 0,
+                error_code VARCHAR(100), error_category VARCHAR(100), claim_token VARCHAR(36),
+                lease_expires_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                completed_at TIMESTAMPTZ,
+                CONSTRAINT uq_external_ingestion_identity UNIQUE
+                    (external_job_id, export_run_id, dataset_sha256)
+            );
+            CREATE INDEX ix_legacy_external_state ON external_ingestion_operations(state);
+            INSERT INTO external_ingestion_operations
+                (id, external_job_id, export_run_id, dataset_sha256, imported_count)
+            VALUES ('legacy-operation', 'legacy-job', 'legacy-run',
+                    'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 37);
+        """)
+        execute_postgres_migration_on_sqlite(connection)
+        execute_postgres_migration_on_sqlite(connection)
+
+        columns = {row[1]: row for row in connection.execute(
+            "PRAGMA table_info(external_ingestion_operations)")}
+        for name, expected_default in {
+            "priority": "100", "processed_offset": "0", "fairness_skips": "0",
+        }.items():
+            self.assertIn(name, columns)
+            self.assertEqual(columns[name][3], 1)
+            self.assertEqual(columns[name][4], expected_default)
+        row = connection.execute("""
+            SELECT id, external_job_id, export_run_id, dataset_sha256, imported_count,
+                   priority, processed_offset, fairness_skips
+            FROM external_ingestion_operations WHERE id='legacy-operation'
+        """).fetchone()
+        self.assertEqual(row, (
+            "legacy-operation", "legacy-job", "legacy-run", "a" * 64, 37, 100, 0, 0))
+        indexes = {row[1] for row in connection.execute(
+            "PRAGMA index_list(external_ingestion_operations)")}
+        self.assertIn("ix_legacy_external_state", indexes)
+        self.assertIn("ix_external_ingestion_operations_priority", indexes)
+
+    def test_actual_sql_migration_installs_empty_schema_idempotently(self):
+        connection = sqlite3.connect(":memory:")
+        self.addCleanup(connection.close)
+        connection.execute("CREATE TABLE pipeline_runs (id VARCHAR(36) PRIMARY KEY)")
+        execute_postgres_migration_on_sqlite(connection)
+        execute_postgres_migration_on_sqlite(connection)
+        columns = {row[1] for row in connection.execute(
+            "PRAGMA table_info(external_ingestion_operations)")}
+        self.assertTrue({"priority", "processed_offset", "fairness_skips"}.issubset(columns))
+        indexes = {row[1] for row in connection.execute(
+            "PRAGMA index_list(external_ingestion_operations)")}
+        self.assertIn("ix_external_ingestion_operations_priority", indexes)
 
     def test_repeated_and_concurrent_commands_converge_on_one_operation(self):
         db = engine()
