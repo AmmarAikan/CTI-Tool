@@ -358,6 +358,58 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertNotIn("cursor", session.calls[0][2]["params"])
         self.assertEqual(session.calls[0][2]["headers"]["If-None-Match"], '"dataset-v1"')
 
+    def test_external_feed_ack_is_hmac_signed_and_response_verified(self) -> None:
+        secret = "feed-response-secret"
+        checkpoint = "a" * 64
+        ack_response = signed_response(
+            {"status": "acknowledged", "checkpoint": checkpoint}, secret
+        )
+        session = FakeSession([ack_response])
+        connector = ExternalFeedAPIConnector(
+            "https://feed.example.test/api/v1/external-feed",
+            "read-token",
+            hmac_secret=secret,
+            session=session,
+        )
+
+        result = connector.acknowledge(checkpoint)
+
+        self.assertEqual(result["status"], "acknowledged")
+        method, url, request = session.calls[0]
+        self.assertEqual(method, "POST")
+        self.assertEqual(url, "https://feed.example.test/api/v1/external-feed/ack")
+        expected = hmac.new(secret.encode(), request["data"], hashlib.sha256).hexdigest()
+        self.assertEqual(request["headers"]["X-CTI-Ack-Signature"], f"sha256={expected}")
+
+    def test_external_feed_rejects_etag_change_between_pages(self) -> None:
+        first = {
+            "schema_version": "1.0",
+            "feed_id": "feed",
+            "generated_at": "2026-09-25T00:00:00Z",
+            "items": [{"external_id": "one", "title": "One"}],
+            "has_more": True,
+            "next_cursor": "page-2",
+            "checkpoint": "a" * 64,
+        }
+        second = {
+            **first,
+            "items": [{"external_id": "two", "title": "Two"}],
+            "has_more": False,
+            "next_cursor": None,
+            "checkpoint": "b" * 64,
+        }
+        connector = ExternalFeedAPIConnector(
+            "https://feed.example.test/api/v1/external-feed",
+            "token",
+            session=FakeSession([
+                FakeResponse(first, headers={"ETag": '"' + "a" * 64 + '"'}),
+                FakeResponse(second, headers={"ETag": '"' + "b" * 64 + '"'}),
+            ]),
+        )
+
+        with self.assertRaisesRegex(ExternalFeedContractError, "ETag changed"):
+            connector.fetch()
+
     def test_external_feed_full_service_is_idempotent_in_temporary_database(self) -> None:
         payload = {
             "schema_version": "1.0",
@@ -418,6 +470,43 @@ class BackendEnhancementTests(unittest.TestCase):
         self.assertIn("Updated analysis", event.description)
         self.assertEqual(raw_count, 1)
         self.assertEqual(event_count, 1)
+
+    def test_external_feed_failure_before_commit_does_not_ack_or_advance_checkpoint(self) -> None:
+        checkpoint = "c" * 64
+        secret = "feed-response-secret"
+        payload = {
+            "schema_version": "1.0",
+            "feed_id": "failure-test-feed",
+            "generated_at": "2026-09-25T00:00:00Z",
+            "items": [{"external_id": "failure-1", "title": "Failure fixture"}],
+            "has_more": False,
+            "checkpoint": checkpoint,
+        }
+        feed = signed_response(payload, secret)
+        feed.headers["ETag"] = f'"{checkpoint}"'
+        fake_session = FakeSession([feed])
+        connector = ExternalFeedAPIConnector(
+            "https://feed.example.test/api/v1/external-feed",
+            "token",
+            hmac_secret=secret,
+            session=fake_session,
+        )
+        engine = temporary_database_engine()
+        with Session(engine) as session, patch(
+            "backend.app.services.pipeline_service.ExternalCTIPipeline.process_batch",
+            side_effect=RuntimeError("forced before persistence"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "External pipeline failed"):
+                PipelineService(session).run_external_feed(connector)
+            raw_count = session.scalar(select(func.count()).select_from(RawItem))
+            state_source = session.scalar(
+                select(Source).where(Source.name == "Remote External Feed API")
+            )
+
+        self.assertEqual(raw_count, 0)
+        self.assertIsNotNone(state_source)
+        self.assertIsNone((state_source.config or {}).get("checkpoint"))
+        self.assertEqual([call[0] for call in fake_session.calls], ["GET"])
 
     def test_historical_accepted_sync_is_idempotent_and_updates_once(self) -> None:
         def item(content: str) -> dict:

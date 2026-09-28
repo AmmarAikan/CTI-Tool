@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
@@ -250,6 +251,42 @@ class ExternalAcceptedSyncResponse(BaseModel):
 class ExternalJobImportRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     job_id: str = Field(min_length=8, max_length=100)
+
+
+class ExternalIngestionError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str = Field(max_length=100)
+    stage: str = Field(max_length=40)
+    retryable: bool
+    message: str = Field(max_length=200)
+
+
+class ExternalIngestionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: str = Field(max_length=36)
+    operation_type: Literal["external_ingestion"]
+    state: str = Field(max_length=30)
+    stage: str = Field(max_length=40)
+    retryable: bool
+    attempt_count: int = Field(ge=0)
+    external_job_id: str = Field(max_length=200)
+    export_run_id: str = Field(max_length=200)
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    gateway_checkpoint: str | None = Field(default=None, max_length=200)
+    pipeline_run_id: str | None = Field(default=None, max_length=36)
+    collected: int = Field(ge=0)
+    exported: int = Field(ge=0)
+    imported: int = Field(ge=0)
+    created: int = Field(ge=0)
+    updated: int = Field(ge=0)
+    unchanged: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    acknowledged: int = Field(ge=0)
+    error: ExternalIngestionError | None = None
+    created_at: datetime
+    started_at: datetime | None = None
+    updated_at: datetime
+    completed_at: datetime | None = None
 
 
 class IntelligenceIndicatorResponse(BaseModel):

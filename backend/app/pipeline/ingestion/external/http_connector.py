@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,9 @@ class ExternalFeedResult:
     not_modified: bool = False
     response_bytes: int = 0
     duplicate_items: int = 0
+    external_job_id: str | None = None
+    export_run_id: str | None = None
+    dataset_sha256: str | None = None
 
     def details(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,9 @@ class ExternalFeedResult:
             "response_bytes": self.response_bytes,
             "not_modified": self.not_modified,
             "duplicate_items": self.duplicate_items,
+            "external_job_id": self.external_job_id,
+            "export_run_id": self.export_run_id,
+            "dataset_sha256": self.dataset_sha256,
         }
 
 
@@ -54,6 +61,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
     """Pull a paginated, authenticated JSON feed from the private VPS Gateway."""
 
     SIGNATURE_HEADER = "X-CTI-Signature"
+    ACK_SIGNATURE_HEADER = "X-CTI-Ack-Signature"
 
     def __init__(
         self,
@@ -107,6 +115,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
             if response.status_code == 304:
                 result.not_modified = True
                 result.etag = self.if_none_match
+                result.checkpoint = self.checkpoint
                 return result
             response.raise_for_status()
             body = self._response_body(response)
@@ -140,8 +149,14 @@ class ExternalFeedAPIConnector(ExternalConnector):
             result.feed_id = feed_id
             result.schema_version = envelope["schema_version"]
             result.generated_at = envelope["generated_at"]
-            result.etag = response.headers.get("ETag") or result.etag
+            response_etag = response.headers.get("ETag")
+            if result.etag and response_etag and response_etag != result.etag:
+                raise ExternalFeedContractError("ETag changed between pages")
+            result.etag = response_etag or result.etag
             result.checkpoint = envelope.get("checkpoint") or result.checkpoint
+            result.external_job_id = envelope.get("external_job_id") or result.external_job_id
+            result.export_run_id = envelope.get("export_run_id") or result.export_run_id
+            result.dataset_sha256 = envelope.get("dataset_sha256") or result.dataset_sha256
 
             if not envelope["has_more"]:
                 return result
@@ -154,6 +169,47 @@ class ExternalFeedAPIConnector(ExternalConnector):
         raise ExternalFeedContractError(
             f"Feed exceeded EXTERNAL_FEED_MAX_PAGES={self.max_pages}; no partial batch was stored"
         )
+
+    def acknowledge(self, checkpoint: str) -> dict[str, Any]:
+        """Acknowledge only after the caller has durably committed the complete feed."""
+        if not self.hmac_secret:
+            return {"status": "disabled", "checkpoint": checkpoint}
+        normalized = checkpoint.strip().strip('"')
+        if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
+            raise ExternalFeedContractError("External feed checkpoint is not a SHA-256 digest")
+        body = json.dumps(
+            {"checkpoint": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        signature = hmac.new(
+            str(self.hmac_secret or "").encode("utf-8"), body, hashlib.sha256
+        ).hexdigest()
+        response = self.session.post(
+            f"{self.url.rstrip('/')}/ack",
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+                "Content-Type": "application/json",
+                self.ACK_SIGNATURE_HEADER: f"sha256={signature}",
+                "User-Agent": "graduation-cti-backend/2.0",
+            },
+            data=body,
+            timeout=self.timeout,
+            verify=self.verify_tls,
+        )
+        response.raise_for_status()
+        response_body = self._response_body(response)
+        self._verify_signature(response_body, response.headers.get(self.SIGNATURE_HEADER))
+        payload = self._parse_payload(response_body)
+        if (
+            not isinstance(payload, dict)
+            or payload.get("status") != "acknowledged"
+            or str(payload.get("checkpoint") or "") != normalized
+        ):
+            raise ExternalFeedContractError("Gateway returned an invalid acknowledgement")
+        return payload
 
     def healthcheck(self) -> dict[str, Any]:
         try:
@@ -266,6 +322,15 @@ class ExternalFeedAPIConnector(ExternalConnector):
             datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
         except ValueError as exc:
             raise ExternalFeedContractError("generated_at must be a valid ISO-8601 timestamp") from exc
+        external_job_id = str(payload.get("external_job_id") or "") or None
+        export_run_id = str(payload.get("export_run_id") or "") or None
+        dataset_sha256 = str(payload.get("dataset_sha256") or "").removeprefix("sha256:") or None
+        if external_job_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", external_job_id):
+            raise ExternalFeedContractError("external_job_id is invalid")
+        if export_run_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", export_run_id):
+            raise ExternalFeedContractError("export_run_id is invalid")
+        if dataset_sha256 and not re.fullmatch(r"[0-9a-f]{64}", dataset_sha256):
+            raise ExternalFeedContractError("dataset_sha256 is invalid")
         return {
             "schema_version": schema_version,
             "feed_id": feed_id,
@@ -274,6 +339,9 @@ class ExternalFeedAPIConnector(ExternalConnector):
             "has_more": bool(payload.get("has_more", False)),
             "next_cursor": str(payload["next_cursor"]) if payload.get("next_cursor") else None,
             "checkpoint": str(payload["checkpoint"]) if payload.get("checkpoint") else None,
+            "external_job_id": external_job_id,
+            "export_run_id": export_run_id,
+            "dataset_sha256": dataset_sha256,
         }
 
     def _validate_items(self, items: Any) -> list[dict[str, Any]]:
@@ -313,7 +381,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
             status=3,
             backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
-            allowed_methods=frozenset({"GET"}),
+            allowed_methods=frozenset({"GET", "POST"}),
             respect_retry_after_header=True,
         )
         session.mount("https://", HTTPAdapter(max_retries=retry))

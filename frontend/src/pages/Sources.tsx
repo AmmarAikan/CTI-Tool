@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {externalQueryKeys} from '../api/externalQueryKeys';
 import { Link } from 'react-router-dom';
 import { api, ApiError, type AcceptedSyncResult, type ExternalJob, type JobState, type Source } from '../api/client';
-import { externalImportIdentity, refreshAfterExternalImport, useExternalImportLifecycle } from '../api/externalImportLifecycle';
+import { externalImportIdentity, isRetryableExternalImportError, refreshAfterExternalImport, useExternalImportLifecycle } from '../api/externalImportLifecycle';
 import { useAuth } from '../auth/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
@@ -74,7 +74,8 @@ export function ExternalImportStatus({job,onImported}:{job?:ExternalJob;onImport
   const {state}=lifecycle;
   if(state.stage==='import_aborted'||state.stage==='import_succeeded')return null;
   const failed=state.stage==='import_failed';
-  return <div className={`job-panel ${failed?'error-panel':''}`} role={failed?'alert':'status'}><strong>{failed?t('importProcessingFailed'):t('centralImportRunning')}</strong>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{state.stage} · {state.code}</code></details>}{failed&&<button className="button button-secondary" onClick={lifecycle.retry}>{t('retryImport')}</button>}</div>;
+  if(state.stage==='monitoring_paused')return <div className="job-panel" role="status"><strong>{t('monitoringPaused')}</strong><code dir="ltr">{state.stage} · {state.code}</code><button className="button button-secondary" onClick={lifecycle.resume}>{t('resumeMonitoring')}</button></div>;
+  return <div className={`job-panel ${failed?'error-panel':''}`} role={failed?'alert':'status'}><strong>{failed?t('importProcessingFailed'):t('centralImportRunning')}</strong>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{state.stage} · {state.code}</code></details>}{failed&&isRetryableExternalImportError(state.error)&&<button className="button button-secondary" onClick={lifecycle.retry}>{t('retryImport')}</button>}</div>;
 }
 
 function SourceRows({ source, canRun, pending, job, submissionError, onRun, onUpdate, onManage, onImported }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void; onManage:(source:Source,action:'enable'|'disable'|'delete')=>void;onImported:(sourceId:string,result:AcceptedSyncResult)=>void }) {

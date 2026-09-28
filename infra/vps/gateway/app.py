@@ -6,9 +6,11 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,9 @@ STREAM_NAMES = frozenset({"dionaea", "host-auth", "web-access"})
 WEB_BASE_KEY = "_gateway_web_base_offset"
 WEB_LOG_RESERVATION_BYTES = 16 * 1024
 WEB_PAGE_MAX_BYTES = 8 * 1024 * 1024
+JSON_WRITE_BUFFER_BYTES = 1024 * 1024
+FEED_DELIVERY_STATE_VERSION = "1.0"
+FEED_ACK_SIGNATURE_HEADER = "X-CTI-Ack-Signature"
 
 
 def utc_now() -> str:
@@ -94,6 +99,7 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             "/api/v1/sensors/host-auth",
             "/api/v1/external-feed",
             "/api/v1/external-feed/publish",
+            "/api/v1/external-feed/ack",
         }
         if loggable:
             with app.state.write_lock:
@@ -145,12 +151,18 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             raise HTTPException(status_code=422, detail="publish body must be UTF-8 JSON") from exc
         incoming = _normalize_publish(payload, settings)
         with app.state.write_lock:
-            envelope, merge_counts = _merge_feed_snapshot(
+            envelope, merge_counts, unacknowledged_ids = _merge_feed_snapshot(
                 _feed_path(settings), incoming, settings
             )
-            encoded = _json_bytes(envelope)
-            digest = hashlib.sha256(encoded).hexdigest()
-            _atomic_write(_feed_path(settings), encoded)
+            digest, _ = _atomic_write_json(
+                _feed_path(settings), envelope, settings.max_feed_snapshot_bytes
+            )
+            _write_feed_delivery_state(
+                settings,
+                digest,
+                unacknowledged_ids,
+                last_publish=merge_counts,
+            )
         return {
             "status": "accepted",
             "feed_id": settings.feed_id,
@@ -159,6 +171,41 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             **merge_counts,
             "etag": digest,
         }
+
+    @app.post("/api/v1/external-feed/ack")
+    async def acknowledge_external_feed(
+        request: Request,
+        authorization: str | None = Header(default=None),
+        ack_signature: str | None = Header(default=None, alias=FEED_ACK_SIGNATURE_HEADER),
+    ):
+        _authorize(authorization, settings.feed_read_token)
+        length = request.headers.get("content-length")
+        if length and _safe_int(length, settings.max_publish_bytes + 1) > settings.max_publish_bytes:
+            raise HTTPException(status_code=413, detail="ack body exceeds configured limit")
+        body = await request.body()
+        if len(body) > settings.max_publish_bytes:
+            raise HTTPException(status_code=413, detail="ack body exceeds configured limit")
+        expected_signature = hmac.new(
+            settings.feed_hmac_secret.encode("utf-8"), body, hashlib.sha256
+        ).hexdigest()
+        supplied_signature = str(ack_signature or "").removeprefix("sha256=").strip().lower()
+        if not supplied_signature or not hmac.compare_digest(supplied_signature, expected_signature):
+            raise HTTPException(status_code=401, detail="external feed acknowledgement failed")
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise HTTPException(status_code=422, detail="ack body must be UTF-8 JSON") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=422, detail="ack body must be an object")
+        checkpoint = str(payload.get("checkpoint") or "").strip().strip('"')
+        if len(checkpoint) != 64 or any(character not in "0123456789abcdef" for character in checkpoint):
+            raise HTTPException(status_code=422, detail="ack checkpoint must be a SHA-256 digest")
+        external_ids_value = payload.get("external_ids")
+        if external_ids_value is not None and not isinstance(external_ids_value, list):
+            raise HTTPException(status_code=422, detail="ack external_ids must be an array")
+        with app.state.write_lock:
+            result = _acknowledge_feed_delivery(settings, checkpoint, external_ids_value)
+        return _signed_json(result, settings.feed_hmac_secret)
 
     @app.get("/api/v1/external-feed")
     def external_feed(
@@ -186,6 +233,9 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             "schema_version": "1.0",
             "feed_id": payload["feed_id"],
             "generated_at": payload["generated_at"],
+            "external_job_id": payload.get("external_job_id"),
+            "export_run_id": payload.get("export_run_id"),
+            "dataset_sha256": payload.get("dataset_sha256"),
             "items": page,
             "has_more": has_more,
             "next_cursor": _encode_cursor(end, "external-feed", settings.cursor_secret) if has_more else None,
@@ -255,10 +305,22 @@ def _normalize_publish(payload: Any, settings: GatewaySettings) -> dict[str, Any
     items = [_normalize_external_item(value, index) for index, value in enumerate(values)]
     generated_at = str(payload.get("generated_at") or payload.get("completed_at") or utc_now())
     _validate_timestamp(generated_at)
+    external_job_id = str(payload.get("external_job_id") or "")
+    export_run_id = str(payload.get("export_run_id") or payload.get("run_id") or "")
+    dataset_sha256 = str(payload.get("dataset_sha256") or "").removeprefix("sha256:")
+    if external_job_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", external_job_id):
+        raise HTTPException(status_code=422, detail="external job identity is invalid")
+    if export_run_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", export_run_id):
+        raise HTTPException(status_code=422, detail="export run identity is invalid")
+    if dataset_sha256 and not re.fullmatch(r"[0-9a-f]{64}", dataset_sha256):
+        raise HTTPException(status_code=422, detail="dataset digest is invalid")
     return {
         "schema_version": "1.0",
         "feed_id": settings.feed_id,
         "generated_at": generated_at,
+        "external_job_id": external_job_id or None,
+        "export_run_id": export_run_id or None,
+        "dataset_sha256": dataset_sha256 or None,
         "items": items,
     }
 
@@ -267,56 +329,132 @@ def _merge_feed_snapshot(
     path: Path,
     incoming: dict[str, Any],
     settings: GatewaySettings,
-) -> tuple[dict[str, Any], dict[str, int]]:
-    """Merge incremental exports into a bounded snapshot so offline consumers miss no run."""
-    existing_items: list[dict[str, Any]] = []
+) -> tuple[dict[str, Any], dict[str, int], set[str]]:
+    """Merge into a bounded delivery snapshot without evicting unacknowledged records."""
     if path.is_file():
         try:
-            existing = json.loads(
-                _bounded_read(path, settings.max_feed_snapshot_bytes).decode("utf-8")
-            )
+            existing = _bounded_json_load(path, settings.max_feed_snapshot_bytes)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail="stored external feed is invalid") from exc
         if not isinstance(existing, dict) or not isinstance(existing.get("items"), list):
             raise HTTPException(status_code=500, detail="stored external feed contract is invalid")
-        existing_items = existing["items"]
+    else:
+        existing = {"items": []}
+    existing_items = existing["items"]
 
-    merged: dict[str, dict[str, Any]] = {}
+    positions: dict[str, int] = {}
+    retained = 0
     for index, item in enumerate(existing_items):
         if not isinstance(item, dict) or not str(item.get("external_id") or "").strip():
             raise HTTPException(
                 status_code=500,
                 detail=f"stored external feed item {index} is invalid",
             )
-        merged[str(item["external_id"])] = item
+        external_id = str(item["external_id"])
+        position = positions.get(external_id)
+        if position is None:
+            positions[external_id] = retained
+            existing_items[retained] = item
+            retained += 1
+        else:
+            existing_items[position] = item
+    del existing_items[retained:]
+
+    previous_count = len(existing_items)
+    existing_digest = _sha256_file(path) if path.is_file() else None
+    unacknowledged_ids, _ = _load_feed_delivery_state(
+        settings,
+        existing_digest,
+        {str(item["external_id"]) for item in existing_items},
+    )
+    existing_identity = (existing.get("external_job_id"), existing.get("export_run_id"),
+                         existing.get("dataset_sha256"))
+    incoming_identity = (incoming.get("external_job_id"), incoming.get("export_run_id"),
+                         incoming.get("dataset_sha256"))
+    if unacknowledged_ids and incoming_identity != existing_identity:
+        raise HTTPException(status_code=409,
+            detail="unacknowledged feed identity must be committed before publishing another export")
 
     inserted = updated = unchanged = 0
+    incoming_by_id: dict[str, dict[str, Any]] = {}
     for item in incoming["items"]:
+        incoming_by_id[str(item["external_id"])] = item
+    overlap_count = len(set(positions).intersection(incoming_by_id))
+    new_count = len(set(incoming_by_id).difference(positions))
+    for external_id in sorted(incoming_by_id):
+        item = incoming_by_id[external_id]
         external_id = str(item["external_id"])
-        previous = merged.get(external_id)
-        if previous is None:
+        position = positions.get(external_id)
+        if position is None:
             inserted += 1
-        elif previous == item:
+            positions[external_id] = len(existing_items)
+            existing_items.append(item)
+            unacknowledged_ids.add(external_id)
+        elif existing_items[position] == item:
             unchanged += 1
         else:
             updated += 1
-        merged[external_id] = item
+            existing_items[position] = item
+            unacknowledged_ids.add(external_id)
 
-    if len(merged) > settings.max_feed_items:
-        raise HTTPException(status_code=413, detail="cumulative feed contains too many items")
-    envelope = {
-        "schema_version": "1.0",
-        "feed_id": settings.feed_id,
-        "generated_at": incoming["generated_at"],
-        "items": [merged[key] for key in sorted(merged)],
-    }
-    if len(_json_bytes(envelope)) > settings.max_feed_snapshot_bytes:
+    existing_items.sort(key=lambda item: str(item["external_id"]))
+    existing.clear()
+    existing.update(
+        {
+            "schema_version": "1.0",
+            "feed_id": settings.feed_id,
+            "generated_at": incoming["generated_at"],
+            "external_job_id": incoming.get("external_job_id"),
+            "export_run_id": incoming.get("export_run_id"),
+            "dataset_sha256": incoming.get("dataset_sha256"),
+            "items": existing_items,
+        }
+    )
+    initial_size = _streamed_json_size(existing)
+    safe_candidates = sorted(
+        (item for item in existing_items if str(item["external_id"]) not in unacknowledged_ids),
+        key=_retention_key,
+    )
+    pruned_ids: set[str] = set()
+    candidate_index = 0
+    current_size = initial_size
+    current_count = len(existing_items)
+    encoder = _canonical_json_encoder()
+    while current_count > settings.max_feed_items or current_size > settings.max_feed_snapshot_bytes:
+        if candidate_index >= len(safe_candidates):
+            raise HTTPException(
+                status_code=413,
+                detail="feed capacity is exhausted by unacknowledged items",
+            )
+        candidate = safe_candidates[candidate_index]
+        candidate_index += 1
+        external_id = str(candidate["external_id"])
+        pruned_ids.add(external_id)
+        encoded_size = len(encoder.encode(candidate).encode("utf-8"))
+        current_size -= encoded_size + (1 if current_count > 1 else 0)
+        current_count -= 1
+    if pruned_ids:
+        existing["items"] = [
+            item for item in existing_items if str(item["external_id"]) not in pruned_ids
+        ]
+    final_size = _streamed_json_size(existing)
+    if final_size > settings.max_feed_snapshot_bytes:
         raise HTTPException(status_code=413, detail="cumulative feed exceeds configured limit")
-    return envelope, {
+    unacknowledged_ids.intersection_update(
+        str(item["external_id"]) for item in existing["items"]
+    )
+    counts = {
+        "previous_count": previous_count,
+        "incoming_count": len(incoming["items"]),
+        "overlap_count": overlap_count,
+        "new_count": new_count,
+        "pruned_count": len(pruned_ids),
+        "final_count": len(existing["items"]),
         "inserted_items": inserted,
         "updated_items": updated,
         "unchanged_items": unchanged,
     }
+    return existing, counts, unacknowledged_ids
 
 
 def _normalize_external_item(value: Any, index: int) -> dict[str, Any]:
@@ -587,6 +725,159 @@ def _feed_path(settings: GatewaySettings) -> Path:
     return settings.data_dir / "external_feed.json"
 
 
+def _feed_delivery_state_path(settings: GatewaySettings) -> Path:
+    return settings.data_dir / "external_feed_delivery.json"
+
+
+def _canonical_json_encoder() -> json.JSONEncoder:
+    return json.JSONEncoder(
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+
+
+def _streamed_json_size(value: Any) -> int:
+    encoder = _canonical_json_encoder()
+    return sum(len(chunk.encode("utf-8")) for chunk in _iter_json_chunks(value, encoder)) + 1
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _load_feed_delivery_state(
+    settings: GatewaySettings,
+    snapshot_etag: str | None,
+    existing_ids: set[str],
+) -> tuple[set[str], dict[str, Any]]:
+    """Return protected IDs; missing/stale state fails closed by protecting everything."""
+    state_path = _feed_delivery_state_path(settings)
+    if not snapshot_etag or not state_path.is_file():
+        return set(existing_ids), {}
+    try:
+        state = _bounded_json_load(state_path, settings.max_feed_snapshot_bytes)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+        return set(existing_ids), {}
+    if (
+        not isinstance(state, dict)
+        or state.get("schema_version") != FEED_DELIVERY_STATE_VERSION
+        or state.get("snapshot_etag") != snapshot_etag
+        or not isinstance(state.get("unacknowledged_ids"), list)
+    ):
+        return set(existing_ids), {}
+    unacknowledged = {
+        str(external_id)
+        for external_id in state["unacknowledged_ids"]
+        if str(external_id) in existing_ids
+    }
+    return unacknowledged, state
+
+
+def _write_feed_delivery_state(
+    settings: GatewaySettings,
+    snapshot_etag: str,
+    unacknowledged_ids: set[str],
+    *,
+    last_publish: dict[str, int] | None = None,
+    last_ack: dict[str, Any] | None = None,
+) -> None:
+    state_path = _feed_delivery_state_path(settings)
+    existing: dict[str, Any] = {}
+    if state_path.is_file():
+        try:
+            value = _bounded_json_load(state_path, settings.max_feed_snapshot_bytes)
+            if isinstance(value, dict):
+                existing = value
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, HTTPException):
+            existing = {}
+    state = {
+        "schema_version": FEED_DELIVERY_STATE_VERSION,
+        "snapshot_etag": snapshot_etag,
+        "unacknowledged_ids": sorted(unacknowledged_ids),
+        "last_publish": last_publish if last_publish is not None else existing.get("last_publish"),
+        "last_ack": last_ack if last_ack is not None else existing.get("last_ack"),
+    }
+    _atomic_write_json(state_path, state, settings.max_feed_snapshot_bytes)
+
+
+def _acknowledge_feed_delivery(
+    settings: GatewaySettings,
+    checkpoint: str,
+    external_ids_value: list[Any] | None,
+) -> dict[str, Any]:
+    path = _feed_path(settings)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no external feed has been published")
+    snapshot_etag = _sha256_file(path)
+    if not hmac.compare_digest(checkpoint, snapshot_etag):
+        raise HTTPException(status_code=409, detail="external feed acknowledgement is stale")
+    try:
+        snapshot = _bounded_json_load(path, settings.max_feed_snapshot_bytes)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="stored external feed is invalid") from exc
+    if not isinstance(snapshot, dict) or not isinstance(snapshot.get("items"), list):
+        raise HTTPException(status_code=500, detail="stored external feed contract is invalid")
+    existing_ids = {str(item.get("external_id") or "") for item in snapshot["items"]}
+    if "" in existing_ids:
+        raise HTTPException(status_code=500, detail="stored external feed contains invalid identity")
+    unacknowledged_ids, state = _load_feed_delivery_state(
+        settings, snapshot_etag, existing_ids
+    )
+    if external_ids_value is None:
+        acknowledged_ids = existing_ids
+        acknowledgement_scope = "complete_snapshot"
+    else:
+        if len(external_ids_value) > settings.max_feed_items:
+            raise HTTPException(status_code=413, detail="ack contains too many identities")
+        acknowledged_ids = {str(external_id).strip() for external_id in external_ids_value}
+        if "" in acknowledged_ids or not acknowledged_ids.issubset(existing_ids):
+            raise HTTPException(status_code=422, detail="ack contains an unknown external identity")
+        acknowledgement_scope = "verified_subset"
+    previously_unacknowledged = len(unacknowledged_ids)
+    unacknowledged_ids.difference_update(acknowledged_ids)
+    last_ack = {
+        "checkpoint": checkpoint,
+        "scope": acknowledgement_scope,
+        "acknowledged_at": utc_now(),
+        "acknowledged_count": len(acknowledged_ids),
+        "remaining_unacknowledged_count": len(unacknowledged_ids),
+    }
+    _write_feed_delivery_state(
+        settings,
+        snapshot_etag,
+        unacknowledged_ids,
+        last_publish=state.get("last_publish") if isinstance(state, dict) else None,
+        last_ack=last_ack,
+    )
+    return {
+        "status": "acknowledged",
+        "checkpoint": checkpoint,
+        "scope": acknowledgement_scope,
+        "snapshot_items": len(existing_ids),
+        "acknowledged_items": len(acknowledged_ids),
+        "newly_acknowledged_items": previously_unacknowledged - len(unacknowledged_ids),
+        "unacknowledged_items": len(unacknowledged_ids),
+    }
+
+
+def _retention_key(item: dict[str, Any]) -> tuple[str, str]:
+    """Oldest acknowledged item is pruned first, with identity as a stable tie-breaker."""
+    timestamp = str(item.get("collected_at") or item.get("published_at") or "")
+    try:
+        normalized = datetime.fromisoformat(timestamp.replace("Z", "+00:00")).astimezone(
+            timezone.utc
+        ).isoformat()
+    except (ValueError, TypeError):
+        normalized = ""
+    return normalized, str(item["external_id"])
+
+
 def _web_path(settings: GatewaySettings) -> Path:
     return settings.data_dir / "web_access.jsonl"
 
@@ -597,11 +888,84 @@ def _bounded_read(path: Path, limit: int) -> bytes:
     return path.read_bytes()
 
 
+def _bounded_json_load(path: Path, limit: int) -> Any:
+    if path.stat().st_size > limit:
+        raise HTTPException(status_code=413, detail="stored object exceeds configured limit")
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def _atomic_write(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_bytes(data)
     os.replace(temporary, path)
+
+
+def _atomic_write_json(path: Path, value: Any, max_bytes: int) -> tuple[str, int]:
+    """Serialize once in bounded chunks and atomically replace the destination."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    digest = hashlib.sha256()
+    written = 0
+    encoder = _canonical_json_encoder()
+    buffer = bytearray()
+    try:
+        with temporary.open("wb") as handle:
+            for text in _iter_json_chunks(value, encoder):
+                encoded = text.encode("utf-8")
+                written += len(encoded)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail="cumulative feed exceeds configured limit",
+                    )
+                buffer.extend(encoded)
+                if len(buffer) >= JSON_WRITE_BUFFER_BYTES:
+                    handle.write(buffer)
+                    digest.update(buffer)
+                    buffer.clear()
+            if written + 1 > max_bytes:
+                raise HTTPException(
+                    status_code=413,
+                    detail="cumulative feed exceeds configured limit",
+                )
+            buffer.extend(b"\n")
+            written += 1
+            handle.write(buffer)
+            digest.update(buffer)
+        os.replace(temporary, path)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return digest.hexdigest(), written
+
+
+def _iter_json_chunks(value: Any, encoder: json.JSONEncoder) -> Iterator[str]:
+    """Keep the large feed list streaming while encoding each bounded item efficiently."""
+    if not (
+        isinstance(value, dict)
+        and isinstance(value.get("items"), list)
+        and all(isinstance(key, str) for key in value)
+    ):
+        yield from encoder.iterencode(value)
+        return
+    yield "{"
+    for key_index, key in enumerate(sorted(value)):
+        if key_index:
+            yield ","
+        yield encoder.encode(key)
+        yield ":"
+        if key != "items":
+            yield encoder.encode(value[key])
+            continue
+        yield "["
+        for item_index, item in enumerate(value[key]):
+            if item_index:
+                yield ","
+            yield encoder.encode(item)
+        yield "]"
+    yield "}"
 
 
 def _json_bytes(value: Any) -> bytes:

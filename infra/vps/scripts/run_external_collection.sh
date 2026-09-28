@@ -174,9 +174,71 @@ fi
 
 current_stage=export_retrieval
 echo "external collection export invocation_id=${invocation_id} job_id=${job_id} command_id=${command_id} stage=export_retrieval state=started"
-curl --fail-with-body --silent --show-error --max-time 60 \
-  -H "${auth_header}" \
-  "${base_url}/exports/latest" >"${work_dir}/export.json"
+IFS=$'\t' read -r export_run_id dataset_sha256 < <(python3 - "${work_dir}/status.json" <<'PY'
+import json
+import pathlib
+import re
+import sys
+
+status = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+result = status.get("result") if isinstance(status.get("result"), dict) else {}
+identity = result.get("export") if isinstance(result.get("export"), dict) else {}
+run_id = identity.get("run_id")
+digest = str(identity.get("dataset_sha256") or "").removeprefix("sha256:")
+if identity.get("status") != "completed" or not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", run_id):
+    raise SystemExit("terminal job does not contain a completed export identity")
+if not re.fullmatch(r"[0-9a-f]{64}", digest):
+    raise SystemExit("terminal job export digest is invalid")
+print(f"{run_id}\t{digest}")
+PY
+)
+offset=0
+page_number=0
+total=-1
+while [[ "${total}" -lt 0 || "${offset}" -lt "${total}" ]]; do
+  page_number=$((page_number + 1))
+  if [[ "${page_number}" -gt 80 ]]; then
+    echo "exact export exceeds bounded page count" >&2
+    exit 1
+  fi
+  page_path="${work_dir}/export-page-${page_number}.json"
+  curl --fail-with-body --silent --show-error --max-time 60 \
+    -H "${auth_header}" \
+    "${base_url}/exports/accepted?run_id=${export_run_id}&limit=250&offset=${offset}" >"${page_path}"
+  IFS=$'\t' read -r page_count total < <(python3 - "${page_path}" "${export_run_id}" "${dataset_sha256}" <<'PY'
+import json
+import pathlib
+import sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+digest = str(value.get("dataset_sha256") or "").removeprefix("sha256:")
+if value.get("export_run_id") != sys.argv[2] or digest != sys.argv[3]:
+    raise SystemExit("exact export page identity changed")
+items, total = value.get("items"), value.get("total")
+if not isinstance(items, list) or not isinstance(total, int) or total < 0:
+    raise SystemExit("exact export page contract is invalid")
+print(f"{len(items)}\t{total}")
+PY
+  )
+  if [[ "${page_count}" -eq 0 && "${offset}" -lt "${total}" ]]; then
+    echo "exact export pagination stopped before total" >&2
+    exit 1
+  fi
+  offset=$((offset + page_count))
+done
+
+python3 - "${work_dir}" "${work_dir}/publish-payload.json" "${job_id}" "${export_run_id}" "${dataset_sha256}" <<'PY'
+import json
+import pathlib
+import sys
+root = pathlib.Path(sys.argv[1])
+items = []
+for path in sorted(root.glob("export-page-*.json"), key=lambda value: int(value.stem.rsplit("-", 1)[1])):
+    items.extend(json.loads(path.read_text(encoding="utf-8"))["items"])
+payload = {"schema_version": "1.0", "external_job_id": sys.argv[3],
+           "export_run_id": sys.argv[4], "dataset_sha256": sys.argv[5], "items": items}
+pathlib.Path(sys.argv[2]).write_text(
+    json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+PY
 echo "external collection export invocation_id=${invocation_id} job_id=${job_id} command_id=${command_id} stage=export_retrieval state=completed"
 
 current_stage=gateway_publish
@@ -184,7 +246,7 @@ curl --fail-with-body --silent --show-error --max-time 120 \
   -X POST \
   -H "${publish_header}" \
   -H "Content-Type: application/json" \
-  --data-binary "@${work_dir}/export.json" \
+  --data-binary "@${work_dir}/publish-payload.json" \
   "${gateway_url}" >"${work_dir}/publish.json"
 
 python3 - "${work_dir}/publish.json" "${state}" "${invocation_id}" "${job_id}" "${command_id}" <<'PY'

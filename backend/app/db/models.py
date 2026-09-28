@@ -92,6 +92,42 @@ class PipelineRun(Base):
     source: Mapped[Source | None] = relationship(back_populates="runs")
 
 
+class ExternalIngestionOperation(Base):
+    __tablename__ = "external_ingestion_operations"
+    __table_args__ = (
+        UniqueConstraint("external_job_id", "export_run_id", "dataset_sha256",
+                         name="uq_external_ingestion_identity"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    operation_type: Mapped[str] = mapped_column(String(40), default="external_ingestion")
+    state: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    stage: Mapped[str] = mapped_column(String(40), default="export_ready", index=True)
+    retryable: Mapped[bool] = mapped_column(Boolean, default=True)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0)
+    external_job_id: Mapped[str] = mapped_column(String(200), index=True)
+    export_run_id: Mapped[str] = mapped_column(String(200), index=True)
+    dataset_sha256: Mapped[str] = mapped_column(String(64), index=True)
+    gateway_checkpoint: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    pipeline_run_id: Mapped[str | None] = mapped_column(ForeignKey("pipeline_runs.id", ondelete="SET NULL"), nullable=True)
+    collected_count: Mapped[int] = mapped_column(Integer, default=0)
+    exported_count: Mapped[int] = mapped_column(Integer, default=0)
+    imported_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_count: Mapped[int] = mapped_column(Integer, default=0)
+    updated_count: Mapped[int] = mapped_column(Integer, default=0)
+    unchanged_count: Mapped[int] = mapped_column(Integer, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, default=0)
+    acknowledged_count: Mapped[int] = mapped_column(Integer, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_category: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    claim_token: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ThreatEvent(Base):
     __tablename__ = "threat_events"
 
