@@ -10,7 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import TestClient
 
 from backend.app.pipeline.ingestion.external.dark_web_connector import (
     DarkWebConfigurationError, DarkWebSource, TorResponse, load_dark_web_config,

@@ -16,7 +16,7 @@ import unittest
 from pathlib import Path
 from dataclasses import replace
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import TestClient
 
 from tests.test_vps_gateway import gateway
 

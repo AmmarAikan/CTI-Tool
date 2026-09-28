@@ -161,18 +161,21 @@ class DionaeaAPIConnector(InternalConnector):
             response.raise_for_status()
             body = self._response_body(response)
             self._verify_signature(body, response.headers.get(self.SIGNATURE_HEADER))
-            self._validate_envelope(self._parse(body))
+            envelope = self._validate_envelope(self._parse(body))
+            availability = envelope.get("availability_state") or "available"
             return {
                 "configured": True,
-                "reachable": True,
+                "reachable": availability in {"available", "running_without_docker_healthcheck"},
                 "contract_valid": True,
                 "hmac_verification": bool(self.hmac_secret),
+                "availability_state": availability,
             }
         except (requests.RequestException, ValueError, TypeError) as exc:
             return {
                 "configured": True,
                 "reachable": False,
                 "error_type": type(exc).__name__,
+                "availability_state": "unavailable",
             }
 
     def _response_body(self, response: requests.Response) -> bytes:
@@ -242,6 +245,7 @@ class DionaeaAPIConnector(InternalConnector):
             "has_more": bool(payload.get("has_more", False)),
             "next_cursor": str(payload["next_cursor"]) if payload.get("next_cursor") else None,
             "checkpoint": str(payload["checkpoint"]) if payload.get("checkpoint") else None,
+            "availability_state": str(payload.get("availability_state") or "available"),
         }
 
     def _headers(self) -> dict[str, str]:

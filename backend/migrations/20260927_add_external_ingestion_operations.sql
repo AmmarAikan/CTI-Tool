@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS external_ingestion_operations (
     stage VARCHAR(40) NOT NULL DEFAULT 'export_ready',
     retryable BOOLEAN NOT NULL DEFAULT TRUE,
     attempt_count INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 100,
     external_job_id VARCHAR(200) NOT NULL,
     export_run_id VARCHAR(200) NOT NULL,
     dataset_sha256 VARCHAR(64) NOT NULL,
@@ -19,6 +20,8 @@ CREATE TABLE IF NOT EXISTS external_ingestion_operations (
     unchanged_count INTEGER NOT NULL DEFAULT 0,
     failed_count INTEGER NOT NULL DEFAULT 0,
     acknowledged_count INTEGER NOT NULL DEFAULT 0,
+    processed_offset INTEGER NOT NULL DEFAULT 0,
+    fairness_skips INTEGER NOT NULL DEFAULT 0,
     error_code VARCHAR(100),
     error_category VARCHAR(100),
     claim_token VARCHAR(36),
@@ -38,3 +41,5 @@ CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_lease
     ON external_ingestion_operations (lease_expires_at);
 CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_updated
     ON external_ingestion_operations (updated_at);
+CREATE INDEX IF NOT EXISTS ix_external_ingestion_operations_priority
+    ON external_ingestion_operations (priority, created_at);

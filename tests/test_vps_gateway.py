@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import asyncio
 import importlib.util
 import json
 import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
+import httpx
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import TestClient
 
 ROOT = Path(__file__).resolve().parents[1]
 GATEWAY_PATH = ROOT / "infra" / "vps" / "gateway" / "app.py"
@@ -127,19 +130,100 @@ class VPSGatewayTests(unittest.TestCase):
             headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
             json={**identity, "items": [{"record_id": "identity-1", "title": "One"}]})
         self.assertEqual(published.status_code, 202)
-        pulled = self.client.get("/api/v1/external-feed",
+        pulled = self.client.get("/api/v1/external-feed", params=identity,
             headers={"Authorization": f"Bearer {self.settings.feed_read_token}"})
         self.assertEqual({key: pulled.json()[key] for key in identity}, identity)
         rejected = self.client.post("/api/v1/external-feed/publish",
             headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
             json={**identity, "dataset_sha256": "invalid", "items": []})
         self.assertEqual(rejected.status_code, 422)
+        second_identity = {**identity, "external_job_id": "job-identity-654321",
+                           "export_run_id": "ext-identity-654321", "dataset_sha256": "c" * 64}
         conflicting = self.client.post("/api/v1/external-feed/publish",
             headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
-            json={**identity, "external_job_id": "job-identity-654321",
-                  "export_run_id": "ext-identity-654321", "dataset_sha256": "c" * 64,
+            json={**second_identity,
                   "items": [{"record_id": "identity-2", "title": "Two"}]})
-        self.assertEqual(conflicting.status_code, 409)
+        self.assertEqual(conflicting.status_code, 202)
+        second = self.client.get("/api/v1/external-feed", params=second_identity,
+            headers={"Authorization": f"Bearer {self.settings.feed_read_token}"})
+        self.assertEqual([item["external_id"] for item in second.json()["items"]], ["identity-2"])
+        original = self.client.get("/api/v1/external-feed", params=identity,
+            headers={"Authorization": f"Bearer {self.settings.feed_read_token}"})
+        self.assertEqual([item["external_id"] for item in original.json()["items"]], ["identity-1"])
+
+    def test_cross_export_cursor_is_rejected(self) -> None:
+        first = {"external_job_id": "job-cursor-111111", "export_run_id": "run-cursor-111111",
+                 "dataset_sha256": "1" * 64}
+        second = {"external_job_id": "job-cursor-222222", "export_run_id": "run-cursor-222222",
+                  "dataset_sha256": "2" * 64}
+        headers = {"Authorization": f"Bearer {self.settings.feed_publish_token}"}
+        for identity in (first, second):
+            response = self.client.post("/api/v1/external-feed/publish", headers=headers,
+                json={**identity, "items": [{"record_id": f"{identity['external_job_id']}-{i}",
+                                              "title": str(i)} for i in range(2)]})
+            self.assertEqual(response.status_code, 202)
+        read = {"Authorization": f"Bearer {self.settings.feed_read_token}"}
+        page = self.client.get("/api/v1/external-feed", headers=read,
+                               params={**first, "limit": 1}).json()
+        rejected = self.client.get("/api/v1/external-feed", headers=read,
+                                   params={**second, "limit": 1,
+                                           "cursor": page["next_cursor"]})
+        self.assertEqual(rejected.status_code, 422)
+
+    def test_legacy_migration_preserves_all_3059_protected_ids(self) -> None:
+        legacy = gateway._normalize_publish({"items": [
+            {"record_id": f"legacy-{index:04d}", "title": str(index)}
+            for index in range(3059)]}, self.settings)
+        digest, _ = gateway._atomic_write_json(
+            gateway._feed_path(self.settings), legacy, self.settings.max_feed_snapshot_bytes)
+        protected = {f"legacy-{index:04d}" for index in range(3059)}
+        gateway._write_feed_delivery_state(self.settings, digest, protected)
+        identity = {"external_job_id": "job-ui-12345678", "export_run_id": "run-ui-12345678",
+                    "dataset_sha256": "f" * 64}
+        published = self.client.post("/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={**identity, "items": [{"record_id": f"ui-{index:02d}", "title": str(index)}
+                                        for index in range(15)]})
+        self.assertEqual(published.status_code, 202)
+        state = gateway._load_batch_state(self.settings)
+        self.assertEqual(state["legacy_backlog"]["item_count"], 3059)
+        self.assertEqual(set(state["legacy_backlog"]["protected_ids"]), protected)
+        exact = self.client.get("/api/v1/external-feed", params=identity,
+            headers={"Authorization": f"Bearer {self.settings.feed_read_token}"})
+        self.assertEqual(len(exact.json()["items"]), 15)
+
+    def test_health_remains_responsive_during_concurrent_exact_reads(self) -> None:
+        identity = {"external_job_id": "job-health-123456", "export_run_id": "run-health-123456",
+                    "dataset_sha256": "e" * 64}
+        published = self.client.post("/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={**identity, "items": [{"record_id": f"health-{index:04d}",
+                                          "title": str(index), "content": "x" * 256}
+                                         for index in range(1000)]})
+        self.assertEqual(published.status_code, 202)
+
+        async def exercise():
+            transport = httpx.ASGITransport(app=self.client.app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test",
+                                         headers={"Accept-Encoding": "identity"}) as client:
+                read_headers = {"Authorization": f"Bearer {self.settings.feed_read_token}"}
+                reads = [client.get("/api/v1/external-feed", params={**identity, "limit": 100},
+                                    headers=read_headers) for _ in range(8)]
+                health = [client.get("/health") for _ in range(8)]
+                return await asyncio.gather(*(reads + health))
+        responses = asyncio.run(exercise())
+        self.assertTrue(all(response.status_code == 200 for response in responses))
+
+    def test_dionaea_health_states_do_not_require_docker_health_metadata(self) -> None:
+        disabled = replace(self.settings, dionaea_enabled=False)
+        self.assertEqual(gateway._dionaea_state(disabled), "disabled")
+        self.assertEqual(gateway._dionaea_state(self.settings), "unavailable")
+        running = replace(self.settings, dionaea_container_running=True)
+        self.assertEqual(gateway._dionaea_state(running),
+                         "running_without_docker_healthcheck")
+        self.dionaea_path.parent.mkdir(parents=True, exist_ok=True)
+        self.dionaea_path.write_text("[]", encoding="utf-8")
+        self.assertEqual(gateway._dionaea_state(self.settings), "available")
 
     def test_sensor_stream_and_ssh_parser_are_bounded_structured_json(self) -> None:
         record = {

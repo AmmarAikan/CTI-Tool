@@ -35,7 +35,7 @@ Authorization: Bearer <feed-publish-token>
 Content-Type: application/json
 ```
 
-The body may be the versioned envelope or the accepted dataset/list shape produced by External Sources. Each run-scoped export is merged into a bounded delivery snapshot by stable external identity. New records are inserted, changed records replace their older representation, and unchanged records are retained once. New and changed records remain protected until Central Backend durably commits the complete snapshot and acknowledges its checkpoint. If capacity is reached, the Gateway prunes only acknowledged records, oldest `collected_at`/`published_at` first with `external_id` as the deterministic tie-breaker. This prevents Central Backend from missing a collection window while it is unavailable without turning the Gateway into the permanent CTI archive. The Gateway applies request/snapshot byte bounds, a cumulative item bound, stable identity/content checks, timestamp validation, metadata secret-key removal, locking, and an atomic snapshot write. Missing or stale delivery state fails closed by treating every retained item as unacknowledged. A rejected merge preserves the previous snapshot. The publish token cannot read sensors or access MISP. The response reports `previous_count`, `incoming_count`, `overlap_count`, `new_count`, `pruned_count`, `final_count`, the legacy inserted/updated/unchanged counters, and the ETag.
+Modern publishers provide `external_job_id`, `export_run_id`, and `dataset_sha256` together. The Gateway stores each identity as an immutable batch and never merges another export into it. Reads and ACKs repeat all three fields. Pagination cursors are HMAC-bound to that identity and the immutable batch checkpoint. Historical snapshots without a complete identity remain an isolated protected backlog and are never silently acknowledged, rewritten, or discarded during migration.
 
 ## Durable delivery acknowledgement
 
@@ -51,6 +51,19 @@ X-CTI-Ack-Signature: sha256=<HMAC-SHA256 of the exact request body>
 ```
 
 The acknowledgement is accepted only while the checkpoint still matches the current snapshot. A stale checkpoint receives `409` and leaves every unacknowledged record protected. The operation is idempotent. The Gateway response is signed with the normal `X-CTI-Signature` response HMAC. A restricted `external_ids` subset may be supplied only for a verified one-time migration of records already proven byte-for-byte durable in PostgreSQL; normal consumers always acknowledge the complete snapshot.
+
+## Scheduling and restart guarantees
+
+Frontend-created exports use priority `100` and are claimed FIFO by creation time.
+An adopted legacy Gateway snapshot uses priority `0`. Backlog work commits at most
+one configured processing batch per claim, persists `processed_offset` in the same
+database transaction as that batch, releases its lease, and then becomes eligible
+for another claim.
+
+Every interactive claim durably increments `fairness_skips` on pending backlog
+operations. After 10 overtakes, the oldest backlog receives one committed batch;
+its counter resets and interactive FIFO scheduling resumes. Worker restarts do not
+reset fairness. Scheduling never yields inside an open database transaction.
 
 ## Response envelope
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from backend.app.db.database import Base
-from backend.app.db.models import PipelineRun, RawItem, Source, ThreatEvent
+from backend.app.db.models import ExternalIngestionOperation, PipelineRun, RawItem, Source, ThreatEvent
 from backend.app.pipeline.common.cti_schema import CTIObject, RawRecord
 from backend.app.services.pipeline_service import PipelineService
 
@@ -115,6 +115,53 @@ class NotModifiedConnector:
 
 
 class ExternalFeedBatchingTests(unittest.TestCase):
+    def test_processed_offset_commits_with_batch_and_restart_resumes_next_record(self) -> None:
+        engine = database_engine()
+        values = [record(index) for index in range(3)]
+        settings = SimpleNamespace(external_feed_processing_batch_size=2)
+        first_batch = True
+        with Session(engine, expire_on_commit=False) as session:
+            operation = ExternalIngestionOperation(
+                external_job_id="job-offset-123456", export_run_id="run-offset-123456",
+                dataset_sha256="d" * 64, state="central_importing", stage="persisting")
+            session.add(operation); session.commit()
+
+            def progress(offset, counts):
+                current = session.get(ExternalIngestionOperation, operation.id)
+                current.processed_offset = offset
+                current.imported_count = counts["stored"]
+
+            def fail_second(batch):
+                nonlocal first_batch
+                if first_batch:
+                    first_batch = False
+                    return [cti_object(value) for value in batch]
+                raise RuntimeError("restart boundary")
+
+            service = PipelineService(session)
+            with patch("backend.app.services.pipeline_service.get_settings", return_value=settings), patch(
+                "backend.app.services.pipeline_service.ExternalCTIPipeline",
+                return_value=SimpleNamespace(process_batch=fail_second)):
+                with self.assertRaisesRegex(RuntimeError, "External pipeline failed"):
+                    service._run_external_records(values, details={"transport": "restart"},
+                                                  progress_callback=progress)
+            session.refresh(operation)
+            self.assertEqual(operation.processed_offset, 2)
+            run = session.scalar(select(PipelineRun))
+            self.assertEqual(session.scalar(select(func.count()).select_from(RawItem)), 2)
+
+            with patch("backend.app.services.pipeline_service.get_settings", return_value=settings), patch(
+                "backend.app.services.pipeline_service.ExternalCTIPipeline",
+                return_value=SimpleNamespace(process_batch=lambda batch: [cti_object(value) for value in batch])):
+                service._run_external_records(values, details={"transport": "restart"},
+                                              existing_run_id=run.id,
+                                              start_offset=operation.processed_offset,
+                                              progress_callback=progress)
+            session.refresh(operation)
+            self.assertEqual(operation.processed_offset, 3)
+            self.assertEqual(session.scalar(select(func.count()).select_from(RawItem)), 3)
+            self.assertEqual(session.scalar(select(func.count()).select_from(ThreatEvent)), 3)
+
     def test_not_modified_replay_preserves_checkpoint_without_second_ack(self) -> None:
         engine = database_engine()
         checkpoint = "f" * 64

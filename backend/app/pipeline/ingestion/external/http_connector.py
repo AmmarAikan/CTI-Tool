@@ -80,6 +80,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
         session: requests.Session | None = None,
         if_none_match: str | None = None,
         checkpoint: str | None = None,
+        expected_identity: tuple[str, str, str] | None = None,
     ) -> None:
         self.url = url.strip()
         self.token = token
@@ -92,6 +93,7 @@ class ExternalFeedAPIConnector(ExternalConnector):
         self.page_size = max(1, min(page_size, 1000))
         self.if_none_match = if_none_match
         self.checkpoint = checkpoint
+        self.expected_identity = expected_identity
         self.session = session or self._session()
         self.last_result: ExternalFeedResult | None = None
         self._validate_url(allow_http)
@@ -177,8 +179,12 @@ class ExternalFeedAPIConnector(ExternalConnector):
         normalized = checkpoint.strip().strip('"')
         if len(normalized) != 64 or any(character not in "0123456789abcdef" for character in normalized):
             raise ExternalFeedContractError("External feed checkpoint is not a SHA-256 digest")
+        identity = self.expected_identity
         body = json.dumps(
-            {"checkpoint": normalized},
+            {"checkpoint": normalized, **({
+                "external_job_id": identity[0], "export_run_id": identity[1],
+                "dataset_sha256": identity[2],
+            } if identity else {})},
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -240,6 +246,12 @@ class ExternalFeedAPIConnector(ExternalConnector):
 
     def _request_page(self, cursor: str | None, *, send_etag: bool) -> requests.Response:
         params: dict[str, Any] = {"limit": self.page_size}
+        if self.expected_identity:
+            params.update({
+                "external_job_id": self.expected_identity[0],
+                "export_run_id": self.expected_identity[1],
+                "dataset_sha256": self.expected_identity[2],
+            })
         if cursor:
             params["cursor"] = cursor
         return self.session.get(

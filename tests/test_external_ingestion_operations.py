@@ -16,8 +16,8 @@ from backend.app.db.database import Base
 from backend.app.db.models import ExternalIngestionOperation, PipelineRun
 from backend.app.db.migrations import apply_additive_migrations
 from backend.app.pipeline.ingestion.external.http_connector import ExternalFeedResult
-from backend.app.services.external_ingestion_service import (ExternalIngestionService, _claim_next,
-    _ensure_gateway_operation, _retry_state)
+from backend.app.services.external_ingestion_service import (FAIRNESS_INTERACTIVE_LIMIT,
+    ExternalIngestionService, _claim_next, _ensure_gateway_operation, _retry_state)
 
 
 IDENTITY = ("job-operation-123456", "ext-operation-123456", "a" * 64)
@@ -107,6 +107,85 @@ class ExternalIngestionOperationTests(unittest.TestCase):
             recovered = _claim_next(second)
             self.assertEqual(recovered.id, operation_id)
             self.assertNotEqual(recovered.claim_token, first_token)
+
+    def test_interactive_fifo_and_durable_backlog_fairness(self):
+        db = engine()
+        with Session(db) as session:
+            backlog = ExternalIngestionOperation(
+                external_job_id="gateway-legacy-backlog", export_run_id="gateway-backlog-run",
+                dataset_sha256="b" * 64, priority=0, state="published", stage="published")
+            session.add(backlog)
+            interactive = []
+            for index in range(FAIRNESS_INTERACTIVE_LIMIT + 1):
+                value = ExternalIngestionOperation(
+                    external_job_id=f"job-interactive-{index:04d}",
+                    export_run_id=f"run-interactive-{index:04d}", dataset_sha256=f"{index:064x}",
+                    priority=100, state="published", stage="published")
+                session.add(value); interactive.append(value)
+            session.commit()
+            for expected in interactive[:FAIRNESS_INTERACTIVE_LIMIT]:
+                claimed = _claim_next(session)
+                self.assertEqual(claimed.id, expected.id)
+                claimed.state, claimed.claim_token, claimed.lease_expires_at = "completed", None, None
+                session.commit()
+            session.refresh(backlog)
+            self.assertEqual(backlog.fairness_skips, FAIRNESS_INTERACTIVE_LIMIT)
+            claimed = _claim_next(session)
+            self.assertEqual(claimed.id, backlog.id)
+            self.assertEqual(claimed.fairness_skips, 0)
+            claimed.state, claimed.claim_token, claimed.lease_expires_at = "completed", None, None
+            session.commit()
+            self.assertEqual(_claim_next(session).id, interactive[-1].id)
+
+    def test_concurrent_claimers_never_receive_same_operation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db = create_engine(f"sqlite:///{folder}/claims.sqlite3")
+            Base.metadata.create_all(db)
+            with Session(db) as session:
+                session.add_all([ExternalIngestionOperation(
+                    external_job_id=f"job-claim-{index:04d}", export_run_id=f"run-claim-{index:04d}",
+                    dataset_sha256=f"{index:064x}") for index in range(2)])
+                session.commit()
+            claimed_ids: list[str] = []
+            barrier = threading.Barrier(2)
+            def claim() -> None:
+                with Session(db) as session:
+                    barrier.wait()
+                    value = _claim_next(session)
+                    if value is not None:
+                        claimed_ids.append(value.id)
+            threads = [threading.Thread(target=claim) for _ in range(2)]
+            for thread in threads: thread.start()
+            for thread in threads: thread.join()
+            self.assertEqual(len(claimed_ids), len(set(claimed_ids)))
+
+    def test_3059_backlog_yields_to_15_record_job_then_resumes_checkpoint(self):
+        with Session(engine()) as session:
+            backlog = ExternalIngestionOperation(
+                external_job_id="gateway-legacy-3059", export_run_id="gateway-backlog-3059",
+                dataset_sha256="3" * 64, priority=0, state="published", stage="published",
+                exported_count=3059)
+            interactive = ExternalIngestionOperation(
+                external_job_id="job-ui-15-records", export_run_id="run-ui-15-records",
+                dataset_sha256="f" * 64, priority=100, state="published", stage="published",
+                exported_count=15)
+            session.add_all([backlog, interactive]); session.commit()
+            first = _claim_next(session)
+            self.assertEqual(first.id, interactive.id)
+            first.state, first.stage = "completed", "completed"
+            first.processed_offset = first.acknowledged_count = 15
+            first.claim_token = first.lease_expires_at = None
+            session.commit()
+            second = _claim_next(session)
+            self.assertEqual(second.id, backlog.id)
+            second.state, second.stage, second.processed_offset = "central_importing", "persisting", 250
+            second.claim_token = second.lease_expires_at = None
+            session.commit()
+            resumed = _claim_next(session)
+            self.assertEqual(resumed.id, backlog.id)
+            self.assertEqual(resumed.processed_offset, 250)
+            self.assertEqual(interactive.acknowledged_count, 15)
+            self.assertEqual(backlog.acknowledged_count, 0)
 
     def test_worker_adopts_modern_and_legacy_gateway_checkpoints(self):
         db = engine()

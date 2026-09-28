@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import logging
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,8 @@ _DIGEST = re.compile(r"^(?:sha256:)?([0-9a-f]{64})$")
 _wake = threading.Event()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
+LOGGER = logging.getLogger(__name__)
+FAIRNESS_INTERACTIVE_LIMIT = 10
 
 
 def now() -> datetime:
@@ -75,7 +78,6 @@ class ExternalIngestionService:
         return operation
 
     def process(self, operation: ExternalIngestionOperation) -> None:
-        operation.attempt_count += 1
         operation.started_at = operation.started_at or now()
         operation.updated_at = now()
         try:
@@ -94,16 +96,35 @@ class ExternalIngestionService:
                         "dataset_sha256": operation.dataset_sha256})
                     self.session.add(run); self.session.flush(); operation.pipeline_run_id = run.id
                 self.session.commit()
-                connector = PipelineService.external_feed_connector()
                 legacy = operation.external_job_id.startswith("gateway-legacy-")
                 expected = (None if legacy else
                     (operation.external_job_id, operation.export_run_id, operation.dataset_sha256))
+                connector = PipelineService.external_feed_connector(expected_identity=expected)
+                operation_id = operation.id
+                def persist_progress(offset: int, counts: dict[str, int]) -> None:
+                    current = self.session.get(ExternalIngestionOperation, operation_id)
+                    if current is None:
+                        raise RuntimeError("external_operation_disappeared")
+                    current.processed_offset = offset
+                    current.imported_count = counts["stored"]
+                    current.created_count = counts["created"]
+                    current.updated_count = counts["updated"]
+                    current.unchanged_count = counts["unchanged"]
+                    current.failed_count = counts["failed"]
+                    current.stage = "persisting"
+                    current.updated_at = now()
                 summary = PipelineService(self.session).run_external_feed(
                     connector, expected_identity=expected, acknowledge=False,
                     pipeline_run_id=operation.pipeline_run_id,
                     expected_checkpoint=operation.gateway_checkpoint,
-                    require_unidentified=legacy)
+                    require_unidentified=legacy,
+                    start_offset=operation.processed_offset,
+                    max_batches=1 if operation.priority <= 0 else None,
+                    progress_callback=persist_progress)
                 details = summary.get("details") if isinstance(summary.get("details"), dict) else {}
+                operation = self.session.get(ExternalIngestionOperation, operation_id)
+                if operation is None:
+                    raise RuntimeError("external_operation_disappeared")
                 operation.pipeline_run_id = summary["run_id"]
                 operation.gateway_checkpoint = details.get("gateway_ack_checkpoint") or details.get("checkpoint")
                 operation.imported_count = int(summary.get("stored_count") or 0)
@@ -111,12 +132,23 @@ class ExternalIngestionService:
                 operation.updated_count = int(details.get("updated_items") or 0)
                 operation.unchanged_count = int(details.get("database_unchanged_items") or 0)
                 operation.failed_count = int(summary.get("failed_count") or 0)
+                if details.get("processing_complete") is False:
+                    operation.state, operation.stage = "central_importing", "persisting"
+                    operation.claim_token = None
+                    operation.lease_expires_at = None
+                    operation.updated_at = now()
+                    self.session.commit()
+                    _wake.set()
+                    return
                 operation.state, operation.stage = "committed", "committed"
                 self.session.commit()
             if operation.state in {"committed", "acknowledging"}:
                 operation.state, operation.stage = "acknowledging", "acknowledging"
                 self.session.commit()
-                connector = connector or PipelineService.external_feed_connector()
+                legacy = operation.external_job_id.startswith("gateway-legacy-")
+                expected = (None if legacy else
+                    (operation.external_job_id, operation.export_run_id, operation.dataset_sha256))
+                connector = connector or PipelineService.external_feed_connector(expected_identity=expected)
                 if not operation.gateway_checkpoint or not operation.pipeline_run_id:
                     raise ValueError("committed_operation_identity_invalid")
                 PipelineService(self.session).acknowledge_external_feed(
@@ -137,8 +169,10 @@ class ExternalIngestionService:
             self._fail(operation.id, code, "http_status", retryable)
         except Exception as exc:
             self.session.rollback()
-            code = "ingestion_failed" if isinstance(exc, RuntimeError) else "invalid_contract"
-            self._fail(operation.id, code, type(exc).__name__[:100], isinstance(exc, RuntimeError))
+            LOGGER.exception("external ingestion failed operation_id=%s stage=%s exception_class=%s",
+                             operation.id, operation.stage, type(exc).__name__)
+            code, retryable = _safe_failure(exc, operation.stage)
+            self._fail(operation.id, code, operation.stage[:100], retryable)
 
     def _publish_exact_export(self, operation: ExternalIngestionOperation) -> None:
         settings = get_settings()
@@ -193,6 +227,7 @@ def operation_dict(value: ExternalIngestionOperation) -> dict[str, Any]:
         "export_run_id", "dataset_sha256", "gateway_checkpoint", "pipeline_run_id",
         "collected_count", "exported_count", "imported_count", "created_count",
         "updated_count", "unchanged_count", "failed_count", "acknowledged_count",
+        "priority", "processed_offset", "fairness_skips",
         "error_code", "error_category")}
 
 
@@ -206,6 +241,19 @@ def _retry_state(stage: str) -> str:
     if stage == "published":
         return "published"
     return "queued"
+
+
+def _safe_failure(exc: Exception, stage: str) -> tuple[str, bool]:
+    """Map internal failures to a bounded, payload-free API code."""
+    if isinstance(exc, (ValueError, TypeError)):
+        return "invalid_external_contract", False
+    if stage == "published":
+        return "gateway_publish_failed", True
+    if stage == "acknowledging":
+        return "gateway_ack_failed", True
+    if stage in {"central_importing", "committed"}:
+        return "central_processing_failed", True
+    return "external_ingestion_failed", True
 
 
 def _worker() -> None:
@@ -226,23 +274,48 @@ def _worker() -> None:
 
 def _claim_next(session: Session) -> ExternalIngestionOperation | None:
     claimed_at = now()
-    candidate = session.scalar(select(ExternalIngestionOperation.id).where(
+    available = (
         ExternalIngestionOperation.state.in_(RESUMABLE),
         or_(ExternalIngestionOperation.claim_token.is_(None),
             ExternalIngestionOperation.lease_expires_at.is_(None),
             ExternalIngestionOperation.lease_expires_at <= claimed_at),
-    ).order_by(ExternalIngestionOperation.updated_at, ExternalIngestionOperation.id).limit(1))
+    )
+    # Durable fairness: after ten interactive claims overtake a pending backlog
+    # batch, that backlog receives exactly one committed batch before priority
+    # scheduling resumes. FIFO is preserved inside each priority class.
+    candidate = session.scalar(select(ExternalIngestionOperation.id).where(
+        *available, ExternalIngestionOperation.priority <= 0,
+        ExternalIngestionOperation.fairness_skips >= FAIRNESS_INTERACTIVE_LIMIT,
+    ).order_by(ExternalIngestionOperation.created_at,
+               ExternalIngestionOperation.id).with_for_update(skip_locked=True).limit(1))
+    if candidate is None:
+        candidate = session.scalar(select(ExternalIngestionOperation.id).where(
+            *available,
+        ).order_by(ExternalIngestionOperation.priority.desc(),
+                   ExternalIngestionOperation.created_at,
+                   ExternalIngestionOperation.id).with_for_update(skip_locked=True).limit(1))
     if candidate is None:
         return None
     token = str(uuid.uuid4())
     lease_seconds = max(60, min(get_settings().external_ingestion_lease_seconds, 86_400))
+    selected_priority = session.scalar(select(ExternalIngestionOperation.priority).where(
+        ExternalIngestionOperation.id == candidate))
     result = session.execute(update(ExternalIngestionOperation).where(
         ExternalIngestionOperation.id == candidate,
         or_(ExternalIngestionOperation.claim_token.is_(None),
             ExternalIngestionOperation.lease_expires_at.is_(None),
             ExternalIngestionOperation.lease_expires_at <= claimed_at),
     ).values(claim_token=token, lease_expires_at=claimed_at + timedelta(seconds=lease_seconds),
-             updated_at=claimed_at))
+             updated_at=claimed_at,
+             attempt_count=ExternalIngestionOperation.attempt_count + 1,
+             fairness_skips=0 if (selected_priority or 0) <= 0
+                            else ExternalIngestionOperation.fairness_skips))
+    if result.rowcount == 1 and (selected_priority or 0) > 0:
+        session.execute(update(ExternalIngestionOperation).where(
+            ExternalIngestionOperation.priority <= 0,
+            ExternalIngestionOperation.state.in_(RESUMABLE),
+            ExternalIngestionOperation.id != candidate,
+        ).values(fairness_skips=ExternalIngestionOperation.fairness_skips + 1))
     session.commit()
     if result.rowcount != 1:
         return None
@@ -280,7 +353,8 @@ def _ensure_gateway_operation(session: Session) -> None:
     session.add(ExternalIngestionOperation(
         external_job_id=external_job_id, export_run_id=export_run_id,
         dataset_sha256=digest, state="published", stage="published",
-        exported_count=len(result.records), gateway_checkpoint=result.checkpoint))
+        exported_count=len(result.records), gateway_checkpoint=result.checkpoint,
+        priority=0))
     try:
         session.commit()
     except IntegrityError:
