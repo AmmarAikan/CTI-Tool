@@ -212,7 +212,7 @@ def _worker() -> None:
     while not _stop.is_set():
         with SessionLocal() as session:
             operation = _claim_next(session)
-            if operation is None:
+            if operation is None and get_settings().external_ingestion_auto_adopt_gateway:
                 _ensure_gateway_operation(session)
                 operation = _claim_next(session)
             if operation is not None:

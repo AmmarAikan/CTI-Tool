@@ -57,6 +57,10 @@ class Settings:
     external_ingestion_worker_enabled: bool = _as_bool(os.getenv("EXTERNAL_INGESTION_WORKER_ENABLED"), True)
     external_ingestion_poll_seconds: int = int(os.getenv("EXTERNAL_INGESTION_POLL_SECONDS", "5"))
     external_ingestion_lease_seconds: int = int(os.getenv("EXTERNAL_INGESTION_LEASE_SECONDS", "3600"))
+    external_ingestion_auto_adopt_gateway: bool = _as_bool(
+        os.getenv("EXTERNAL_INGESTION_AUTO_ADOPT_GATEWAY"),
+        os.getenv("CTI_APP_ENV", "development").strip().lower() == "production",
+    )
     external_feed_processing_batch_size: int = int(
         os.getenv("EXTERNAL_FEED_PROCESSING_BATCH_SIZE", "100")
     )
