@@ -62,6 +62,21 @@ class VPSGatewayTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary.cleanup()
 
+    def test_snapshot_merge_rejects_mixed_unacknowledged_export_identity_directly(self) -> None:
+        path = self.settings.data_dir / "external-feed.json"
+        first_identity = {"external_job_id": "job-direct-123456", "export_run_id": "ext-direct-123456",
+                          "dataset_sha256": "a" * 64}
+        first = gateway._normalize_publish({**first_identity,
+            "items": [{"record_id": "direct-1", "title": "One"}]}, self.settings)
+        envelope, _, pending = gateway._merge_feed_snapshot(path, first, self.settings)
+        digest, _ = gateway._atomic_write_json(path, envelope, self.settings.max_feed_snapshot_bytes)
+        gateway._write_feed_delivery_state(self.settings, digest, pending)
+        second = gateway._normalize_publish({**first_identity, "external_job_id": "job-direct-654321",
+            "export_run_id": "ext-direct-654321", "dataset_sha256": "b" * 64,
+            "items": [{"record_id": "direct-2", "title": "Two"}]}, self.settings)
+        with self.assertRaisesRegex(Exception, "unacknowledged feed identity"):
+            gateway._merge_feed_snapshot(path, second, self.settings)
+
     def test_external_publish_pull_hmac_pagination_etag_and_auth(self) -> None:
         dataset = {
             "run_id": "ext-run-1",
@@ -104,6 +119,27 @@ class VPSGatewayTests(unittest.TestCase):
             },
         )
         self.assertEqual(not_modified.status_code, 304)
+
+    def test_external_identity_is_preserved_and_invalid_digest_fails_closed(self) -> None:
+        identity = {"external_job_id": "job-identity-123456", "export_run_id": "ext-identity-123456",
+                    "dataset_sha256": "a" * 64}
+        published = self.client.post("/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={**identity, "items": [{"record_id": "identity-1", "title": "One"}]})
+        self.assertEqual(published.status_code, 202)
+        pulled = self.client.get("/api/v1/external-feed",
+            headers={"Authorization": f"Bearer {self.settings.feed_read_token}"})
+        self.assertEqual({key: pulled.json()[key] for key in identity}, identity)
+        rejected = self.client.post("/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={**identity, "dataset_sha256": "invalid", "items": []})
+        self.assertEqual(rejected.status_code, 422)
+        conflicting = self.client.post("/api/v1/external-feed/publish",
+            headers={"Authorization": f"Bearer {self.settings.feed_publish_token}"},
+            json={**identity, "external_job_id": "job-identity-654321",
+                  "export_run_id": "ext-identity-654321", "dataset_sha256": "c" * 64,
+                  "items": [{"record_id": "identity-2", "title": "Two"}]})
+        self.assertEqual(conflicting.status_code, 409)
 
     def test_sensor_stream_and_ssh_parser_are_bounded_structured_json(self) -> None:
         record = {

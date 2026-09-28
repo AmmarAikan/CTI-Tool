@@ -195,7 +195,8 @@ Through the private production frontend or a root-only VPS diagnostic session, u
 
 ```text
 /api/v1/integrations/status
-/api/v1/integrations/external-feed/pull
+/api/v1/integrations/external-ingestions
+/api/v1/integrations/external-ingestions/{operation_id}
 /api/v1/integrations/external-control/health
 /api/v1/integrations/external-control/sources
 /api/v1/integrations/external-control/jobs
@@ -208,7 +209,9 @@ Through the private production frontend or a root-only VPS diagnostic session, u
 /api/v1/events/{event_id}/misp
 ```
 
-An identical External Feed returns HTTP 304 and creates a completed zero-record run. A changed snapshot skips unchanged PostgreSQL records before BERT and processes only new or changed content. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
+Central Backend is the sole External writer. The browser creates or resumes a durable operation and polls its exact ID; the legacy job-import route is only a `202` adapter, while direct feed pull and export sync return `410`. Gateway `retained_count` is the bounded snapshot size; `unacknowledged_count` is the subset that must remain until Central commits it. A signed ACK is sent only after commit, and an ACK retry resumes at `acknowledging` without repeating persistence.
+
+An identical External Feed returns HTTP 304. A changed snapshot skips unchanged PostgreSQL records before BERT and processes only new or changed content. MISP sends are unpublished-first and verify every requested indicator after insertion; a repeated send adds zero duplicate attributes.
 
 The External timer runs every two hours. Manual source addition and per-source collection are issued through the central FastAPI API, not by publishing the VPS adapter or enabling its Swagger UI.
 

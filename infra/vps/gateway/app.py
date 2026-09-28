@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -232,6 +233,9 @@ def create_app(settings: GatewaySettings) -> FastAPI:
             "schema_version": "1.0",
             "feed_id": payload["feed_id"],
             "generated_at": payload["generated_at"],
+            "external_job_id": payload.get("external_job_id"),
+            "export_run_id": payload.get("export_run_id"),
+            "dataset_sha256": payload.get("dataset_sha256"),
             "items": page,
             "has_more": has_more,
             "next_cursor": _encode_cursor(end, "external-feed", settings.cursor_secret) if has_more else None,
@@ -301,10 +305,22 @@ def _normalize_publish(payload: Any, settings: GatewaySettings) -> dict[str, Any
     items = [_normalize_external_item(value, index) for index, value in enumerate(values)]
     generated_at = str(payload.get("generated_at") or payload.get("completed_at") or utc_now())
     _validate_timestamp(generated_at)
+    external_job_id = str(payload.get("external_job_id") or "")
+    export_run_id = str(payload.get("export_run_id") or payload.get("run_id") or "")
+    dataset_sha256 = str(payload.get("dataset_sha256") or "").removeprefix("sha256:")
+    if external_job_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", external_job_id):
+        raise HTTPException(status_code=422, detail="external job identity is invalid")
+    if export_run_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{7,199}", export_run_id):
+        raise HTTPException(status_code=422, detail="export run identity is invalid")
+    if dataset_sha256 and not re.fullmatch(r"[0-9a-f]{64}", dataset_sha256):
+        raise HTTPException(status_code=422, detail="dataset digest is invalid")
     return {
         "schema_version": "1.0",
         "feed_id": settings.feed_id,
         "generated_at": generated_at,
+        "external_job_id": external_job_id or None,
+        "export_run_id": export_run_id or None,
+        "dataset_sha256": dataset_sha256 or None,
         "items": items,
     }
 
@@ -351,6 +367,13 @@ def _merge_feed_snapshot(
         existing_digest,
         {str(item["external_id"]) for item in existing_items},
     )
+    existing_identity = (existing.get("external_job_id"), existing.get("export_run_id"),
+                         existing.get("dataset_sha256"))
+    incoming_identity = (incoming.get("external_job_id"), incoming.get("export_run_id"),
+                         incoming.get("dataset_sha256"))
+    if unacknowledged_ids and incoming_identity != existing_identity:
+        raise HTTPException(status_code=409,
+            detail="unacknowledged feed identity must be committed before publishing another export")
 
     inserted = updated = unchanged = 0
     incoming_by_id: dict[str, dict[str, Any]] = {}
@@ -381,6 +404,9 @@ def _merge_feed_snapshot(
             "schema_version": "1.0",
             "feed_id": settings.feed_id,
             "generated_at": incoming["generated_at"],
+            "external_job_id": incoming.get("external_job_id"),
+            "export_run_id": incoming.get("export_run_id"),
+            "dataset_sha256": incoming.get("dataset_sha256"),
             "items": existing_items,
         }
     )
