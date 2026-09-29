@@ -207,6 +207,11 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
             self.central["services"]["backend"]["environment"]["EXTERNAL_FEED_PUBLISH_TOKEN"],
             "synthetic_publish_token",
         )
+        backend_environment = self.central["services"]["backend"]["environment"]
+        self.assertEqual(backend_environment["EXTERNAL_INGESTION_WORKER_ENABLED"], "false")
+        self.assertEqual(backend_environment["EXTERNAL_INGESTION_POLL_SECONDS"], "5")
+        self.assertEqual(backend_environment["EXTERNAL_INGESTION_LEASE_SECONDS"], "3600")
+        self.assertEqual(backend_environment["EXTERNAL_INGESTION_AUTO_ADOPT_GATEWAY"], "true")
         self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN=${FEED_PUBLISH_TOKEN}", self.generator)
         self.assertNotIn("host.docker.internal:18088", self.generator)
         self.assertNotIn("host.docker.internal:18090", self.generator)
