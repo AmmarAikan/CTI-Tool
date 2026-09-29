@@ -12,6 +12,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from backend.app.core.config import Settings, get_settings
 from backend.app.pipeline.ingestion.external.integration.diagnostics import (
     COLLECTION_STAGE_PATTERN,
     DIAGNOSTIC_IDENTIFIER_PATTERN,
@@ -238,7 +239,6 @@ class ExternalControlClient:
                     or not isinstance(item.get("counts"), dict):
                 raise ExternalControlTransportError("External job history contract is invalid")
         return payload
-
     def cancel_job(self, job_id: str) -> dict[str, Any]:
         self._validate_job_id(job_id)
         return self._job_response(self._request("POST", f"/jobs/{quote(job_id, safe='')}/cancel"))
@@ -766,3 +766,19 @@ class ExternalControlClient:
         session.mount("https://", HTTPAdapter(max_retries=retry))
         session.mount("http://", HTTPAdapter(max_retries=retry))
         return session
+
+
+def configured_external_control_client(settings: Settings | None = None) -> ExternalControlClient:
+    """Build the private External control client for API and worker callers."""
+    value = settings or get_settings()
+    if not value.external_control_configured:
+        raise ValueError("external_control_not_configured")
+    return ExternalControlClient(
+        str(value.external_control_api_url),
+        str(value.external_control_api_token),
+        verify_tls=value.external_control_verify_tls,
+        allow_http=value.external_control_allow_http,
+        timeout_seconds=value.external_control_timeout_seconds,
+        preview_timeout_seconds=value.external_control_preview_timeout_seconds,
+        max_response_bytes=value.external_control_max_bytes,
+    )

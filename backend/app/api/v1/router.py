@@ -40,6 +40,7 @@ from backend.app.db.models import (
 )
 from backend.app.integrations.external_control_client import (
     ExternalControlClient,
+    configured_external_control_client,
     ExternalControlError,
     ExternalControlRemoteError,
 )
@@ -182,15 +183,7 @@ def external_control_client() -> ExternalControlClient:
         raise HTTPException(status_code=503, detail={"code": "external_control_not_configured", "retryable": False,
                                                      "message": "External Sources control is not configured"})
     try:
-        return ExternalControlClient(
-            str(settings.external_control_api_url),
-            str(settings.external_control_api_token),
-            verify_tls=settings.external_control_verify_tls,
-            allow_http=settings.external_control_allow_http,
-            timeout_seconds=settings.external_control_timeout_seconds,
-            preview_timeout_seconds=settings.external_control_preview_timeout_seconds,
-            max_response_bytes=settings.external_control_max_bytes,
-        )
+        return configured_external_control_client(settings)
     except ValueError as exc:
         raise HTTPException(status_code=503, detail={"code": "external_control_configuration_invalid", "retryable": False,
                                                      "message": "External Sources control configuration is invalid"}) from exc

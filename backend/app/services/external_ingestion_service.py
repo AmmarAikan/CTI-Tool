@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from backend.app.core.config import get_settings
 from backend.app.db.database import SessionLocal
 from backend.app.db.models import ExternalIngestionOperation, PipelineRun, Source
+from backend.app.integrations.external_control_client import configured_external_control_client
 from backend.app.services.pipeline_service import PipelineService
 
 
@@ -265,16 +266,21 @@ def _safe_failure(exc: Exception, stage: str) -> tuple[str, bool]:
 
 def _worker() -> None:
     while not _stop.is_set():
+        try:
+            client = configured_external_control_client()
+        except (TypeError, ValueError):
+            # Configuration failures must not claim an operation. This keeps the
+            # exact export retryable once the worker configuration is repaired.
+            LOGGER.error("external ingestion worker control client is not configured")
+            _wake.wait(max(1, min(get_settings().external_ingestion_poll_seconds, 60))); _wake.clear()
+            continue
         with SessionLocal() as session:
             operation = _claim_next(session)
             if operation is None and get_settings().external_ingestion_auto_adopt_gateway:
                 _ensure_gateway_operation(session)
                 operation = _claim_next(session)
             if operation is not None:
-                # Client is unused by feed processing; creation validates exact
-                # External identity synchronously before the operation is queued.
-                from backend.app.api.v1.router import external_control_client
-                ExternalIngestionService(session, external_control_client()).process(operation)
+                ExternalIngestionService(session, client).process(operation)
                 continue
         _wake.wait(max(1, min(get_settings().external_ingestion_poll_seconds, 60))); _wake.clear()
 

@@ -14,7 +14,9 @@ from backend.app.integrations.external_control_client import (
     ExternalControlTimeoutError,
     ExternalControlTransportError,
     ExternalControlUnavailableError,
+    configured_external_control_client,
 )
+from backend.app.core.config import Settings
 from backend.app.pipeline.ingestion.external.integration.diagnostics import EXTERNAL_COLLECTION_METHODS
 
 
@@ -33,6 +35,26 @@ class FakeSession:
     def request(self, method: str, url: str, **kwargs):
         self.calls.append((method, url, kwargs))
         return self.responses.pop(0)
+
+
+class ExternalControlConfigurationTests(unittest.TestCase):
+    def test_shared_factory_builds_configured_client_for_api_and_worker(self) -> None:
+        settings = Settings(
+            external_control_api_url="http://cti-external-control:8000/api/v1/external-sources",
+            external_control_api_token="a" * 32,
+            external_control_allow_http=True,
+            external_control_verify_tls=False,
+        )
+        client = configured_external_control_client(settings)
+        self.assertIsInstance(client, ExternalControlClient)
+        self.assertEqual(client.base_url, settings.external_control_api_url)
+
+    def test_shared_factory_rejects_incomplete_configuration(self) -> None:
+        with self.assertRaisesRegex(ValueError, "external_control_not_configured"):
+            configured_external_control_client(Settings(
+                external_control_api_url=None,
+                external_control_api_token=None,
+            ))
 
 
 class RaisingSession:
