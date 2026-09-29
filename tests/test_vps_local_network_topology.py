@@ -27,6 +27,7 @@ SYNTHETIC = {
     "JWT_SECRET": "synthetic_jwt_secret",
     "BOOTSTRAP_ADMIN_PASSWORD": "synthetic_admin_password",
     "FEED_PUBLISH_TOKEN": "synthetic_publish_token",
+    "EXTERNAL_FEED_PUBLISH_TOKEN": "synthetic_publish_token",
     "FEED_READ_TOKEN": "synthetic_read_token",
     "FEED_RESPONSE_HMAC_SECRET": "synthetic_feed_hmac",
     "SENSOR_READ_TOKEN": "synthetic_sensor_token",
@@ -202,6 +203,11 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         }
         for target in expected:
             self.assertIn(target, self.generator)
+        self.assertEqual(
+            self.central["services"]["backend"]["environment"]["EXTERNAL_FEED_PUBLISH_TOKEN"],
+            "synthetic_publish_token",
+        )
+        self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN=${FEED_PUBLISH_TOKEN}", self.generator)
         self.assertNotIn("host.docker.internal:18088", self.generator)
         self.assertNotIn("host.docker.internal:18090", self.generator)
         self.assertIn('generate_backend_client_fragment.sh" "${secret_file}"', self.deploy_stack)
