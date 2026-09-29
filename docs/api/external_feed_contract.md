@@ -67,6 +67,12 @@ releases its lease. The worker then checks the complete queue again before anoth
 backlog batch. Scheduling never yields inside an open database transaction and an
 in-flight batch is never interrupted.
 
+Operators can request a bounded drain by creating
+`/tmp/external-ingestion-worker.drain` inside the Backend container. The marker
+does not affect the current claim; it prevents the next claim after the current
+transaction finishes. Removing the marker resumes selection. Container restart
+also clears it because `/tmp` is an ephemeral tmpfs.
+
 ## Response envelope
 
 ```json
