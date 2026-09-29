@@ -25,7 +25,6 @@ _wake = threading.Event()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
 LOGGER = logging.getLogger(__name__)
-FAIRNESS_INTERACTIVE_LIMIT = 10
 
 
 def now() -> datetime:
@@ -280,20 +279,15 @@ def _claim_next(session: Session) -> ExternalIngestionOperation | None:
             ExternalIngestionOperation.lease_expires_at.is_(None),
             ExternalIngestionOperation.lease_expires_at <= claimed_at),
     )
-    # Durable fairness: after ten interactive claims overtake a pending backlog
-    # batch, that backlog receives exactly one committed batch before priority
-    # scheduling resumes. FIFO is preserved inside each priority class.
+    # Strict interactive priority at every claim boundary. Backlog processing is
+    # limited to one committed batch in process(), so a newly queued interactive
+    # operation is observed before another background batch is claimed. FIFO is
+    # preserved inside each priority class and an in-flight batch is never cut.
     candidate = session.scalar(select(ExternalIngestionOperation.id).where(
-        *available, ExternalIngestionOperation.priority <= 0,
-        ExternalIngestionOperation.fairness_skips >= FAIRNESS_INTERACTIVE_LIMIT,
-    ).order_by(ExternalIngestionOperation.created_at,
+        *available,
+    ).order_by(ExternalIngestionOperation.priority.desc(),
+               ExternalIngestionOperation.created_at,
                ExternalIngestionOperation.id).with_for_update(skip_locked=True).limit(1))
-    if candidate is None:
-        candidate = session.scalar(select(ExternalIngestionOperation.id).where(
-            *available,
-        ).order_by(ExternalIngestionOperation.priority.desc(),
-                   ExternalIngestionOperation.created_at,
-                   ExternalIngestionOperation.id).with_for_update(skip_locked=True).limit(1))
     if candidate is None:
         return None
     token = str(uuid.uuid4())
@@ -310,12 +304,6 @@ def _claim_next(session: Session) -> ExternalIngestionOperation | None:
              attempt_count=ExternalIngestionOperation.attempt_count + 1,
              fairness_skips=0 if (selected_priority or 0) <= 0
                             else ExternalIngestionOperation.fairness_skips))
-    if result.rowcount == 1 and (selected_priority or 0) > 0:
-        session.execute(update(ExternalIngestionOperation).where(
-            ExternalIngestionOperation.priority <= 0,
-            ExternalIngestionOperation.state.in_(RESUMABLE),
-            ExternalIngestionOperation.id != candidate,
-        ).values(fairness_skips=ExternalIngestionOperation.fairness_skips + 1))
     session.commit()
     if result.rowcount != 1:
         return None

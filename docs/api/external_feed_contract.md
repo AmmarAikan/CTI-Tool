@@ -60,10 +60,12 @@ one configured processing batch per claim, persists `processed_offset` in the sa
 database transaction as that batch, releases its lease, and then becomes eligible
 for another claim.
 
-Every interactive claim durably increments `fairness_skips` on pending backlog
-operations. After 10 overtakes, the oldest backlog receives one committed batch;
-its counter resets and interactive FIFO scheduling resumes. Worker restarts do not
-reset fairness. Scheduling never yields inside an open database transaction.
+At every claim boundary, all ready interactive operations precede every backlog
+operation, regardless of the legacy `fairness_skips` value. When no interactive
+operation is ready, the oldest backlog operation receives one committed batch and
+releases its lease. The worker then checks the complete queue again before another
+backlog batch. Scheduling never yields inside an open database transaction and an
+in-flight batch is never interrupted.
 
 ## Response envelope
 

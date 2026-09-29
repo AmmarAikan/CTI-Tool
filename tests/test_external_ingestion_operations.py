@@ -19,7 +19,7 @@ from backend.app.db.database import Base
 from backend.app.db.models import ExternalIngestionOperation, PipelineRun
 from backend.app.db.migrations import apply_additive_migrations
 from backend.app.pipeline.ingestion.external.http_connector import ExternalFeedResult
-from backend.app.services.external_ingestion_service import (FAIRNESS_INTERACTIVE_LIMIT,
+from backend.app.services.external_ingestion_service import (
     ExternalIngestionService, _claim_next, _ensure_gateway_operation, _retry_state)
 
 
@@ -214,34 +214,56 @@ class ExternalIngestionOperationTests(unittest.TestCase):
             self.assertEqual(recovered.id, operation_id)
             self.assertNotEqual(recovered.claim_token, first_token)
 
-    def test_interactive_fifo_and_durable_backlog_fairness(self):
+    def test_all_ready_interactive_operations_precede_backlog_regardless_of_skips(self):
         db = engine()
         with Session(db) as session:
             backlog = ExternalIngestionOperation(
                 external_job_id="gateway-legacy-backlog", export_run_id="gateway-backlog-run",
-                dataset_sha256="b" * 64, priority=0, state="published", stage="published")
+                dataset_sha256="b" * 64, priority=0, state="published", stage="published",
+                fairness_skips=10_000)
             session.add(backlog)
             interactive = []
-            for index in range(FAIRNESS_INTERACTIVE_LIMIT + 1):
+            for index in range(3):
                 value = ExternalIngestionOperation(
                     external_job_id=f"job-interactive-{index:04d}",
                     export_run_id=f"run-interactive-{index:04d}", dataset_sha256=f"{index:064x}",
                     priority=100, state="published", stage="published")
                 session.add(value); interactive.append(value)
             session.commit()
-            for expected in interactive[:FAIRNESS_INTERACTIVE_LIMIT]:
+            for expected in interactive:
                 claimed = _claim_next(session)
                 self.assertEqual(claimed.id, expected.id)
                 claimed.state, claimed.claim_token, claimed.lease_expires_at = "completed", None, None
                 session.commit()
-            session.refresh(backlog)
-            self.assertEqual(backlog.fairness_skips, FAIRNESS_INTERACTIVE_LIMIT)
             claimed = _claim_next(session)
             self.assertEqual(claimed.id, backlog.id)
             self.assertEqual(claimed.fairness_skips, 0)
-            claimed.state, claimed.claim_token, claimed.lease_expires_at = "completed", None, None
-            session.commit()
-            self.assertEqual(_claim_next(session).id, interactive[-1].id)
+
+    def test_interactive_arrival_between_backlog_batches_is_claimed_next(self):
+        db = engine()
+        with Session(db) as session:
+            backlog = ExternalIngestionOperation(
+                external_job_id="gateway-legacy-active", export_run_id="gateway-active-run",
+                dataset_sha256="c" * 64, priority=0, state="published", stage="published",
+                exported_count=3059)
+            session.add(backlog); session.commit()
+            claimed = _claim_next(session)
+            self.assertEqual(claimed.id, backlog.id)
+
+            # One background batch committed without interruption. Releasing its
+            # claim models process() returning to the next selection boundary.
+            claimed.state, claimed.stage, claimed.processed_offset = "central_importing", "persisting", 250
+            claimed.claim_token = claimed.lease_expires_at = None
+            interactive = ExternalIngestionOperation(
+                external_job_id="job-arrived-during-backlog", export_run_id="run-arrived-during-backlog",
+                dataset_sha256="d" * 64, priority=100, state="published", stage="published",
+                exported_count=15)
+            session.add(interactive); session.commit()
+
+            selected = _claim_next(session)
+            self.assertEqual(selected.id, interactive.id)
+            self.assertEqual(backlog.processed_offset, 250)
+            self.assertEqual(backlog.acknowledged_count, 0)
 
     def test_concurrent_claimers_never_receive_same_operation(self):
         with tempfile.TemporaryDirectory() as folder:
