@@ -71,6 +71,16 @@ docker stop --time 30 "${backend_id}" >/dev/null
 cleanup
 lock_pid=
 
+# The stopped singleton worker can no longer own its durable lease. Release only
+# that reservation so the guarded deploy does not wait up to an hour. Processing
+# state, offset, counts, export identity, and acknowledgement state are preserved.
+docker exec "${db_id}" psql -v ON_ERROR_STOP=1 -U "${db_user}" -d "${db_name}" -c \
+  "UPDATE external_ingestion_operations
+      SET claim_token = NULL, lease_expires_at = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE claim_token IS NOT NULL
+      AND state IN ('queued','published','central_importing','committed','acknowledging');" \
+  >/dev/null
+
 export CTI_COMPOSE_PROJECT_NAME=${project}
 compose=(docker compose --env-file "${central_env}" --env-file "${integration_env}" \
   --env-file "${misp_env}" -f "${release_root}/compose.yaml" \
