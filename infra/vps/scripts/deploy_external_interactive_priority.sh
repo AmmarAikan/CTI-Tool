@@ -70,21 +70,32 @@ if systemctl is-active --quiet cti-external-collection.service; then
   exit 1
 fi
 
-project_name=$(read_env_value "${central_env}" CTI_COMPOSE_PROJECT_NAME)
-project_name=${project_name:-cti-central}
 backend_port=$(read_env_value "${central_env}" CTI_BACKEND_PORT)
 backend_port=${backend_port:-18000}
-mapfile -t backend_ids < <(docker ps --filter "label=com.docker.compose.project=${project_name}" \
+mapfile -t backend_ids < <(docker ps --filter "publish=${backend_port}" \
   --filter 'label=com.docker.compose.service=backend' --format '{{.ID}}')
-mapfile -t db_ids < <(docker ps --filter "label=com.docker.compose.project=${project_name}" \
-  --filter 'label=com.docker.compose.service=db' --format '{{.ID}}')
-mapfile -t gateway_ids < <(docker ps --filter 'label=com.docker.compose.project=cti-vps' \
+mapfile -t gateway_ids < <(docker ps --filter 'publish=8088' \
   --filter 'label=com.docker.compose.service=gateway' --format '{{.ID}}')
-if [[ ${#backend_ids[@]} -ne 1 || ${#db_ids[@]} -ne 1 || ${#gateway_ids[@]} -ne 1 ]]; then
-  echo "Expected exactly one running Backend, database, and Gateway container" >&2
+if [[ ${#backend_ids[@]} -ne 1 || ${#gateway_ids[@]} -ne 1 ]]; then
+  echo "Expected exactly one Backend on port ${backend_port} and one Gateway on port 8088" >&2
   exit 1
 fi
-backend_id=${backend_ids[0]}; db_id=${db_ids[0]}; gateway_id=${gateway_ids[0]}
+backend_id=${backend_ids[0]}; gateway_id=${gateway_ids[0]}
+project_name=$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "${backend_id}")
+if [[ -z ${project_name} || ! ${project_name} =~ ^[a-zA-Z0-9][a-zA-Z0-9_.-]+$ ]]; then
+  echo "Unable to resolve the running Backend Compose project" >&2
+  exit 1
+fi
+mapfile -t db_ids < <(docker ps --filter "label=com.docker.compose.project=${project_name}" \
+  --filter 'label=com.docker.compose.service=db' --format '{{.ID}}')
+if [[ ${#db_ids[@]} -ne 1 ]]; then
+  echo "Expected exactly one database in the running Backend project ${project_name}" >&2
+  exit 1
+fi
+db_id=${db_ids[0]}
+# The running project is authoritative. This avoids accidentally creating a
+# parallel stack when an older central.env contains a stale project name.
+export CTI_COMPOSE_PROJECT_NAME=${project_name}
 db_user=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${db_id}" | sed -n 's/^POSTGRES_USER=//p' | tail -n 1)
 db_name=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${db_id}" | sed -n 's/^POSTGRES_DB=//p' | tail -n 1)
 if [[ -z ${db_user} || -z ${db_name} ]]; then
