@@ -20,7 +20,7 @@ from backend.app.db.models import ExternalIngestionOperation, PipelineRun
 from backend.app.db.migrations import apply_additive_migrations
 from backend.app.pipeline.ingestion.external.http_connector import ExternalFeedResult
 from backend.app.services.external_ingestion_service import (
-    ExternalIngestionService, _claim_next, _ensure_gateway_operation, _retry_state)
+    ExternalIngestionService, _claim_next, _drain_requested, _ensure_gateway_operation, _retry_state)
 
 
 IDENTITY = ("job-operation-123456", "ext-operation-123456", "a" * 64)
@@ -62,6 +62,22 @@ class Client:
 
 
 class ExternalIngestionOperationTests(unittest.TestCase):
+    def test_drain_marker_blocks_next_claim_without_mutating_ready_work(self):
+        db = engine()
+        with tempfile.TemporaryDirectory() as folder, Session(db) as session:
+            operation = ExternalIngestionOperation(
+                external_job_id="job-drain-123456", export_run_id="run-drain-123456",
+                dataset_sha256="d" * 64, priority=100, state="published", stage="published")
+            session.add(operation); session.commit()
+            marker = Path(folder) / "drain"
+            marker.touch()
+            with patch("backend.app.services.external_ingestion_service.DRAIN_FILE", marker):
+                self.assertTrue(_drain_requested())
+                self.assertIsNone(_claim_next(session))
+            session.refresh(operation)
+            self.assertIsNone(operation.claim_token)
+            self.assertEqual(operation.attempt_count, 0)
+
     def test_legacy_manual_writers_are_gone(self):
         from backend.app.api.v1.router import pull_external_feed, sync_external_accepted
         with Session(engine()) as session:

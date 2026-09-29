@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import re
 import logging
+import os
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -25,10 +27,16 @@ _wake = threading.Event()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
 LOGGER = logging.getLogger(__name__)
+DRAIN_FILE = Path(os.getenv("EXTERNAL_INGESTION_DRAIN_FILE", "/tmp/external-ingestion-worker.drain"))
 
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _drain_requested() -> bool:
+    """Pause before the next claim without interrupting an in-flight operation."""
+    return DRAIN_FILE.is_file()
 
 
 class ExternalIngestionService:
@@ -272,6 +280,8 @@ def _worker() -> None:
 
 
 def _claim_next(session: Session) -> ExternalIngestionOperation | None:
+    if _drain_requested():
+        return None
     claimed_at = now()
     available = (
         ExternalIngestionOperation.state.in_(RESUMABLE),
