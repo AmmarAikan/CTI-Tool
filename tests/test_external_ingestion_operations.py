@@ -20,7 +20,7 @@ from backend.app.db.models import ExternalIngestionOperation, PipelineRun
 from backend.app.db.migrations import apply_additive_migrations
 from backend.app.pipeline.ingestion.external.http_connector import ExternalFeedResult
 from backend.app.services.external_ingestion_service import (
-    ExternalIngestionService, _claim_next, _drain_requested, _ensure_gateway_operation, _retry_state)
+    ExternalIngestionService, _claim_next, _drain_requested, _ensure_gateway_operation, _retry_state, _worker)
 
 
 IDENTITY = ("job-operation-123456", "ext-operation-123456", "a" * 64)
@@ -62,6 +62,16 @@ class Client:
 
 
 class ExternalIngestionOperationTests(unittest.TestCase):
+    def test_worker_does_not_claim_when_control_client_is_unavailable(self):
+        with patch("backend.app.services.external_ingestion_service._stop.is_set",
+                   side_effect=[False, True]), patch(
+            "backend.app.services.external_ingestion_service.configured_external_control_client",
+            side_effect=ValueError("external_control_not_configured")), patch(
+            "backend.app.services.external_ingestion_service._wake.wait"), patch(
+            "backend.app.services.external_ingestion_service._claim_next") as claim:
+            _worker()
+        claim.assert_not_called()
+
     def test_drain_marker_blocks_next_claim_without_mutating_ready_work(self):
         db = engine()
         with tempfile.TemporaryDirectory() as folder, Session(db) as session:
