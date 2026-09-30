@@ -262,6 +262,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertIn("sha256sum -c manifest.sha256", script)
         self.assertIn("BACKLOG_ARCHIVE=${archive_dir}", script)
         self.assertIn("EXTERNAL_INGESTION_BACKLOG_ENABLED false", script)
+        self.assertIn("EXTERNAL_INGESTION_WORKER_ENABLED true", script)
         self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN", script)
         self.assertIn("FEED_PUBLISH_TOKEN is missing; deployment refused", script)
         self.assertIn('build frontend', script)

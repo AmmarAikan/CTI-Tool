@@ -153,6 +153,7 @@ trap 'echo "Deployment did not complete. Rollback: ${rollback_command}" >&2' ERR
 
 # Quarantine only priority-zero Gateway backlog. Interactive operations remain
 # enabled and preserve their exact export identity and retry lifecycle.
+set_env_value "${integration_env}" EXTERNAL_INGESTION_WORKER_ENABLED true
 set_env_value "${integration_env}" EXTERNAL_INGESTION_BACKLOG_ENABLED false
 resolve_runtime
 compose_runtime
