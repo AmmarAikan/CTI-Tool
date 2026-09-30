@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {externalQueryKeys} from '../api/externalQueryKeys';
 import { Link } from 'react-router-dom';
@@ -50,11 +50,13 @@ function RunButton({ source, busy, onRun }: { source: Source; busy: boolean; onR
 
 export function JobMonitor({ sourceId, label=sourceId, job, onUpdate, maxPollingMs = JOB_POLL_MAX_MS }: { sourceId: string; label?: string; job: ExternalJob; onUpdate: (sourceId: string, job: ExternalJob) => void; maxPollingMs?: number }) {
   const [paused, setPaused] = useState(false);
+  const onUpdateRef = useRef(onUpdate);
+  onUpdateRef.current = onUpdate;
   const terminal = TERMINAL_STATES.includes(job.state);
   const queryKey = ['external-job', job.job_id] as const;
   const query = useQuery({ queryKey, queryFn: ({ signal }) => api.externalJob(job.job_id, signal), enabled: !terminal && !paused, retry: (failureCount, error) => isRetryableJobPollingError(error) && failureCount < JOB_POLL_TRANSIENT_RETRIES, retryDelay: jobPollingRetryDelay, refetchInterval: JOB_POLL_INTERVAL_MS });
   useEffect(() => { setPaused(false); }, [job.job_id]);
-  useEffect(() => { if (query.data?.job_id === job.job_id) onUpdate(sourceId, query.data); }, [job.job_id, onUpdate, query.data, sourceId]);
+  useEffect(() => { if (query.data?.job_id === job.job_id) onUpdateRef.current(sourceId, query.data); }, [job.job_id, query.data, sourceId]);
   useEffect(() => {
     if (terminal || paused) return;
     const timer = window.setTimeout(() => setPaused(true), maxPollingMs);
@@ -81,7 +83,7 @@ export function ExternalImportStatus({job,onImported}:{job?:ExternalJob;onImport
 function CentralImportResult({sourceId,result}:{sourceId:string;result?:AcceptedSyncResult}){
   const {t,number}=useI18n();const {can}=useAuth();
   if(!result)return null;
-  return <div className="job-panel" role="status"><strong>{t('centralImportComplete')}</strong><dl className="job-counts"><div><dt>{t('centralNew')}</dt><dd>{number(result.imported)}</dd></div><div><dt>{t('centralUpdated')}</dt><dd>{number(result.updated)}</dd></div><div><dt>{t('centralUnchanged')}</dt><dd>{number(result.unchanged)}</dd></div><div><dt>{t('centralFailed')}</dt><dd>{number(result.failed)}</dd></div></dl>{result.unchanged>0&&result.imported===0&&result.updated===0&&<span>{t('centralUnchangedHint')}</span>}<span><Link to="/accepted-records">{t('acceptedRecords')}</Link> · <Link to="/processing-center">{t('processingCenter')}</Link></span>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">import_succeeded · http_parse_succeeded · {sourceId} · {result.run_id}</code></details>}</div>;
+  return <div className="job-panel" role="status"><strong>{t('centralImportComplete')}</strong><dl className="job-counts"><div><dt>{t('centralNew')}</dt><dd>{number(result.imported)}</dd></div><div><dt>{t('centralUpdated')}</dt><dd>{number(result.updated)}</dd></div><div><dt>{t('centralUnchanged')}</dt><dd>{number(result.unchanged)}</dd></div><div><dt>{t('centralFailed')}</dt><dd>{number(result.failed)}</dd></div></dl>{result.unchanged>0&&result.imported===0&&result.updated===0&&<span>{t('centralUnchangedHint')}</span>}<span><Link to="/accepted-records">{t('acceptedRecords')}</Link> · <Link to={`/processing-center?run=${encodeURIComponent(result.run_id)}`}>{t('processingCenter')}</Link></span>{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">import_succeeded · http_parse_succeeded · {sourceId} · {result.run_id}</code></details>}</div>;
 }
 
 function SourceRows({ source, canRun, pending, job, submissionError, centralResult, onRun, onUpdate, onManage, onImported }: { source: Source; canRun: boolean; pending: boolean; job?: ExternalJob; submissionError?: string; centralResult?:AcceptedSyncResult; onRun: (source: Source) => void; onUpdate: (sourceId: string, job: ExternalJob) => void; onManage:(source:Source,action:'enable'|'disable'|'delete')=>void;onImported:(sourceId:string,result:AcceptedSyncResult)=>void }) {

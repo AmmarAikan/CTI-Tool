@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, type AcceptedSyncResult, type ExternalJob, type InternalIntegration, type ManualPreview } from '../api/client';
 import { isRetryableExternalImportError, refreshAfterExternalImport, useExternalImportLifecycle } from '../api/externalImportLifecycle';
@@ -16,6 +16,7 @@ type OperationRequest = { generation: number; kind: InputKind; selection: string
 type PreviewDecisionRequest = { generation: number; preview: ManualPreview; signal: AbortSignal };
 
 export const PROCESSING_CENTER_JOB_POLL_MAX_MS = 15 * 60_000;
+type VisibleStageState='pending'|'active'|'confirmed';
 
 function validPublicUrl(value: string) {
   try {
@@ -28,6 +29,7 @@ export function ProcessingCenter() {
   const { can } = useAuth();
   const queryClient = useQueryClient();
   const { t, number } = useI18n();
+  const [searchParams] = useSearchParams();
   const [kind, setKind] = useState<InputKind>('external');
   const [selection, setSelection] = useState('');
   const [url, setUrl] = useState('');
@@ -50,7 +52,9 @@ export function ProcessingCenter() {
     { queryKey: ['center-correlations'], queryFn: () => api.intelligenceCorrelations(1), retry: false },
     { queryKey: ['center-outliers'], queryFn: () => api.intelligenceOutliers(1, 0, true), retry: false },
   ] });
-  const analysis=useQuery({queryKey:externalQueryKeys.processingRun(pullResult?.run_id||''),queryFn:({signal})=>api.analysisRunResults(pullResult!.run_id,signal),enabled:Boolean(pullResult?.run_id&&['completed','partial','failed'].includes(pullResult.status)),retry:2});
+  const linkedRunId=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,35}$/.test(searchParams.get('run')||'')?searchParams.get('run')||'':'';
+  const analysisRunId=pullResult?.run_id||linkedRunId;
+  const analysis=useQuery({queryKey:externalQueryKeys.processingRun(analysisRunId),queryFn:({signal})=>api.analysisRunResults(analysisRunId,signal),enabled:Boolean(analysisRunId&&(linkedRunId||['completed','partial','failed'].includes(pullResult?.status||''))),retry:2});
   const importLifecycle=useExternalImportLifecycle(job,value=>{setPullResult(value);void refreshAfterExternalImport(queryClient,value)});
   const run = useMutation({
     mutationFn: async (request: OperationRequest) => {
@@ -87,6 +91,19 @@ export function ProcessingCenter() {
   const state = job?.state || pullResult?.status;
   const stages: TranslationKey[] = ['selectInput', 'collectStage', 'privacyStage', 'classifyStage', 'extractStage', 'saveStage', 'correlateStage', 'snapshot'];
   const statusKey = state && ['queued', 'processing', 'completed', 'partial', 'failed', 'cancelled', 'cancellation_requested'].includes(state) ? state as TranslationKey : undefined;
+  const linkedRunConfirmed=Boolean(linkedRunId&&analysis.data);
+  const collectionActive=Boolean(job&&!TERMINAL_STATES.includes(job.state));
+  const collectionConfirmed=Boolean(job&&['completed','partial'].includes(job.state))||linkedRunConfirmed;
+  const centralActive=importLifecycle.state.stage==='import_request_started';
+  const centralConfirmed=importLifecycle.state.stage==='import_succeeded'||Boolean(pullResult&&['completed','partial'].includes(pullResult.status))||linkedRunConfirmed;
+  const stageStates:VisibleStageState[]=stages.map((_key,index)=>{
+    if(index===0)return'confirmed';
+    if(index===1)return collectionConfirmed?'confirmed':collectionActive?'active':'pending';
+    if(index===2||index===3)return collectionConfirmed?'confirmed':'pending';
+    if(index>=4&&index<=6)return centralConfirmed?'confirmed':centralActive?'active':'pending';
+    if(index===7)return analysis.data?'confirmed':analysis.isLoading?'active':'pending';
+    return'pending';
+  });
   const safeMutationError = (error: unknown) => error instanceof ApiError && error.status === 401 ? t('sessionExpired') : error instanceof ApiError && error.status === 403 ? t('forbidden') : error instanceof ApiError && error.status === 404 ? t('jobNotFound') : error instanceof ApiError && [408,504].includes(error.status) ? t('timeout') : error instanceof ApiError && error.status === 409 ? t(error.code==='external_job_not_ready'?'importNotReady':'previewConflict') : error instanceof ApiError && error.status === 410 ? t('previewExpired') : error instanceof ApiError && error.status === 503 ? t('externalControlUnavailable') : error instanceof ApiError && error.status === 502 ? t('externalResponseIncompatible') : error instanceof ApiError && ['invalid_response','invalid_error_response'].includes(error.code) ? t('malformed') : error instanceof TypeError ? t('disconnected') : t('unknownError');
 
   useEffect(() => () => {
@@ -143,8 +160,8 @@ export function ProcessingCenter() {
       {kind === 'dark' && watches.data && choices.length === 0 && <p role="status">{t('noConfiguredWatches')}</p>}
       {run.isError && <div className="state-panel error-panel" role="alert"><strong>{safeMutationError(run.error)}</strong><button className="button button-secondary" onClick={submit}>{t('retry')}</button></div>}
     </section>
-    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key, index) => {const confirmed=index===0||(index===1&&Boolean(job&&['completed','partial'].includes(job.state)))||(index>1&&Boolean(analysis.data&&['completed','partial'].includes(analysis.data.status)));return <li className={confirmed?'confirmed':''} key={key}><span>{index + 1}</span>{t(key)}</li>})}</ol></section>
-    <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && <EmptyState label={t('noOperation')} />}
+    <section className="workflow-panel"><div><h3>{t('stages')}</h3><p>{t('confirmedOnly')}</p></div><ol className="stage-strip">{stages.map((key,index)=>{const stageState=stageStates[index];return <li className={stageState} aria-current={stageState==='active'?'step':undefined} key={key}><span>{index+1}</span>{t(key)}<small>{stageState==='confirmed'?t('completed'):stageState==='active'?t('processing'):''}</small></li>})}</ol></section>
+    <section className="operation-panel"><h3>{t('actualState')}</h3>{!state && !preview && !analysisRunId && <EmptyState label={t('noOperation')} />}
       {job && <JobMonitor key={job.job_id} sourceId="processing-center" label={selectedLabel} job={job} maxPollingMs={PROCESSING_CENTER_JOB_POLL_MAX_MS} onUpdate={(_id, value) => { setJob((current) => current?.job_id === value.job_id ? acceptExternalJobUpdate(current,value) : current); if (TERMINAL_STATES.includes(value.state) && refreshedTerminalJob.current !== value.job_id) { forgetActiveExternalJob('processing-center',value.job_id);refreshedTerminalJob.current = value.job_id;void queryClient.invalidateQueries({queryKey:externalQueryKeys.reviews()});snapshot.forEach((query) => void query.refetch()); } }} />}
       {pullResult && <div className="job-panel" role="status"><strong>{statusKey ? t(statusKey) : t('operationSucceeded')}</strong>{'imported' in pullResult&&<><dl className="job-counts"><div><dt>{t('centralNew')}</dt><dd>{number(pullResult.imported)}</dd></div><div><dt>{t('centralUpdated')}</dt><dd>{number(pullResult.updated)}</dd></div><div><dt>{t('centralUnchanged')}</dt><dd>{number(pullResult.unchanged)}</dd></div><div><dt>{t('centralFailed')}</dt><dd>{number(pullResult.failed)}</dd></div></dl>{pullResult.unchanged>0&&pullResult.imported===0&&pullResult.updated===0&&<span>{t('centralUnchangedHint')}</span>}</>}{can('analyst')&&<details><summary>{t('technicalDetails')}</summary><code dir="ltr">{pullResult.run_id}</code></details>}</div>}
       {job&&TERMINAL_STATES.includes(job.state)&&<p role="status">{t('collectionCompleted')}</p>}
@@ -155,7 +172,7 @@ export function ProcessingCenter() {
       {importLifecycle.state.stage==='import_failed'&&<div className="state-panel error-panel" role="alert">{safeMutationError(importLifecycle.state.error)}{can('analyst')&&<code dir="ltr">{importLifecycle.state.stage} · {importLifecycle.state.code}</code>}{isRetryableExternalImportError(importLifecycle.state.error)&&<button className="button button-secondary" onClick={importLifecycle.retry}>{t('retryImport')}</button>}</div>}
       {decisionError !== undefined && <div className="state-panel error-panel" role="alert">{safeMutationError(decisionError)}</div>}
     </section>
-    {!job&&!pullResult&&<section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
+    {!job&&!pullResult&&!analysisRunId&&<section className="snapshot-panel"><h3>{t('snapshot')}</h3><p>{t('snapshotHint')}</p>{snapshot.some((query) => query.isLoading) && <LoadingState />}{snapshot.some((query) => query.isError) && <ErrorState onRetry={() => snapshot.forEach((query) => void query.refetch())} />}
       <div className="metric-grid">{[[t('totalEvents'), summary?.events], [t('totalIndicators'), indicators?.total], [t('totalCorrelations'), correlations?.total], [t('totalOutliers'), outliers?.total]].map(([label, value]) => <article className="metric-card" key={String(label)}><span>{label}</span><strong>{typeof value === 'number' ? number(value) : '—'}</strong></article>)}</div>
       {events?.items.length ? <div className="center-events"><h4>{t('latestEvents')}</h4>{events.items.map((event) => <article key={event.id}><div><strong>{event.title}</strong><small>{event.source_pipeline} · {event.severity || '—'} · {number(Math.round(event.confidence * 100))}%</small></div><Link to={`/intelligence/events/${event.id}`}>{t('viewDetails')}</Link></article>)}</div> : null}
       <nav className="quick-actions" aria-label={t('quickActions')}><Link to="/intelligence/indicators">{t('viewIndicators')}</Link><Link to="/intelligence/correlations">{t('viewCorrelations')}</Link><Link to="/intelligence/outliers">{t('viewOutliers')}</Link><Link to="/analysis">{t('viewRuns')}</Link></nav>

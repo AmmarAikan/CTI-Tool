@@ -1,6 +1,7 @@
 import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useState } from 'react';
 import { api, clearToken } from '../api/client';
 import { JobMonitor, JOB_POLL_INTERVAL_MS, Sources } from '../pages/Sources';
 import { renderWithProviders } from './fixtures';
@@ -145,6 +146,16 @@ describe('single external source job', () => {
     const view = renderWithProviders(<JobMonitor sourceId="source-one" job={{...job('running'),counts:{},sources:{}} as never} onUpdate={()=>undefined} maxPollingMs={25}/>);
     expect(await screen.findByText(/لا تزال الوظيفة قيد التشغيل/)).toBeInTheDocument();expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'استئناف المتابعة'})).toBeEnabled();
     const count = fetchMock.mock.calls.length; view.unmount(); await new Promise(resolve=>window.setTimeout(resolve,JOB_POLL_INTERVAL_MS+25));expect(fetchMock).toHaveBeenCalledTimes(count);
+  });
+  it('does not repeat an unchanged polling update when the parent callback identity changes',async()=>{
+    const current={...job('running'),counts:{},sources:{}} as never;
+    mockRole('analyst',()=>response(job('running')));
+    const updates=vi.fn();
+    function Parent(){const[,setTick]=useState(0);return <JobMonitor sourceId="source-one" job={current} onUpdate={()=>{updates();setTick(value=>value+1)}}/>}
+    renderWithProviders(<Parent/>);
+    await waitFor(()=>expect(updates).toHaveBeenCalledTimes(1));
+    await new Promise(resolve=>window.setTimeout(resolve,25));
+    expect(updates).toHaveBeenCalledTimes(1);
   });
 
   it('uses existing 401 expiry behavior and rejects malformed jobs', async () => {
