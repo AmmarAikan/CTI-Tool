@@ -259,6 +259,8 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertIn('docker cp "${gateway_id}:/data/external_feed.json"', script)
         self.assertIn("manifest.sha256", script)
         self.assertIn("EXTERNAL_INGESTION_BACKLOG_ENABLED false", script)
+        self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN", script)
+        self.assertIn("FEED_PUBLISH_TOKEN is missing; deployment refused", script)
         self.assertIn('build frontend', script)
         self.assertNotIn("/api/v1/external-feed/ack", script)
         self.assertNotRegex(script, r"(?i)DELETE\s+FROM\s+external_ingestion_operations")

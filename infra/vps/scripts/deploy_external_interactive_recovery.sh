@@ -24,6 +24,14 @@ set_env_value() {
   fi
 }
 
+sync_publish_token() {
+  local value
+  value=$(read_env_value "${vps_env}" FEED_PUBLISH_TOKEN)
+  [[ -n ${value} ]] || { echo "FEED_PUBLISH_TOKEN is missing; deployment refused" >&2; exit 1; }
+  set_env_value "${integration_env}" EXTERNAL_FEED_PUBLISH_TOKEN "${value}"
+  chmod 0600 "${integration_env}"
+}
+
 resolve_runtime() {
   backend_port=$(read_env_value "${central_env}" CTI_BACKEND_PORT); backend_port=${backend_port:-18000}
   frontend_port=$(read_env_value "${central_env}" CTI_FRONTEND_PORT); frontend_port=${frontend_port:-18080}
@@ -80,6 +88,10 @@ install -d -o root -g root -m 0700 "${archive_dir}"
 frontend_rollback=cti-central-frontend:interactive-recovery-rollback-${timestamp}
 docker image tag "$(docker inspect --format '{{.Image}}' "${frontend_id}")" "${frontend_rollback}"
 
+# The Gateway publish credential is authoritative in the root-only VPS env.
+# Synchronize it without printing it before any Backend image is recreated.
+sync_publish_token
+
 # Copy the immutable-at-write Gateway artifacts without acknowledging, deleting,
 # or moving them. A before/after digest refuses an archive made during mutation.
 before=$(docker exec "${gateway_id}" sh -c 'find /data -maxdepth 2 -type f \( -name "external_feed.json" -o -name "external_feed_delivery.json" -o -path "/data/external_feed_batches/*.json" \) -exec sha256sum {} \; 2>/dev/null | sort')
@@ -134,7 +146,7 @@ done
 
 backend_id=$(docker ps --filter "publish=${backend_port}" --filter 'label=com.docker.compose.service=backend' --format '{{.ID}}')
 docker exec "${backend_id}" python -c \
-  'from backend.app.core.config import get_settings; from backend.app.integrations.external_control_client import configured_external_control_client; s=get_settings(); assert s.external_ingestion_worker_enabled and not s.external_ingestion_backlog_enabled; assert configured_external_control_client() is not None'
+  'from backend.app.core.config import get_settings; from backend.app.integrations.external_control_client import configured_external_control_client; s=get_settings(); assert s.external_ingestion_worker_enabled and not s.external_ingestion_backlog_enabled and s.external_feed_publish_token; assert configured_external_control_client() is not None'
 
 find "${archive_dir}" -type d -exec chmod 0700 {} +
 find "${archive_dir}" -type f -exec chmod 0600 {} +
