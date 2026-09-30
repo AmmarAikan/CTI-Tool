@@ -10,6 +10,10 @@ export const EXTERNAL_IMPORT_MONITORING_MAX_MS=120_000;
 
 export function externalImportIdentity(job?:ExternalJob):string|undefined {
   if(!job||!['completed','partial'].includes(job.state)||job.export?.status!=='completed') return;
+  // A source run that accepted nothing has no interactive work to submit.
+  // Its historical export remains available for explicit recovery, but must
+  // not start a long Central import from the source row.
+  if(job.counts?.accepted_records===0) return;
   const value=job.export;
   if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value.run_id)||!/^[a-f0-9]{64}$/i.test(value.dataset_sha256||'')) return;
   return `${job.job_id}:${value.run_id}:${value.dataset_sha256}`;
@@ -17,6 +21,7 @@ export function externalImportIdentity(job?:ExternalJob):string|undefined {
 export function externalImportBlockReason(job:ExternalJob):'export_incomplete'|'export_identity_missing'|undefined {
   if(!['completed','partial'].includes(job.state)) return;
   if(job.export?.status!=='completed') return 'export_incomplete';
+  if(job.counts?.accepted_records===0) return;
   return externalImportIdentity(job)?undefined:'export_identity_missing';
 }
 export function isAbortError(error:unknown){return error instanceof DOMException&&error.name==='AbortError'}
@@ -33,7 +38,7 @@ export function useExternalImportLifecycle(job:ExternalJob|undefined,onSuccess:(
   const[monitorGeneration,setMonitorGeneration]=useState(0);
   const[state,setState]=useState<ExternalImportState>({stage:'terminal_detected',code:'awaiting_terminal'});
   useEffect(()=>{
-    if(!job||!['completed','partial'].includes(job.state))return;
+    if(!job||!['completed','partial'].includes(job.state)||job.counts?.accepted_records===0)return;
     if(!identity||!jobId){setState({stage:'terminal_detected',code:externalImportBlockReason(job)||'export_not_ready'});return}
     let mounted=true,timer:number|undefined;
     const monitoringStarted=Date.now();

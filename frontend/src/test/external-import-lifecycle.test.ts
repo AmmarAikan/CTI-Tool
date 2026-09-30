@@ -25,13 +25,14 @@ describe('shared exact External import lifecycle',()=>{
     expect(invalidate.mock.calls.every(([filters])=>filters?.refetchType==='active')).toBe(true);
   });
 
-  it('imports only a completed export with its exact identity, independently of collection counts',()=>{
+  it('imports a completed exact export only when this run accepted new records',()=>{
     const job={job_id:'job-607dbdb2a1a8b00e64c52f1c',state:'completed',counts:{accepted_records:0},export:{status:'completed',run_id:'ext-20260927T083110Z-d656e0bb4a3c',dataset_sha256:'c'.repeat(64),accepted_records:15,review_records:0}} as ExternalJob;
-    expect(externalImportIdentity(job)).toBe(`${job.job_id}:${job.export!.run_id}:${job.export!.dataset_sha256}`);
-    expect(externalImportBlockReason({...job,export:{...job.export!,status:'running'}})).toBe('export_incomplete');
+    expect(externalImportIdentity(job)).toBeUndefined();
+    expect(externalImportIdentity({...job,counts:{accepted_records:1}})).toBe(`${job.job_id}:${job.export!.run_id}:${job.export!.dataset_sha256}`);
+    expect(externalImportBlockReason({...job,counts:{accepted_records:1},export:{...job.export!,status:'running'}})).toBe('export_incomplete');
     expect(externalImportIdentity({...job,export:{...job.export!,status:'running'}})).toBeUndefined();
-    expect(externalImportBlockReason({...job,export:{...job.export!,run_id:''}})).toBe('export_identity_missing');
-    expect(externalImportBlockReason({...job,export:{...job.export!,dataset_sha256:undefined}})).toBe('export_identity_missing');
+    expect(externalImportBlockReason({...job,counts:{accepted_records:1},export:{...job.export!,run_id:''}})).toBe('export_identity_missing');
+    expect(externalImportBlockReason({...job,counts:{accepted_records:1},export:{...job.export!,dataset_sha256:undefined}})).toBe('export_identity_missing');
     expect(isAbortError(new DOMException('cancelled','AbortError'))).toBe(true);
     expect(isAbortError(new TypeError('network'))).toBe(false);
   });

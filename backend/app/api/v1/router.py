@@ -2324,7 +2324,8 @@ def _accepted_record(event: ThreatEvent, source: Source | None, correlation_coun
             "source_type": event.source_type[:50], "category": str(raw.get("category") or "")[:80] or None,
             "summary": str(raw.get("summary") or event.description or "")[:1000],
             "published": str(raw.get("published") or "")[:40] or None,
-            "collected_at": str(raw.get("collected_at") or "")[:40] or None,
+            "collected_at": str(raw.get("collected_at") or "")[:40] or
+                            (iso(event.raw_item.ingested_at) if event.raw_item else None),
             "accepted_at": iso(event.updated_at), "processing_state": event.processing_status[:30],
             "classification": event.classification_label[:50] if event.classification_label else None,
             "privacy_status": str(privacy.get("status") or "")[:40] or None,
