@@ -61,6 +61,9 @@ class Settings:
         os.getenv("EXTERNAL_INGESTION_AUTO_ADOPT_GATEWAY"),
         os.getenv("CTI_APP_ENV", "development").strip().lower() == "production",
     )
+    external_ingestion_backlog_enabled: bool = _as_bool(
+        os.getenv("EXTERNAL_INGESTION_BACKLOG_ENABLED"), True
+    )
     external_feed_processing_batch_size: int = int(
         os.getenv("EXTERNAL_FEED_PROCESSING_BATCH_SIZE", "100")
     )

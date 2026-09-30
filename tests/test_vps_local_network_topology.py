@@ -16,6 +16,7 @@ BOOTSTRAP = ROOT / "infra" / "vps" / "scripts" / "bootstrap_host.sh"
 PROVISIONER = ROOT / "infra" / "vps" / "scripts" / "provision_backend_networks.sh"
 GENERATOR = ROOT / "infra" / "vps" / "scripts" / "generate_backend_client_fragment.sh"
 DEPLOY_STACK = ROOT / "infra" / "vps" / "scripts" / "deploy_stack.sh"
+INTERACTIVE_RECOVERY = ROOT / "infra" / "vps" / "scripts" / "deploy_external_interactive_recovery.sh"
 NETWORKS = {
     "cti_backend_gateway": "cti-backend-gateway",
     "cti_backend_external": "cti-backend-external",
@@ -80,6 +81,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         cls.provisioner = PROVISIONER.read_text(encoding="utf-8")
         cls.generator = GENERATOR.read_text(encoding="utf-8")
         cls.deploy_stack = DEPLOY_STACK.read_text(encoding="utf-8")
+        cls.interactive_recovery = INTERACTIVE_RECOVERY.read_text(encoding="utf-8")
         cls.misp_override = MISP_OVERRIDE.read_text(encoding="utf-8")
 
     def test_pairwise_networks_render_as_stable_external_networks(self) -> None:
@@ -212,6 +214,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertEqual(backend_environment["EXTERNAL_INGESTION_POLL_SECONDS"], "5")
         self.assertEqual(backend_environment["EXTERNAL_INGESTION_LEASE_SECONDS"], "3600")
         self.assertEqual(backend_environment["EXTERNAL_INGESTION_AUTO_ADOPT_GATEWAY"], "true")
+        self.assertEqual(backend_environment["EXTERNAL_INGESTION_BACKLOG_ENABLED"], "true")
         self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN=${FEED_PUBLISH_TOKEN}", self.generator)
         self.assertNotIn("host.docker.internal:18088", self.generator)
         self.assertNotIn("host.docker.internal:18090", self.generator)
@@ -250,6 +253,15 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         frontend = self.central["services"]["frontend"]
         self.assertTrue(frontend["read_only"])
         self.assertEqual(frontend["cap_drop"], ["ALL"])
+
+    def test_interactive_recovery_archives_without_ack_or_deletion(self) -> None:
+        script = self.interactive_recovery
+        self.assertIn('docker cp "${gateway_id}:/data/external_feed.json"', script)
+        self.assertIn("manifest.sha256", script)
+        self.assertIn("EXTERNAL_INGESTION_BACKLOG_ENABLED false", script)
+        self.assertIn('build frontend', script)
+        self.assertNotIn("/api/v1/external-feed/ack", script)
+        self.assertNotRegex(script, r"(?i)DELETE\s+FROM\s+external_ingestion_operations")
 
 
     def test_internal_http_is_allowed_only_for_approved_aliases(self) -> None:
