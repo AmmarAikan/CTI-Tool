@@ -6,6 +6,8 @@ import {useI18n} from '../i18n/I18nContext';
 import {useAuth} from '../auth/AuthContext';
 import {externalQueryKeys} from '../api/externalQueryKeys';
 
+const REVIEW_PAGE_SIZE=10;
+
 export function Reviews(){
   const {t,number,dateTime}=useI18n(),{can}=useAuth(),client=useQueryClient();
   const [search,setSearch]=useState(''),[type,setType]=useState('all'),[status,setStatus]=useState<'all'|ReviewRecord['status']>('all');
@@ -14,8 +16,8 @@ export function Reviews(){
   const [records,setRecords]=useState<ReviewRecord[]>([]);
   const [pageMeta,setPageMeta]=useState({total:0,offset:0,malformed:0});
   const controller=useRef<AbortController|undefined>(undefined);
-  const query=useQuery({queryKey:externalQueryKeys.reviews(search,type),queryFn:({signal})=>api.latestExternalReviews(20,0,signal),retry:false});
-  const more=useMutation({mutationFn:({offset,signal}:{offset:number;signal:AbortSignal})=>api.latestExternalReviews(20,offset,signal),onSuccess:value=>{setRecords(current=>{const seen=new Set(current.map(item=>`${item.record_id}:${item.content_sha256}`));return [...current,...value.records.filter(item=>!seen.has(`${item.record_id}:${item.content_sha256}`))]});setPageMeta(current=>({total:value.total,offset:value.offset+value.records.length,malformed:current.malformed+value.malformed_records}))}});
+  const query=useQuery({queryKey:externalQueryKeys.reviews(search,type),queryFn:({signal})=>api.latestExternalReviews(REVIEW_PAGE_SIZE,0,signal),retry:false});
+  const more=useMutation({mutationFn:({offset,signal}:{offset:number;signal:AbortSignal})=>api.latestExternalReviews(REVIEW_PAGE_SIZE,offset,signal),onSuccess:value=>{setRecords(current=>{const seen=new Set(current.map(item=>`${item.record_id}:${item.content_sha256}`));return [...current,...value.records.filter(item=>!seen.has(`${item.record_id}:${item.content_sha256}`))]});setPageMeta(current=>({total:value.total,offset:value.offset+value.records.length,malformed:current.malformed+value.malformed_records}))}});
   const decision=useMutation({mutationFn:({record,action,selectedReason,signal}:{record:ReviewRecord;action:'approved'|'rejected';selectedReason:typeof reason;signal:AbortSignal})=>api.decideExternalReview(record,action,action==='rejected'?selectedReason:undefined,signal),onSuccess:(value)=>{setMessage(value.decision==='approved'?t('reviewApproved'):t('reviewRejected'));setRecords([]);void client.invalidateQueries({queryKey:['external','reviews']});void client.invalidateQueries({queryKey:externalQueryKeys.reviewLifecycle()});if(value.decision==='approved')void client.invalidateQueries({queryKey:['external','accepted-records']})}});
   useEffect(()=>()=>controller.current?.abort(),[]);
   useEffect(()=>{if(query.data){setRecords(query.data.records);setPageMeta({total:query.data.total,offset:query.data.records.length,malformed:query.data.malformed_records})}},[query.data]);
