@@ -258,6 +258,9 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         script = self.interactive_recovery
         self.assertIn('docker cp "${gateway_id}:/data/external_feed.json"', script)
         self.assertIn("manifest.sha256", script)
+        self.assertIn("Gateway backlog unchanged; reusing verified archive", script)
+        self.assertIn("sha256sum -c manifest.sha256", script)
+        self.assertIn("BACKLOG_ARCHIVE=${archive_dir}", script)
         self.assertIn("EXTERNAL_INGESTION_BACKLOG_ENABLED false", script)
         self.assertIn("EXTERNAL_FEED_PUBLISH_TOKEN", script)
         self.assertIn("FEED_PUBLISH_TOKEN is missing; deployment refused", script)
