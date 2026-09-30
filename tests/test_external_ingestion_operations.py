@@ -62,6 +62,55 @@ class Client:
 
 
 class ExternalIngestionOperationTests(unittest.TestCase):
+    def test_disabled_backlog_is_not_claimed_but_interactive_work_is(self):
+        with Session(engine()) as session:
+            backlog = ExternalIngestionOperation(
+                external_job_id="gateway-legacy-disabled", export_run_id="gateway-backlog-disabled",
+                dataset_sha256="9" * 64, priority=0, state="published", stage="published")
+            interactive = ExternalIngestionOperation(
+                external_job_id="job-ui-enabled-123", export_run_id="run-ui-enabled-123",
+                dataset_sha256="8" * 64, priority=100, state="published", stage="published")
+            session.add_all([backlog, interactive]); session.commit()
+            settings = SimpleNamespace(external_ingestion_backlog_enabled=False,
+                                       external_ingestion_lease_seconds=3600)
+            with patch("backend.app.services.external_ingestion_service.get_settings",
+                       return_value=settings):
+                self.assertEqual(_claim_next(session).id, interactive.id)
+                interactive.state, interactive.stage = "completed", "completed"
+                interactive.claim_token = interactive.lease_expires_at = None
+                session.commit()
+                self.assertIsNone(_claim_next(session))
+            session.refresh(backlog)
+            self.assertIsNone(backlog.claim_token)
+            self.assertEqual(backlog.attempt_count, 0)
+
+    def test_publish_recovers_client_from_shared_factory(self):
+        with Session(engine()) as session:
+            operation = ExternalIngestionOperation(
+                external_job_id=IDENTITY[0], export_run_id=IDENTITY[1],
+                dataset_sha256=IDENTITY[2], state="queued", stage="export_ready")
+            client = Mock()
+            client.accepted_export_page.return_value = {
+                "export_run_id": IDENTITY[1], "dataset_sha256": IDENTITY[2],
+                "total": 0, "items": [],
+            }
+            settings = SimpleNamespace(external_feed_publish_token="publish-token",
+                                       external_feed_url="http://cti-gateway:8080/api/v1/external-feed",
+                                       external_feed_connect_timeout_seconds=5,
+                                       external_feed_read_timeout_seconds=60,
+                                       external_feed_verify_tls=False)
+            response = Mock(); response.json.return_value = {"status": "accepted", "etag": "etag"}
+            with patch("backend.app.services.external_ingestion_service.get_settings",
+                       return_value=settings), patch(
+                "backend.app.services.external_ingestion_service.configured_external_control_client",
+                return_value=client), patch(
+                "backend.app.services.external_ingestion_service.requests.post",
+                return_value=response):
+                ExternalIngestionService(session, None)._publish_exact_export(operation)
+            client.accepted_export_page.assert_called_once_with(
+                limit=250, offset=0, run_id=IDENTITY[1])
+            response.raise_for_status.assert_called_once()
+
     def test_worker_does_not_claim_when_control_client_is_unavailable(self):
         with patch("backend.app.services.external_ingestion_service._stop.is_set",
                    side_effect=[False, True]), patch(

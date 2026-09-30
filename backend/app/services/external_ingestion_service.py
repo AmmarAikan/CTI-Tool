@@ -184,11 +184,12 @@ class ExternalIngestionService:
 
     def _publish_exact_export(self, operation: ExternalIngestionOperation) -> None:
         settings = get_settings()
-        if self.client is None or not settings.external_feed_publish_token or not settings.external_feed_url:
+        client = self.client or configured_external_control_client(settings)
+        if not settings.external_feed_publish_token or not settings.external_feed_url:
             raise RuntimeError("external_feed_publish_not_configured")
         records, offset, total = [], 0, None
         while True:
-            page = self.client.accepted_export_page(limit=250, offset=offset, run_id=operation.export_run_id)
+            page = client.accepted_export_page(limit=250, offset=offset, run_id=operation.export_run_id)
             digest = str(page.get("dataset_sha256") or "").removeprefix("sha256:")
             if page.get("export_run_id") != operation.export_run_id or digest != operation.dataset_sha256:
                 raise ValueError("external_export_identity_mismatch")
@@ -276,7 +277,9 @@ def _worker() -> None:
             continue
         with SessionLocal() as session:
             operation = _claim_next(session)
-            if operation is None and get_settings().external_ingestion_auto_adopt_gateway:
+            settings = get_settings()
+            if (operation is None and settings.external_ingestion_auto_adopt_gateway
+                    and settings.external_ingestion_backlog_enabled):
                 _ensure_gateway_operation(session)
                 operation = _claim_next(session)
             if operation is not None:
@@ -299,8 +302,10 @@ def _claim_next(session: Session) -> ExternalIngestionOperation | None:
     # limited to one committed batch in process(), so a newly queued interactive
     # operation is observed before another background batch is claimed. FIFO is
     # preserved inside each priority class and an in-flight batch is never cut.
+    backlog_filter = (() if get_settings().external_ingestion_backlog_enabled else
+                      (ExternalIngestionOperation.priority > 0,))
     candidate = session.scalar(select(ExternalIngestionOperation.id).where(
-        *available,
+        *available, *backlog_filter,
     ).order_by(ExternalIngestionOperation.priority.desc(),
                ExternalIngestionOperation.created_at,
                ExternalIngestionOperation.id).with_for_update(skip_locked=True).limit(1))
