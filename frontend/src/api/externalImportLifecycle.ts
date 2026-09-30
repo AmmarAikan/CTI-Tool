@@ -4,7 +4,7 @@ import { api, ApiError, type AcceptedSyncResult, type ExternalIngestionOperation
 import { externalQueryKeys } from './externalQueryKeys';
 
 export type ExternalImportStage='terminal_detected'|'import_ready'|'import_request_started'|'monitoring_paused'|'import_succeeded'|'import_failed'|'import_aborted';
-export type ExternalImportState={stage:ExternalImportStage;code:string;identity?:string;operationId?:string;result?:AcceptedSyncResult;error?:unknown};
+export type ExternalImportState={stage:ExternalImportStage;code:string;identity?:string;operationId?:string;operation?:ExternalIngestionOperation;result?:AcceptedSyncResult;error?:unknown};
 const STORAGE='cti_external_ingestion_operations_v1';
 export const EXTERNAL_IMPORT_MONITORING_MAX_MS=120_000;
 
@@ -47,12 +47,12 @@ export function useExternalImportLifecycle(job:ExternalJob|undefined,onSuccess:(
     const consume=(value:ExternalIngestionOperation):boolean=>{
       if(!mounted)return true;
       if(value.state==='completed'||value.state==='partial'){
-        const result=resultOf(value);setState({stage:'import_succeeded',code:'central_commit_proven',identity,operationId:value.operation_id,result});callback.current(result);return true;
+        const result=resultOf(value);setState({stage:'import_succeeded',code:'central_commit_proven',identity,operationId:value.operation_id,operation:value,result});callback.current(result);return true;
       }
       if(value.state==='failed_terminal'||value.state==='failed_retryable'){
-        setState({stage:'import_failed',code:value.error?.code||'ingestion_failed',identity,operationId:value.operation_id,error:new ApiError(409,value.error?.code||'ingestion_failed',value.error?.message||'External ingestion failed',value.retryable)});return true;
+        setState({stage:'import_failed',code:value.error?.code||'ingestion_failed',identity,operationId:value.operation_id,operation:value,error:new ApiError(409,value.error?.code||'ingestion_failed',value.error?.message||'External ingestion failed',value.retryable)});return true;
       }
-      setState({stage:'import_request_started',code:value.stage,identity,operationId:value.operation_id});return false;
+      setState({stage:'import_request_started',code:value.stage,identity,operationId:value.operation_id,operation:value});return false;
     };
     const poll=async(operationId:string)=>{try{const value=await api.externalIngestion(operationId,controller.signal);if(consume(value))return;if(Date.now()-monitoringStarted>=EXTERNAL_IMPORT_MONITORING_MAX_MS){setState({stage:'monitoring_paused',code:'monitoring_window_expired',identity,operationId});return}timer=window.setTimeout(()=>void poll(operationId),2000)}catch(error){if(!mounted||isAbortError(error))return;setState({stage:'import_failed',code:safeExternalImportCode(error),identity,operationId,error})}};
     const start=async()=>{try{const value=existing?(retryGeneration?await api.retryExternalIngestion(existing,controller.signal):await api.externalIngestion(existing,controller.signal)):await api.createExternalIngestion(jobId,controller.signal);remember(identity,value.operation_id);if(consume(value))return;void poll(value.operation_id)}catch(error){if(!mounted||isAbortError(error))return;setState({stage:'import_failed',code:safeExternalImportCode(error),identity,error})}};
