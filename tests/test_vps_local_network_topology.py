@@ -147,6 +147,7 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertFalse(self.vps["networks"]["external_egress"].get("internal",False))
         self.assertEqual(external["depends_on"]["tor"]["condition"], "service_healthy")
         self.assertEqual(self.vps["services"]["tor"]["image"], "dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6")
+        self.assertIsNone(self.vps["services"]["tor"].get("command"))
 
     def test_discovery_example_is_disabled_and_contains_no_onion_or_secret(self) -> None:
         value = json.loads(DISCOVERY_EXAMPLE.read_text(encoding="utf-8"))
