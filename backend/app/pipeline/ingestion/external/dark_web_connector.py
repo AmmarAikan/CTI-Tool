@@ -96,7 +96,7 @@ class TorHttpClient:
     """GET-only onion client whose DNS resolution stays inside Tor."""
 
     def __init__(self, proxy: TorProxy, *, session: requests.Session | None = None,
-                 connect_timeout: float = 5, read_timeout: float = 15,
+                 connect_timeout: float = 5, read_timeout: float = 30,
                  max_response_bytes: int = 2_000_000, retries: int = 1,
                  backoff_seconds: float = 1, max_redirects: int = 3,
                  allowed_content_types: tuple[str, ...] = ALLOWED_CONTENT_TYPES,
