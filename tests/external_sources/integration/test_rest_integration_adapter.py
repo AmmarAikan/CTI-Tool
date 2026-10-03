@@ -20,6 +20,7 @@ from backend.app.pipeline.ingestion.external.application.manual_source_service i
     ManualSourceService,
 )
 from backend.app.pipeline.ingestion.external.application.manual_preview_service import ManualPreviewService, PreviewConsumed
+from backend.app.pipeline.ingestion.external.manual_source.url_policy import URLPolicyError
 from backend.app.pipeline.ingestion.external.application.source_management_service import (
     SourceView,
 )
@@ -197,6 +198,13 @@ class RestIntegrationAdapterTests(unittest.TestCase):
                                     headers={**self.auth(), "Idempotency-Key": "reject-once"})
         self.assertEqual(rejected.json()["state"], "rejected")
         self.assertNotIn("url", str(created.json()).lower().replace("display_url", "display"))
+
+    def test_manual_preview_reports_bounded_actionable_failure_category(self):
+        self.previews.create.side_effect = URLPolicyError("Tor service is unavailable")
+        response = self.client.post(f"{API_PREFIX}/manual-sources/previews",
+                                    json={"url": "http://" + "a" * 56 + ".onion/report"}, headers=self.auth())
+        self.assertEqual((response.status_code, response.json()["code"]), (422, "tor_unavailable"))
+        self.assertNotIn(".onion", response.text)
 
     def test_manual_preview_enqueue_failure_releases_claim_with_safe_error(self):
         preview_id = self.previews.create.return_value["preview_id"]

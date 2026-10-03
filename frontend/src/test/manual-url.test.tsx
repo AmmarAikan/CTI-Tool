@@ -85,6 +85,8 @@ describe('manual preview workflow', () => {
     await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     expect(await screen.findAllByRole('listitem')).toHaveLength(20);
     expect(screen.getByText('عرض 20 من 24')).toBeInTheDocument();
+    const warning = screen.getByText('تنبيه').closest('details');
+    expect(warning).not.toHaveAttribute('open');
     expect(screen.getByText(/كامل المعاينة المجمدة/)).toBeInTheDocument();
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     await actor.click(screen.getByRole('button', { name: 'اعتماد وحفظ' }));
@@ -97,7 +99,7 @@ describe('manual preview workflow', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
     await actor.selectOptions(await screen.findByLabelText('سبب التجاهل'), 'duplicate'); await actor.click(screen.getByRole('button', { name: 'تجاهل' }));
-    expect(await screen.findByText(/تم تجاهل المعاينة/)).toBeInTheDocument(); expect(screen.queryByText(preview.title)).not.toBeInTheDocument(); expect(screen.queryByText(preview.excerpt)).not.toBeInTheDocument();
+    expect(await screen.findByText(/تم حذف المعاينة المؤقتة/)).toBeInTheDocument(); expect(screen.queryByText(preview.title)).not.toBeInTheDocument(); expect(screen.queryByText(preview.excerpt)).not.toBeInTheDocument();
   });
 
   it('handles expiry, disconnected service, malformed responses, and 401 safely', async () => {
@@ -106,6 +108,14 @@ describe('manual preview workflow', () => {
     }
     mockRole('analyst', () => Promise.reject(new TypeError('offline'))); renderWithProviders(<Manual />); const actor = userEvent.setup(); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); expect(await screen.findByText(/غير متصلة/)).toBeInTheDocument(); cleanup(); vi.restoreAllMocks();
     mockRole('analyst', () => response({ detail: 'expired' }, 401)); renderWithProviders(<Manual />); await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), 'https://example.org/report'); await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' })); await waitFor(() => expect(sessionStorage.getItem('cti_access_token')).toBeNull());
+  });
+
+  it('shows an actionable Tor failure without a generic error', async () => {
+    mockRole('analyst', () => response({ detail: { code: 'tor_unavailable', message: 'safe', retryable: false } }, 422));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), `http://${'a'.repeat(56)}.onion/report`);
+    await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    expect(await screen.findByText(/تعذر الوصول إلى شبكة Tor/)).toBeInTheDocument();
   });
 
 });

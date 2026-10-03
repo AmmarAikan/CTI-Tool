@@ -52,7 +52,8 @@ export function SystemReadiness() {
   });
   if (ml.data) checks.push({
     id: 'ml', title: t('readinessModel'),
-    state: !ml.data.primary_loaded && !ml.data.secondary_loaded ? 'unavailable' : ml.data.quality_gates_passed ? 'healthy' : 'degraded',
+    state: ml.data.backend === 'transformer' && ml.data.quality_gates_passed ? 'healthy'
+      : !ml.data.primary_loaded && !ml.data.secondary_loaded ? 'unavailable' : 'degraded',
     detail: t('readinessModelDetail', {
       backend: ml.data.backend,
       quality: t(ml.data.quality_gates_passed ? 'successful' : 'degraded'),

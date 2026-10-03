@@ -72,6 +72,23 @@ class ManualAdapterTests(unittest.TestCase):
         self.assertEqual(result.status, "stored")
         self.assertEqual(connector.identifiers, [("nvd", "CVE-2026-1234")])
 
+    def test_unconfigured_reddit_and_vulnerability_use_bounded_preview_sources(self):
+        completed = SimpleNamespace(status="completed", accepted_items=[item()], review_items=[], errors=[], skipped_items=0)
+        seen = []
+        adapter = RegisteredConnectorManualAdapter({}, "reddit", lambda source, _state: seen.append(source) or StubConnector(completed))
+        result = adapter.collect_url("https://www.reddit.com/r/cybersecurity/", identifier=None, source_id=None, state={})
+        self.assertEqual(result.status, "stored")
+        self.assertEqual((seen[0].configuration["subreddit"], seen[0].configuration["transport"]),
+                         ("cybersecurity", "reddit_public_rss"))
+
+        connector = StubConnector(completed)
+        adapter = RegisteredConnectorManualAdapter({}, "vulnerability", lambda source, _state: seen.append(source) or connector)
+        result = adapter.collect_url("https://nvd.nist.gov/vuln/detail/CVE-2026-12345",
+                                     identifier="CVE-2026-12345", source_id=None, state={})
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(seen[-1].configuration["type"], "nvd")
+        self.assertEqual(connector.identifiers[0][1], "CVE-2026-12345")
+
     def test_specific_cert_item_and_public_github_are_explicitly_unsupported(self):
         source = self.source("cert-one", "cert", method="official_listing", url="https://cert.example.test/advisories",
                              detail_path_pattern="^/advisories/[a-z-]+$")
@@ -92,7 +109,22 @@ class ManualAdapterTests(unittest.TestCase):
         connector.collect_url = lambda _source, _url: connector.result
         adapter = DarkWebManualAdapter((source,), connector)
         result = adapter.collect_url(source.url, identifier=None, source_id=None, state={"sources": {}, "urls": {}, "items": {}})
-        self.assertEqual((result.status, result.message), ("ignored", "structured source is unavailable"))
+        self.assertEqual((result.status, result.message), ("error", "Tor service is unavailable"))
+
+    def test_valid_v3_onion_candidate_is_ephemeral_and_uses_tor_connector(self):
+        onion = "http://" + "a" * 56 + ".onion/report"
+        connector = StubConnector(SimpleNamespace(status="completed", accepted_items=[item()], review_items=[], rejected_items=[],
+                                                   errors=[], skipped_items=0))
+        connector.state = {}
+        captured = []
+        connector.collect_url = lambda source, url: captured.append((source, url)) or connector.result
+        adapter = DarkWebManualAdapter((), connector, allow_preview_candidate=True)
+        result = adapter.collect_url(onion, identifier=None, source_id=None,
+                                     state={"sources": {}, "urls": {}, "items": {}})
+        self.assertEqual(result.status, "stored")
+        self.assertEqual(captured[0][1], onion)
+        self.assertTrue(captured[0][0].allows(onion))
+        self.assertFalse(DarkWebManualAdapter.valid_candidate_url("http://short.onion/report"))
 
 
 if __name__ == "__main__":

@@ -198,6 +198,26 @@ class LocalManualSourceJobTests(unittest.TestCase):
             self.assertEqual(client.get(f"{API_PREFIX}/exports/latest", headers=headers).json()["accepted_records"], 1)
             self._close(app, root)
 
+    def test_approved_recognized_preview_is_listed_in_detected_category(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            app = self._build(root, SequenceCrawler([]), AcceptClassification(),
+                              adapters={"github_advisory": AcceptedStructuredAdapter()})
+            client = self._client(app); headers = {"Authorization": "Bearer manual-test-token"}
+            preview = client.post(f"{API_PREFIX}/manual-sources/previews", json={"url": GHSA_URL}, headers=headers)
+            self.assertEqual((preview.status_code, preview.json()["page_type"]), (201, "github_advisory"))
+            approved = client.post(
+                f"{API_PREFIX}/manual-sources/previews/{preview.json()['preview_id']}/approve",
+                json={"expected_content_sha256": preview.json()["content_sha256"]},
+                headers={**headers, "Idempotency-Key": "approve-github-preview"},
+            )
+            self.assertEqual(self._wait(client, approved.json()["job_id"], headers)["state"], "completed")
+            manual = [source for source in client.get(f"{API_PREFIX}/sources", headers=headers).json()
+                      if source["metadata"].get("origin") == "user"]
+            self.assertEqual((len(manual), manual[0]["source_type"], manual[0]["metadata"]["method"]),
+                             (1, "github", "github_advisory"))
+            self._close(app, root)
+
     def test_unchanged_manual_url_completes_as_unchanged(self):
         values = [successful_crawl(CONTENT_ONE), CrawlResult(URL, URL, "unchanged")]
         with tempfile.TemporaryDirectory() as folder:
