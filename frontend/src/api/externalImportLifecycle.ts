@@ -24,6 +24,11 @@ export function externalImportBlockReason(job:ExternalJob):'export_incomplete'|'
   if(job.counts?.accepted_records===0) return;
   return externalImportIdentity(job)?undefined:'export_identity_missing';
 }
+export function needsExternalExportRefresh(job:ExternalJob):boolean {
+  return ['completed','partial'].includes(job.state)
+    && (job.counts?.accepted_records||0)>0
+    && !externalImportIdentity(job);
+}
 export function isAbortError(error:unknown){return error instanceof DOMException&&error.name==='AbortError'}
 export function isRetryableExternalImportError(error:unknown){return error instanceof TypeError||(error instanceof ApiError&&error.retryable)}
 export function safeExternalImportCode(error:unknown){if(error instanceof ApiError)return error.code;if(error instanceof TypeError)return'network_request_failed';return'local_import_failed'}

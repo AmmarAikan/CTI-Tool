@@ -2,17 +2,17 @@
   "schema_version": "1.0",
   "providers": [
     {
-      "provider_id": "operator-approved-ahmia",
-      "enabled": false,
+      "provider_id": "ahmia",
+      "enabled": true,
       "provider_type": "ahmia_html",
-      "search_endpoint": "https://operator-approved.example/search?q={query}&page={page}",
+      "search_endpoint": "https://ahmia.fi/search/?q={query}&page={page}",
       "through_tor": true,
-      "allowed_hostname": "operator-approved.example",
+      "allowed_hostname": "ahmia.fi",
       "max_query_chars": 300,
-      "max_result_pages": 2,
-      "max_candidates": 20,
-      "timeout_seconds": 15,
-      "rate_limit_seconds": 2
+      "max_result_pages": 1,
+      "max_candidates": 10,
+      "timeout_seconds": 20,
+      "rate_limit_seconds": 3
     }
   ]
 }

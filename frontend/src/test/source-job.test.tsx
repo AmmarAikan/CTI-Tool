@@ -2,7 +2,7 @@ import { act, cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
-import { api, clearToken } from '../api/client';
+import { api, clearToken, type ExternalJob } from '../api/client';
 import { JobMonitor, JOB_POLL_INTERVAL_MS, Sources } from '../pages/Sources';
 import { renderWithProviders } from './fixtures';
 
@@ -93,6 +93,16 @@ describe('single external source job', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true); renderWithProviders(<Sources />); const button = await screen.findByRole('button', { name: `تشغيل ${enabled.name}` });
     await userEvent.setup().click(button); await screen.findByText(/قيد التشغيل/)
     await screen.findByText(/مكتملة/, {}, { timeout: JOB_POLL_INTERVAL_MS * 2 }); expect(screen.getByText('3')).toBeInTheDocument(); expect(screen.getByText('للمراجعة')).toBeInTheDocument();
+  });
+
+  it('keeps polling a terminal snapshot until its completed export identity arrives',async()=>{
+    const initial:ExternalJob={job_id:'job-export-delay-123',command_id:'cmd-export-delay-123',state:'completed',created_at:'2026-10-03T17:47:00Z',updated_at:'2026-10-03T17:47:36Z',counts:{accepted_records:1},sources:{}};
+    const ready={...job('completed',{accepted_records:1,sources:{},export:{status:'completed',run_id:'ext-20261003T174736Z-ready',dataset_sha256:'a'.repeat(64),accepted_records:1,review_records:0}}),job_id:'job-export-delay-123',command_id:'cmd-export-delay-123'};
+    const fetchMock=mockRole('analyst',path=>path.includes('/jobs/job-export-delay-123')?response(ready):response([]));
+    function Parent(){const[current,setCurrent]=useState(initial);return <><JobMonitor sourceId="source-one" job={current} onUpdate={(_id,value)=>setCurrent(value)}/><output>{current.export?.run_id}</output></>}
+    renderWithProviders(<Parent/>);
+    await waitFor(()=>expect(fetchMock.mock.calls.some(([input])=>String(input).includes('/jobs/job-export-delay-123'))).toBe(true));
+    await waitFor(()=>expect(screen.getByText('ext-20261003T174736Z-ready')).toBeInTheDocument());
   });
 
   it('shows failed jobs with sanitized errors', async () => {
