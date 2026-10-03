@@ -12,6 +12,7 @@ central_env=/etc/cti-platform/central.env
 integration_env=/opt/cti-platform/clients/backend-integrations.env
 misp_env=/opt/cti-platform/clients/misp-client.env
 vps_env=/etc/cti-platform/vps.env
+discovery_config=/etc/cti-platform/dark_web_discovery_providers.json
 state_root=/opt/cti-platform/deployments/manual-source-classification
 
 read_env_value() { sed -n "s/^${2}=//p" "${1}" | tail -n 1; }
@@ -108,6 +109,9 @@ if [[ ${mode} == rollback ]]; then
   frontend_port=${FRONTEND_PORT}
   export CTI_COMPOSE_PROJECT_NAME=${central_project}
   compose_runtime
+  if [[ -s ${state_dir}/dark_web_discovery_providers.json.before ]]; then
+    cp -a -- "${state_dir}/dark_web_discovery_providers.json.before" "${discovery_config}"
+  fi
   docker image tag "${EXTERNAL_ROLLBACK_IMAGE}" cti-external-sources:1.0.0
   docker image tag "${BACKEND_ROLLBACK_IMAGE}" cti-central-backend:current
   docker image tag "${FRONTEND_ROLLBACK_IMAGE}" cti-central-frontend:current
@@ -123,6 +127,7 @@ fi
 [[ ${mode} == deploy && -n ${release_root} ]] || { echo "Usage: $0 deploy RELEASE_ROOT" >&2; exit 1; }
 for path in "${release_root}/Dockerfile.external" "${release_root}/compose.yaml" \
             "${release_root}/infra/vps/compose.yaml" "${release_root}/infra/vps/central.compose.yaml" \
+            "${release_root}/config/dark_web_discovery_providers.example.json" "${discovery_config}" \
             "${central_env}" "${integration_env}" "${misp_env}" "${vps_env}"; do
   [[ -s ${path} ]] || { echo "Required input is missing: ${path}" >&2; exit 1; }
 done
@@ -143,6 +148,25 @@ python_bin=/opt/cti-platform/src/cti-platform/.venv/bin/python
 timestamp=$(date -u +%Y%m%dT%H%M%SZ)
 state_dir=${state_root}/${timestamp}
 install -d -o root -g root -m 0700 "${state_dir}"
+cp -a -- "${discovery_config}" "${state_dir}/dark_web_discovery_providers.json.before"
+python3 - "${discovery_config}" "${release_root}/config/dark_web_discovery_providers.example.json" "${state_dir}/dark_web_discovery_providers.json.next" <<'PY'
+import json, pathlib, sys
+
+current_path, approved_path, output_path = map(pathlib.Path, sys.argv[1:])
+current = json.loads(current_path.read_text(encoding="utf-8"))
+approved = json.loads(approved_path.read_text(encoding="utf-8"))
+if current.get("schema_version") != "1.0" or not isinstance(current.get("providers"), list):
+    raise SystemExit("Invalid deployed Dark Web discovery configuration")
+providers = approved.get("providers")
+if approved.get("schema_version") != "1.0" or not isinstance(providers, list) or len(providers) != 1:
+    raise SystemExit("Invalid approved Ahmia configuration")
+ahmia = providers[0]
+if ahmia.get("provider_id") != "ahmia" or ahmia.get("enabled") is not True or ahmia.get("through_tor") is not True:
+    raise SystemExit("Approved Ahmia configuration is not enabled and Tor-only")
+preserved = [item for item in current["providers"] if isinstance(item, dict) and item.get("provider_id") not in {"ahmia", "operator-approved-ahmia"}]
+next_value = {"schema_version": "1.0", "providers": [*preserved, ahmia]}
+pathlib.Path(output_path).write_text(json.dumps(next_value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+PY
 external_rollback=cti-external-sources:manual-source-rollback-${timestamp}
 backend_rollback=cti-central-backend:manual-source-rollback-${timestamp}
 frontend_rollback=cti-central-frontend:manual-source-rollback-${timestamp}
@@ -173,6 +197,11 @@ preflight_idle
 compose_runtime
 "${vps_compose[@]}" stop external-sources
 "${central_compose[@]}" stop backend frontend
+discovery_mode=$(stat -c '%a' "${discovery_config}")
+discovery_uid=$(stat -c '%u' "${discovery_config}")
+discovery_gid=$(stat -c '%g' "${discovery_config}")
+install -o "${discovery_uid}" -g "${discovery_gid}" -m "${discovery_mode}" \
+  "${state_dir}/dark_web_discovery_providers.json.next" "${discovery_config}"
 "${vps_compose[@]}" up -d --no-build --no-deps --force-recreate tor
 tor_id=$(docker ps --filter "label=com.docker.compose.project=${vps_project}" --filter 'label=com.docker.compose.service=tor' --format '{{.ID}}')
 [[ -n ${tor_id} && ${tor_id} != *$'\n'* ]] || { echo "Expected exactly one Tor container" >&2; exit 1; }
@@ -188,6 +217,8 @@ external_id=$(docker ps --filter 'publish=8090' --filter 'label=com.docker.compo
 backend_id=$(docker ps --filter "publish=${backend_port}" --filter 'label=com.docker.compose.service=backend' --format '{{.ID}}')
 docker exec "${external_id}" python -c \
   'import os, socket; from backend.app.pipeline.ingestion.external.manual_source.adapters import DarkWebManualAdapter; assert DarkWebManualAdapter.valid_candidate_url("http://" + "a" * 56 + ".onion/"); s=socket.create_connection((os.environ["TOR_PROXY_HOST"], int(os.environ["TOR_PROXY_PORT"])), timeout=5); s.close()'
+docker exec "${external_id}" python -c \
+  'import json, os, urllib.request; request=urllib.request.Request("http://127.0.0.1:8000/api/v1/external-sources/dark-web/discovery/providers",headers={"Authorization":"Bearer "+os.environ["EXTERNAL_API_TOKEN"]}); providers=json.load(urllib.request.urlopen(request,timeout=5)); assert any(value.get("provider_id")=="ahmia" and value.get("enabled") and value.get("ready") and value.get("through_tor") for value in providers)'
 docker exec "${backend_id}" python -c \
   'from backend.app.core.config import get_settings; assert get_settings().external_control_configured'
 

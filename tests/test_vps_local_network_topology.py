@@ -17,6 +17,7 @@ PROVISIONER = ROOT / "infra" / "vps" / "scripts" / "provision_backend_networks.s
 GENERATOR = ROOT / "infra" / "vps" / "scripts" / "generate_backend_client_fragment.sh"
 DEPLOY_STACK = ROOT / "infra" / "vps" / "scripts" / "deploy_stack.sh"
 INTERACTIVE_RECOVERY = ROOT / "infra" / "vps" / "scripts" / "deploy_external_interactive_recovery.sh"
+MANUAL_SOURCE_DEPLOY = ROOT / "infra" / "vps" / "scripts" / "deploy_manual_source_classification.sh"
 NETWORKS = {
     "cti_backend_gateway": "cti-backend-gateway",
     "cti_backend_external": "cti-backend-external",
@@ -158,14 +159,27 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertEqual(tor["pids_limit"], 128)
         self.assertIn("no-new-privileges:true", tor["security_opt"])
 
-    def test_discovery_example_is_disabled_and_contains_no_onion_or_secret(self) -> None:
+    def test_discovery_example_enables_bounded_tor_only_ahmia_without_secrets(self) -> None:
         value = json.loads(DISCOVERY_EXAMPLE.read_text(encoding="utf-8"))
         self.assertEqual(value["schema_version"], "1.0")
-        self.assertTrue(value["providers"])
-        self.assertTrue(all(provider["enabled"] is False for provider in value["providers"]))
+        self.assertEqual(len(value["providers"]), 1)
+        provider = value["providers"][0]
+        self.assertEqual(provider["provider_id"], "ahmia")
+        self.assertIs(provider["enabled"], True)
+        self.assertIs(provider["through_tor"], True)
+        self.assertEqual(provider["allowed_hostname"], "ahmia.fi")
+        self.assertEqual(provider["max_result_pages"], 1)
+        self.assertLessEqual(provider["max_candidates"], 10)
         serialized = json.dumps(value).lower()
         self.assertNotIn(".onion", serialized)
         self.assertFalse(any(word in serialized for word in ("password", "token", "credential", "api_key")))
+
+    def test_manual_source_deploy_backs_up_enables_and_rolls_back_ahmia_config(self) -> None:
+        script = MANUAL_SOURCE_DEPLOY.read_text(encoding="utf-8")
+        self.assertIn('cp -a -- "${discovery_config}" "${state_dir}/dark_web_discovery_providers.json.before"', script)
+        self.assertIn('{"ahmia", "operator-approved-ahmia"}', script)
+        self.assertIn('cp -a -- "${state_dir}/dark_web_discovery_providers.json.before" "${discovery_config}"', script)
+        self.assertIn('value.get("provider_id")=="ahmia" and value.get("enabled") and value.get("ready")', script)
         self.assertFalse((ROOT / "config" / "dark_web_discovery_providers.json").exists())
 
     def test_rendered_forbidden_services_are_not_members(self) -> None:
