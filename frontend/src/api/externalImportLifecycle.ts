@@ -27,6 +27,7 @@ export function externalImportBlockReason(job:ExternalJob):'export_incomplete'|'
 export function needsExternalExportRefresh(job:ExternalJob):boolean {
   return ['completed','partial'].includes(job.state)
     && (job.counts?.accepted_records||0)>0
+    && !['failed','not_run'].includes(job.export?.status||'')
     && !externalImportIdentity(job);
 }
 export function isAbortError(error:unknown){return error instanceof DOMException&&error.name==='AbortError'}

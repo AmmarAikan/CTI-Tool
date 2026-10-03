@@ -243,8 +243,10 @@ class CanonicalCollectionService(CollectionService):
             if root is not None:
                 if not root.active: raise DisabledSourceError(source_id)
                 command_id = f"cmd-{secrets.token_hex(12)}"
-                job = self.runner.submit(command_id, lambda: self.manual_service.recheck_url(
-                    root.canonical_url, requested_by=requested_by, force=force),
+                run_id, started_at = generate_run_id(), utc_now_iso()
+                job = self.runner.submit(command_id, lambda: self._run_manual_root(
+                    root, requested_by=requested_by, force=force, run_id=run_id,
+                    started_at=started_at, command_id=command_id),
                     safe_context={"source_id": source_id})
                 return JobAccepted(job.job_id, command_id=command_id)
         del requested_by
@@ -255,6 +257,65 @@ class CanonicalCollectionService(CollectionService):
                                                                 run_id=run_id, started_at=started_at),
                                  safe_context={"source_id": source_id})
         return JobAccepted(job.job_id, command_id=command_id)
+
+    def _run_manual_root(self, root: ManualTrackedRoot, *, requested_by: str, force: bool,
+                         run_id: str, started_at: str, command_id: str) -> dict[str, Any]:
+        capture_started = False
+        captured: tuple[tuple[ExternalCTIItem, str], ...] = ()
+        if self.exporter is not None and hasattr(self.exporter, "begin_manual_capture"):
+            self.exporter.begin_manual_capture(); capture_started = True
+        try:
+            outcome = self.manual_service.recheck_url(
+                root.canonical_url, requested_by=requested_by, force=force)
+            if capture_started:
+                captured = self.exporter.end_manual_capture(); capture_started = False
+        finally:
+            if capture_started:
+                try: self.exporter.end_manual_capture()
+                except Exception: pass
+        status = "failed" if outcome.status == "error" else "completed"
+        aggregate = {
+            "status": status, "source_count": 1, "source_id": root.root_id,
+            "accepted_records": outcome.accepted_records,
+            "review_records": outcome.review_records,
+            "rejected_records": outcome.rejected_records,
+            "skipped_records": outcome.skipped_records,
+            "error_count": outcome.error_count,
+            "sources": {root.root_id: {
+                "status": outcome.status,
+                "accepted_records": outcome.accepted_records,
+                "review_records": outcome.review_records,
+                "rejected_records": outcome.rejected_records,
+                "skipped_records": outcome.skipped_records,
+                "error_count": outcome.error_count,
+                "collection_method": root.method,
+            }},
+            "force": force, "run_id": run_id,
+        }
+        if status == "failed":
+            aggregate["_failure_category"] = "internal_failure"
+            aggregate["_failure_retryable"] = False
+            return aggregate
+        if self.exporter is None or not hasattr(self.exporter, "export_unified"):
+            aggregate["status"] = "partial"
+            aggregate["export"] = {"status": "failed", "error": {"code": "export_unavailable"}}
+            return aggregate
+        manual = {root.root_id: {
+            "status": outcome.status, "accepted_records": outcome.accepted_records,
+            "review_records": outcome.review_records, "rejected_records": outcome.rejected_records,
+            "skipped_records": outcome.skipped_records, "error_count": outcome.error_count,
+        }}
+        try:
+            aggregate["export"] = self.exporter.export_unified(
+                run_id, started_at, (), manual,
+                tuple(item for item, disposition in captured if disposition == "review"))
+        except Exception as exc:
+            LOGGER.error("manual external export failed run_id=%s command_id=%s exception_type=%s",
+                         run_id, command_id, type(exc).__name__)
+            aggregate["status"] = "partial"
+            aggregate["export"] = {"status": "failed", "error": {"code": "export_failed",
+                "message": "manual collection completed but export failed safely"}}
+        return aggregate
 
     def _validated_ids(self, requested: tuple[str, ...]) -> tuple[str, ...]:
         source_ids = tuple(dict.fromkeys(requested)) if requested else tuple(
