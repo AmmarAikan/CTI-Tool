@@ -41,6 +41,10 @@ class TorUnavailableError(ConnectionError):
     pass
 
 
+class OnionSourceUnavailableError(ConnectionError):
+    """Tor is reachable, but the requested Onion destination did not respond."""
+
+
 class DarkWebRequestError(RuntimeError):
     pass
 
@@ -93,7 +97,7 @@ class TorHttpClient:
 
     def __init__(self, proxy: TorProxy, *, session: requests.Session | None = None,
                  connect_timeout: float = 5, read_timeout: float = 15,
-                 max_response_bytes: int = 2_000_000, retries: int = 0,
+                 max_response_bytes: int = 2_000_000, retries: int = 1,
                  backoff_seconds: float = 1, max_redirects: int = 3,
                  allowed_content_types: tuple[str, ...] = ALLOWED_CONTENT_TYPES,
                  sleeper: Callable[[float], None] = time.sleep) -> None:
@@ -123,11 +127,13 @@ class TorHttpClient:
         for attempt in range(self.retries + 1):
             try:
                 return self._get_following_allowed_redirects(source, current, headers)
+            except requests.exceptions.ProxyError as exc:
+                raise TorUnavailableError("Tor proxy request unavailable") from exc
             except (requests.ConnectionError, requests.Timeout) as exc:
                 if attempt >= self.retries:
-                    raise TorUnavailableError("Tor request unavailable") from exc
+                    raise OnionSourceUnavailableError("Onion source request unavailable") from exc
                 self.sleeper(self.backoff_seconds * (2 ** attempt))
-        raise TorUnavailableError("Tor request unavailable")
+        raise OnionSourceUnavailableError("Onion source request unavailable")
 
     def _get_following_allowed_redirects(self, source: DarkWebSource, url: str, headers: dict[str, str]) -> TorResponse:
         current = url
@@ -262,7 +268,8 @@ class DarkWebConnector(ExternalConnector):
         for source in self.sources:
             if not source.enabled: continue
             try: self._collect_source(source, result, force=force)
-            except TorUnavailableError: result.errors.append(f"{source.source_id}:tor_unavailable")
+            except OnionSourceUnavailableError: result.errors.append(f"{source.source_id}:onion_source_unavailable")
+            except TorUnavailableError: result.errors.append(f"{source.source_id}:tor_proxy_unavailable")
             except Exception: result.errors.append(f"{source.source_id}:source_failed")
         if result.errors and not (result.accepted_items or result.review_items or result.rejected_items): result.status = "failed"
         return result
@@ -280,7 +287,8 @@ class DarkWebConnector(ExternalConnector):
             response = self._fetch(source, url)
             if response is None: result.skipped_items += 1
             else: self._process_page(source, url, response, result)
-        except TorUnavailableError: result.status, result.errors = "unavailable", ["tor_unavailable"]
+        except OnionSourceUnavailableError: result.status, result.errors = "unavailable", ["onion_source_unavailable"]
+        except TorUnavailableError: result.status, result.errors = "unavailable", ["tor_proxy_unavailable"]
         except Exception: result.status, result.errors = "failed", ["source_failed"]
         return result
 

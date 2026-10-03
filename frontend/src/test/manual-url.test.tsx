@@ -115,7 +115,15 @@ describe('manual preview workflow', () => {
     renderWithProviders(<Manual />); const actor = userEvent.setup();
     await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), `http://${'a'.repeat(56)}.onion/report`);
     await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
-    expect(await screen.findByText(/تعذر الوصول إلى شبكة Tor/)).toBeInTheDocument();
+    expect(await screen.findByText(/خدمة Tor نفسها غير متاحة/)).toBeInTheDocument();
+  });
+
+  it('distinguishes an unreachable Onion site from a Tor service failure', async () => {
+    mockRole('analyst', () => response({ detail: { code: 'onion_source_unavailable', message: 'safe', retryable: false } }, 422));
+    renderWithProviders(<Manual />); const actor = userEvent.setup();
+    await actor.type(await screen.findByRole('textbox', { name: 'رابط HTTP أو HTTPS' }), `http://${'a'.repeat(56)}.onion/report`);
+    await actor.click(screen.getByRole('button', { name: 'معاينة الرابط' }));
+    expect(await screen.findByText(/اتصال Tor يعمل، لكن موقع Onion المحدد لم يستجب/)).toBeInTheDocument();
   });
 
 });

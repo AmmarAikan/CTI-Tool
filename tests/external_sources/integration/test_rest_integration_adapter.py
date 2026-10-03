@@ -205,6 +205,10 @@ class RestIntegrationAdapterTests(unittest.TestCase):
                                     json={"url": "http://" + "a" * 56 + ".onion/report"}, headers=self.auth())
         self.assertEqual((response.status_code, response.json()["code"]), (422, "tor_unavailable"))
         self.assertNotIn(".onion", response.text)
+        self.previews.create.side_effect = URLPolicyError("Onion source is temporarily unavailable")
+        response = self.client.post(f"{API_PREFIX}/manual-sources/previews",
+                                    json={"url": "http://" + "a" * 56 + ".onion/report"}, headers=self.auth())
+        self.assertEqual((response.status_code, response.json()["code"]), (422, "onion_source_unavailable"))
 
     def test_manual_preview_enqueue_failure_releases_claim_with_safe_error(self):
         preview_id = self.previews.create.return_value["preview_id"]

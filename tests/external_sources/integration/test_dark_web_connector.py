@@ -14,6 +14,7 @@ from backend.app.pipeline.ingestion.external.classification.classification_servi
 from backend.app.pipeline.ingestion.external.common.models import ExternalClassification
 from backend.app.pipeline.ingestion.external.dark_web_connector import (
     DarkWebConfigurationError, DarkWebConnector, DarkWebRequestError, DarkWebSource,
+    OnionSourceUnavailableError, TorUnavailableError,
     TorHttpClient, TorProxy, TorResponse, load_dark_web_config,
 )
 from backend.app.pipeline.ingestion.external.privacy.privacy_filter import IMPLEMENTATION_VERSION as PRIVACY_IMPLEMENTATION_VERSION
@@ -157,6 +158,22 @@ class TorPolicyTests(unittest.TestCase):
         client = TorHttpClient(TorProxy("127.0.0.1", 9999), session=session, retries=0, max_response_bytes=4)
         with self.assertRaises(DarkWebRequestError): client.get(source(), BASE_URL)
 
+    def test_unreachable_onion_is_retried_once_and_not_reported_as_tor_failure(self):
+        session = Mock(spec=requests.Session)
+        session.get.side_effect = requests.Timeout("destination timeout")
+        client = TorHttpClient(TorProxy("127.0.0.1", 9999), session=session, sleeper=lambda _value: None)
+        with self.assertRaises(OnionSourceUnavailableError):
+            client.get(source(), BASE_URL)
+        self.assertEqual(session.get.call_count, 2)
+
+    def test_proxy_failure_remains_a_tor_service_failure(self):
+        session = Mock(spec=requests.Session)
+        session.get.side_effect = requests.exceptions.ProxyError("proxy unavailable")
+        client = TorHttpClient(TorProxy("127.0.0.1", 9999), session=session, sleeper=lambda _value: None)
+        with self.assertRaisesRegex(TorUnavailableError, "Tor proxy"):
+            client.get(source(), BASE_URL)
+        self.assertEqual(session.get.call_count, 1)
+
 
 class FakeClient:
     def __init__(self, pages, available=True): self.pages, self.available, self.calls, self.requests = pages, available, [], []
@@ -228,6 +245,11 @@ class DarkWebConnectorTests(unittest.TestCase):
         result = DarkWebConnector([source()], FakeClient({}, available=False), clock=self.clock).collect_result()
         self.assertEqual(result.status, "unavailable")
         self.assertEqual(result.errors, ["tor_proxy_unavailable"])
+
+    def test_unreachable_onion_is_distinct_from_unavailable_tor_proxy(self):
+        client = FakeClient({BASE_URL: OnionSourceUnavailableError("private detail")})
+        result = DarkWebConnector([source()], client, clock=self.clock).collect_url(source(), BASE_URL)
+        self.assertEqual((result.status, result.errors), ("unavailable", ["onion_source_unavailable"]))
 
     def test_source_and_item_failures_are_redacted_and_isolated(self):
         broken = source(source_id="broken", url=f"http://{FAKE_HOST}/advisories/broken")

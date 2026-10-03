@@ -236,6 +236,7 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
         except URLPolicyError as exc:
             message = str(exc)
             code = ("onion_invalid_or_unapproved" if "onion" in message else
+                    "onion_source_unavailable" if "Onion source" in message else
                     "tor_unavailable" if "Tor" in message or "tor" in message else
                     "source_empty_or_unchanged" if "changed" in message or "content" in message else
                     "source_preview_failed")
