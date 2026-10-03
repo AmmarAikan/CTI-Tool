@@ -112,14 +112,18 @@ services:
   tor:
     image: dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6
     restart: unless-stopped
-    init: true
-    read_only: true
     tmpfs:
       - /tmp:size=32m,noexec,nosuid
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - DAC_OVERRIDE
+    pids_limit: 128
     healthcheck:
       test: ["CMD-SHELL", "tor --version >/dev/null 2>&1 && (nc -z 127.0.0.1 9050 || nc -vz 127.0.0.1 9050 || timeout 2 bash -c '</dev/tcp/127.0.0.1/9050' >/dev/null 2>&1) || exit 1"]
       interval: 15s
