@@ -188,14 +188,17 @@ class UnifiedCollectionTests(unittest.TestCase):
 
     def test_promoted_and_manual_onion_runs_do_not_use_discovery(self):
         runner=ImmediateRunner();executor=Executor();executor.runner=runner
-        discovery_calls=[]
+        discovery_calls=[];exporter=UnifiedExporter()
         promoted=RegisteredSource("dws-"+"a"*24,"dark_web",True,{"protected_url":"redacted"})
-        service=CanonicalCollectionService(runner,{},executor,manual_service=ManualService((ROOT_ONE,)),
+        service=CanonicalCollectionService(runner,{},executor,exporter=exporter,manual_service=ManualService((ROOT_ONE,)),
             dynamic_source=lambda source_id: promoted if source_id==promoted.source_id else discovery_calls.append(source_id))
         service.collect_source(promoted.source_id,requested_by="tester")
         self.assertEqual(executor.calls[0][0],promoted.source_id);self.assertEqual(discovery_calls,[])
         service.collect_source(ROOT_ONE.root_id,requested_by="tester")
         self.assertEqual(discovery_calls,[])
+        self.assertEqual(runner.result["export"]["status"],"completed")
+        self.assertEqual(runner.result["export"]["run_id"],runner.result["run_id"])
+        self.assertEqual(exporter.calls[-1][3][ROOT_ONE.root_id]["accepted_records"],1)
 
     def test_manual_and_promoted_sources_work_without_enabled_static_sources(self):
         runner=ImmediateRunner();executor=Executor();executor.runner=runner
