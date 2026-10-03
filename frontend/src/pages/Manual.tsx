@@ -32,6 +32,7 @@ function safeError(error: unknown,t:(key:TranslationKey)=>string) {
     if (error.status === 408) return t('requestTimeout');
     if ([502, 503, 504].includes(error.status)) return t('externalControlUnavailable');
     if (error.code === 'onion_invalid_or_unapproved') return t('onionPreviewRejected');
+    if (error.code === 'onion_source_unavailable') return t('onionSourceUnavailable');
     if (error.code === 'tor_unavailable') return t('torPreviewUnavailable');
     if (error.code === 'source_empty_or_unchanged') return t('previewNoContentReason');
     if (error.code === 'source_preview_failed') return t('previewFetchFailed');

@@ -85,6 +85,17 @@ wait_health() {
   [[ ${ready} == true ]] || { echo "Post-deployment health failed: ${endpoint}" >&2; return 1; }
 }
 
+wait_container_health() {
+  local container_id=$1 ready=false status
+  for _attempt in $(seq 1 60); do
+    status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}")
+    if [[ ${status} == healthy || ${status} == running ]]; then ready=true; break; fi
+    [[ ${status} != unhealthy && ${status} != exited && ${status} != dead ]] || break
+    sleep 2
+  done
+  [[ ${ready} == true ]] || { echo "Tor container did not become healthy" >&2; return 1; }
+}
+
 if [[ ${mode} == rollback ]]; then
   state_dir=${2:-}
   [[ -s ${state_dir}/state.env ]] || { echo "Usage: $0 rollback STATE_DIRECTORY" >&2; exit 1; }
@@ -162,6 +173,10 @@ preflight_idle
 compose_runtime
 "${vps_compose[@]}" stop external-sources
 "${central_compose[@]}" stop backend frontend
+"${vps_compose[@]}" up -d --no-build --no-deps --force-recreate tor
+tor_id=$(docker ps --filter "label=com.docker.compose.project=${vps_project}" --filter 'label=com.docker.compose.service=tor' --format '{{.ID}}')
+[[ -n ${tor_id} && ${tor_id} != *$'\n'* ]] || { echo "Expected exactly one Tor container" >&2; exit 1; }
+wait_container_health "${tor_id}"
 "${vps_compose[@]}" up -d --no-build --no-deps external-sources
 "${central_compose[@]}" up -d --no-build --no-deps backend frontend
 
@@ -172,7 +187,7 @@ wait_health "http://127.0.0.1:${frontend_port}/healthz"
 external_id=$(docker ps --filter 'publish=8090' --filter 'label=com.docker.compose.service=external-sources' --format '{{.ID}}')
 backend_id=$(docker ps --filter "publish=${backend_port}" --filter 'label=com.docker.compose.service=backend' --format '{{.ID}}')
 docker exec "${external_id}" python -c \
-  'from backend.app.pipeline.ingestion.external.manual_source.adapters import DarkWebManualAdapter; assert DarkWebManualAdapter.valid_candidate_url("http://" + "a" * 56 + ".onion/")'
+  'import os, socket; from backend.app.pipeline.ingestion.external.manual_source.adapters import DarkWebManualAdapter; assert DarkWebManualAdapter.valid_candidate_url("http://" + "a" * 56 + ".onion/"); s=socket.create_connection((os.environ["TOR_PROXY_HOST"], int(os.environ["TOR_PROXY_PORT"])), timeout=5); s.close()'
 docker exec "${backend_id}" python -c \
   'from backend.app.core.config import get_settings; assert get_settings().external_control_configured'
 

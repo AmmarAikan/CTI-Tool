@@ -140,10 +140,11 @@ class DarkWebManualAdapter(ManualAdapter):
         if source is None: return AdapterResult("ignored", message="onion URL is not an approved v3 source")
         self.connector.state = state
         result = self.connector.collect_url(source, canonical_url)
-        if str(getattr(result, "status", "")) == "unavailable" or any(
-            "tor_" in str(error).lower() for error in getattr(result, "errors", ())
-        ):
+        errors = {str(error).lower() for error in getattr(result, "errors", ())}
+        if "tor_proxy_unavailable" in errors or "tor_unavailable" in errors:
             return AdapterResult("error", message="Tor service is unavailable")
+        if "onion_source_unavailable" in errors:
+            return AdapterResult("error", message="Onion source is temporarily unavailable")
         return RegisteredConnectorManualAdapter._result(result)
 
 
