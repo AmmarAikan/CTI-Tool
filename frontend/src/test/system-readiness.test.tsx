@@ -23,6 +23,22 @@ beforeEach(() => { clearToken(); vi.restoreAllMocks(); });
 afterEach(cleanup);
 
 describe('system readiness', () => {
+  it('shows a healthy model when the transformer backend and quality gates are healthy', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const path = String(input);
+      if (path.endsWith('/api/v1/health')) return json({ status: 'ok', database: true });
+      if (path.endsWith('/intelligence/ml/status')) return json({ ...mlStatus, primary_loaded: false,
+        quality_gates_passed: true, readiness: 'ready', quality_gates: mlQualityGates.map((gate) => ({ ...gate, passed: true })) });
+      if (path.endsWith('/intelligence/misp/health')) return json({ configured: true, reachable: true, failure_category: null });
+      if (path.endsWith('/dashboard/summary')) return json(summary);
+      return json({ configured: true, reachable: true, service: 'test-service', contract_valid: true });
+    });
+    renderWithProviders(<SystemReadiness />);
+    expect(await screen.findByText('المحرك: transformer · بوابات الجودة: ناجحة.')).toBeInTheDocument();
+    const model = screen.getByText('نموذج الاستخراج').closest('.readiness-card');
+    expect(model).toHaveTextContent('سليمة');
+  });
+
   it('shows actual service and data evidence with honest scope limitations', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const path = String(input);

@@ -127,9 +127,10 @@ class CanonicalManualSourceService(ManualSourceService):
                  record_seen: Callable[[str, str, str | None], None] | None = None,
                  record_retire: Callable[[str, str, str, str | None], None] | None = None,
                  record_reconcile: Callable[[str, tuple[str, ...], str], tuple[tuple[str, str], ...]] | None = None,
-                 max_listing_links: int = 20, clock: Callable[[], datetime] | None = None) -> None:
+                 max_listing_links: int = 20, clock: Callable[[], datetime] | None = None,
+                 preview_policy: ManualURLPolicy | None = None) -> None:
         if not 1 <= max_listing_links <= 20: raise ValueError("max_listing_links must be between 1 and 20")
-        self.policy, self.crawler, self.state_manager = policy, crawler, state_manager
+        self.policy, self.preview_policy, self.crawler, self.state_manager = policy, preview_policy or policy, crawler, state_manager
         self.adapters, self.router = adapters or {}, router or ManualURLRouter()
         self.content_processor = content_processor or ExternalContentProcessor(
             TextPreprocessor(PROJECT_ROOT / "config" / "preprocessing_rules.json"),
@@ -152,25 +153,29 @@ class CanonicalManualSourceService(ManualSourceService):
         self._migrate_tracked_roots(state)
         self._register_tracked_root(state, canonical)
         self.state_manager.save(state)
+        if route.kind == "rss" and route.source_id is None:
+            return self._run_discovered_feed(canonical, state)
+        if route.kind == "github_public":
+            return self._run_web(canonical, state, force=False)
         if route.kind != "generic_web":
             return self._run_adapter(route, canonical, state)
         return self._run_web(canonical, state, force=False)
 
     def preview_url(self, url: str, *, requested_by: str) -> ManualPreviewBundle:
         del requested_by
-        validated = self.policy.validate(url)
+        validated = self.preview_policy.validate(url)
         captured: list[tuple[ExternalCTIItem, str]] = []
         memory = MemoryStateManager()
         isolated = CanonicalManualSourceService(
-            policy=self.policy, crawler=self.crawler, state_manager=memory,
+            policy=self.preview_policy, preview_policy=self.preview_policy, crawler=self.crawler, state_manager=memory,
             adapters=self.adapters, router=self.router, content_processor=self.content_processor,
             classification_service=self.classification_service,
             record_sink=lambda item, disposition: captured.append((item, disposition)),
             max_listing_links=self.max_listing_links, clock=self.clock,
         )
         result = isolated.add_manual_source(validated.canonical_url, requested_by="preview")
-        if result.status == "error":
-            raise URLPolicyError("URL preview failed safely")
+        if result.status in {"error", "ignored"}:
+            raise URLPolicyError(result.message)
         route = self.router.route(validated.canonical_url)
         state = memory.load()
         transport = state.get("urls", {}).get(validated.canonical_url, {}).get("transport")

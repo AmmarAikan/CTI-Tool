@@ -384,7 +384,9 @@ class LocalManualRecordSink:
         if original_run_id: metadata["run_id"] = original_run_id
 
 
-def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None, crawler: WebCrawler | None = None,
+def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None,
+                                   preview_policy: ManualURLPolicy | None = None,
+                                   crawler: WebCrawler | None = None,
                                    classification_service: ClassificationService | None = None,
                                    adapters: dict[str, ManualAdapter] | None = None,
                                    router: ManualURLRouter | None = None,
@@ -415,6 +417,7 @@ def build_canonical_manual_service(*, policy: ManualURLPolicy | None = None, cra
         record_seen=resolved_sink.mark_seen,
         record_retire=resolved_sink.retire,
         record_reconcile=resolved_sink.reconcile_listing,
+        preview_policy=preview_policy,
     )
 
 
@@ -431,8 +434,13 @@ class DevelopmentSourceService(SourceManagementService):
         self._review_state={source_id:("approved" if source.enabled else "pending") for source_id,source in registry.items()}
     def _manual(self) -> dict[str, SourceView]:
         if self._manual_service is None: return {}
-        return {root.root_id: SourceView(root.root_id, root.safe_dict()["label"], "dark_web" if root.method=="dark_web" else "manual_url",
-            "enabled" if root.active else "disabled", {"origin": "user", "method": root.method})
+        source_types = {
+            "dark_web": "dark_web", "rss": "rss", "discovered_rss_atom": "rss", "reddit": "reddit",
+            "github_advisory": "github", "github_public": "github", "vulnerability": "vulnerability",
+        }
+        return {root.root_id: SourceView(root.root_id, root.safe_dict()["label"], source_types.get(root.method, "manual_url"),
+            "enabled" if root.active else "disabled", {"origin": "user", "method": root.method,
+                **({"transport": "reddit_public_rss"} if root.method == "reddit" else {})})
             for root in self._manual_service.list_tracked_roots()}
     def _promoted(self)->dict[str,SourceView]:
         if self._dark_web_store is None:return {}
@@ -946,15 +954,28 @@ def build_local_app(*, connector_factory: RSSConnectorFactory | None = None,
     exporter = collection_exporter or LocalCollectionExportCoordinator(canonical_exporter, manual_sink)
     resolved_policy = manual_policy
     resolved_adapters = build_registered_manual_adapters(registry)
-    if dark_sources and resolved_dark_client is not None:
+    if resolved_dark_client is not None:
         dark_connector = DarkWebConnector(dark_sources, resolved_dark_client, state={})
-        resolved_adapters["dark_web"] = DarkWebManualAdapter(dark_sources, dark_connector)
+        resolved_adapters["dark_web"] = DarkWebManualAdapter(
+            dark_sources, dark_connector, allow_preview_candidate=True,
+        )
     if manual_adapters: resolved_adapters.update(manual_adapters)
     if resolved_policy is None:
-        resolved_policy = ManualURLPolicy(approved_onion=lambda url: any(
-            source.enabled and source.allows(url) for source in dark_sources
-        ))
-    manual_delegate = build_canonical_manual_service(policy=resolved_policy, crawler=manual_crawler,
+        def approved_onion(url: str) -> bool:
+            if any(source.enabled and source.allows(url) for source in dark_sources):
+                return True
+            state = JsonStateManager(manual_state_path).load()
+            roots = state.get("tracked_roots", {}) if isinstance(state, dict) else {}
+            return any(isinstance(value, dict) and value.get("active") is True and
+                       value.get("canonical_url") == url and not value.get("removed_at")
+                       for value in roots.values()) if isinstance(roots, dict) else False
+        resolved_policy = ManualURLPolicy(approved_onion=approved_onion)
+    preview_policy = ManualURLPolicy(
+        resolver=resolved_policy.resolver,
+        approved_onion=lambda url: resolved_dark_client is not None and DarkWebManualAdapter.valid_candidate_url(url),
+    )
+    manual_delegate = build_canonical_manual_service(policy=resolved_policy, preview_policy=preview_policy,
+                                            crawler=manual_crawler,
                                             classification_service=manual_classification_service,
                                             adapters=resolved_adapters, router=ManualURLRouter(registry), state_path=manual_state_path,
                                             processed_directory=processed_directory, review_directory=review_directory,

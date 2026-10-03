@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import hashlib
 from typing import Any
+from urllib.parse import urlsplit
 
 from backend.app.pipeline.ingestion.external.application.collection_service import RegisteredSource
 from backend.app.pipeline.ingestion.external.application.manual_source_service import AdapterResult, ManualAdapter
 from backend.app.pipeline.ingestion.external.cert_connector import CERTConnector, CERTSource
 from backend.app.pipeline.ingestion.external.common.canonical_url import canonicalize_url
-from backend.app.pipeline.ingestion.external.dark_web_connector import DarkWebConnector, DarkWebSource
+from backend.app.pipeline.ingestion.external.dark_web_connector import DarkWebConnector, DarkWebSource, V3_ONION_LABEL
 from backend.app.pipeline.ingestion.external.reddit_connector import RedditConnector, RedditSource
 from backend.app.pipeline.ingestion.external.rss_connector import RSSConnector, RSSSource
 from backend.app.pipeline.ingestion.external.social_common import SocialItemProcessor
@@ -35,9 +37,9 @@ class RegisteredConnectorManualAdapter(ManualAdapter):
 
     def collect_url(self, canonical_url: str, *, identifier: str | None, source_id: str | None,
                     state: dict[str, Any]) -> AdapterResult:
-        if not source_id or source_id not in self.registry:
+        source = self.registry.get(source_id or "") or self._candidate_source(canonical_url)
+        if source is None:
             return AdapterResult("ignored", message=f"unconfigured {self.route_kind} URL is unsupported")
-        source = self.registry[source_id]
         if not source.enabled:
             return AdapterResult("ignored", message=f"configured source {source_id} is disabled")
         if self.route_kind == "cert" and canonicalize_url(canonical_url) != canonicalize_url(str(source.configuration.get("url") or "")):
@@ -53,6 +55,32 @@ class RegisteredConnectorManualAdapter(ManualAdapter):
         except Exception:
             return AdapterResult("error", message=f"{self.route_kind} connector failed safely")
         return self._result(result)
+
+    def _candidate_source(self, canonical_url: str) -> RegisteredSource | None:
+        """Build an in-memory, bounded source for preview; it is never added to the registry."""
+        parts = urlsplit(canonical_url)
+        host = (parts.hostname or "").lower()
+        suffix = hashlib.sha256(canonical_url.encode()).hexdigest()[:20]
+        if self.route_kind == "reddit":
+            segments = [value for value in parts.path.split("/") if value]
+            if host not in {"reddit.com", "www.reddit.com", "old.reddit.com"} or len(segments) < 2 or segments[0].lower() != "r":
+                return None
+            raw = {"source_id": f"manual-reddit-{suffix}", "name": f"Reddit r/{segments[1]}",
+                   "source_type": "reddit", "subreddit": segments[1], "enabled": True,
+                   "transport": "reddit_public_rss", "max_items": 20, "fetch_linked_articles": True}
+            return RegisteredSource(raw["source_id"], "reddit", True, raw)
+        if self.route_kind in {"vulnerability", "github_advisory"}:
+            if self.route_kind == "github_advisory":
+                source_type, base, name = "github_advisories", "https://api.github.com/advisories", "GitHub Advisory"
+            elif host == "nvd.nist.gov":
+                source_type, base, name = "nvd", "https://services.nvd.nist.gov/rest/json/cves/2.0", "NVD"
+            else:
+                source_type, base, name = "cve", "https://cveawg.mitre.org/api/cve", "CVE Program"
+            raw = {"source_id": f"manual-{source_type}-{suffix}", "name": name, "type": source_type,
+                   "base_url": base, "enabled": True, "results_per_page": 1, "max_pages": 1,
+                   "lookback_days": 0, "delay_seconds": 0}
+            return RegisteredSource(raw["source_id"], "vulnerability", True, raw)
+        return None
 
     def _connector(self, source: RegisteredSource, state: dict[str, Any]):
         raw = source.configuration
@@ -86,16 +114,36 @@ class RegisteredConnectorManualAdapter(ManualAdapter):
 
 
 class DarkWebManualAdapter(ManualAdapter):
-    def __init__(self, sources: tuple[DarkWebSource, ...], connector: DarkWebConnector) -> None:
-        self.sources, self.connector = sources, connector
+    def __init__(self, sources: tuple[DarkWebSource, ...], connector: DarkWebConnector,
+                 *, allow_preview_candidate: bool = False) -> None:
+        self.sources, self.connector, self.allow_preview_candidate = sources, connector, allow_preview_candidate
+
+    @staticmethod
+    def valid_candidate_url(url: str) -> bool:
+        try: parts = urlsplit(canonicalize_url(url))
+        except ValueError: return False
+        host = (parts.hostname or "").lower()
+        return (parts.scheme in {"http", "https"} and not parts.username and not parts.password
+                and host.endswith(".onion") and bool(V3_ONION_LABEL.fullmatch(host[:-6])))
 
     def collect_url(self, canonical_url: str, *, identifier: str | None, source_id: str | None,
                     state: dict[str, Any]) -> AdapterResult:
         del identifier, source_id
         source = next((value for value in self.sources if value.enabled and value.allows(canonical_url)), None)
-        if source is None: return AdapterResult("ignored", message="onion URL is not an enabled configured source")
+        if source is None and self.allow_preview_candidate and self.valid_candidate_url(canonical_url):
+            path = urlsplit(canonical_url).path or "/"
+            source = DarkWebSource(
+                "manual-preview-" + hashlib.sha256(canonical_url.encode()).hexdigest()[:20],
+                "Manual Onion Preview", canonical_url, (path,), True, max_items=1,
+                rate_limit_seconds=0, trusted_curated=False,
+            )
+        if source is None: return AdapterResult("ignored", message="onion URL is not an approved v3 source")
         self.connector.state = state
         result = self.connector.collect_url(source, canonical_url)
+        if str(getattr(result, "status", "")) == "unavailable" or any(
+            "tor_" in str(error).lower() for error in getattr(result, "errors", ())
+        ):
+            return AdapterResult("error", message="Tor service is unavailable")
         return RegisteredConnectorManualAdapter._result(result)
 
 

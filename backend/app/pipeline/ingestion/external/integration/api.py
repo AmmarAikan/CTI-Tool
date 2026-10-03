@@ -25,6 +25,7 @@ from backend.app.pipeline.ingestion.external.application.job_service import JobS
 from backend.app.pipeline.ingestion.external.application.manual_source_service import (
     ManualSourceService,
 )
+from backend.app.pipeline.ingestion.external.manual_source.url_policy import URLPolicyError
 from backend.app.pipeline.ingestion.external.application.manual_preview_service import (
     ManualPreviewService, PreviewConsumed, PreviewExpired, PreviewHashMismatch, PreviewNotFound,
 )
@@ -232,7 +233,14 @@ def create_app(services: AdapterServices, *, docs_enabled: bool = False) -> Fast
                               current: Principal = Depends(permitted("manual:preview"))) -> ManualPreviewResponse:
         preview = _previews(services)
         try: value = preview.create(str(body.url), requested_by=current.subject)
-        except Exception: raise APIError(422, "preview_unavailable", "URL could not be previewed safely") from None
+        except URLPolicyError as exc:
+            message = str(exc)
+            code = ("onion_invalid_or_unapproved" if "onion" in message else
+                    "tor_unavailable" if "Tor" in message or "tor" in message else
+                    "source_empty_or_unchanged" if "changed" in message or "content" in message else
+                    "source_preview_failed")
+            raise APIError(422, code, message[:300]) from None
+        except Exception: raise APIError(422, "source_preview_failed", "URL could not be previewed safely") from None
         return ManualPreviewResponse.model_validate(value)
 
     @app.post(f"{API_PREFIX}/manual-sources/previews/{{preview_id}}/approve",
