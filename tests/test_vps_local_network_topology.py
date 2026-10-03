@@ -146,8 +146,17 @@ class VPSLocalNetworkTopologyTests(unittest.TestCase):
         self.assertEqual(service_networks(self.vps,"tor")["external_egress"]["aliases"], ["tor"])
         self.assertFalse(self.vps["networks"]["external_egress"].get("internal",False))
         self.assertEqual(external["depends_on"]["tor"]["condition"], "service_healthy")
-        self.assertEqual(self.vps["services"]["tor"]["image"], "dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6")
-        self.assertIsNone(self.vps["services"]["tor"].get("command"))
+        tor = self.vps["services"]["tor"]
+        self.assertEqual(tor["image"], "dperson/torproxy@sha256:d161ddddd47b4d2a91b8fe93d61e81b0760c0452ab6983a35ed37452e24004f6")
+        self.assertIsNone(tor.get("command"))
+        self.assertNotIn("init", tor)
+        self.assertNotIn("read_only", tor)
+        self.assertNotIn("user", tor)
+        self.assertEqual(tor["cap_drop"], ["ALL"])
+        self.assertEqual(tor["cap_add"], ["CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"])
+        self.assertNotIn("NET_ADMIN", tor["cap_add"])
+        self.assertEqual(tor["pids_limit"], 128)
+        self.assertIn("no-new-privileges:true", tor["security_opt"])
 
     def test_discovery_example_is_disabled_and_contains_no_onion_or_secret(self) -> None:
         value = json.loads(DISCOVERY_EXAMPLE.read_text(encoding="utf-8"))
