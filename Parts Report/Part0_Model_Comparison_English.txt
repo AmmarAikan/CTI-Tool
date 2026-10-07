@@ -2,7 +2,7 @@ Part 0 Report: sklearn vs BERT NER Models After Final Update
 ================================================================
 
 Project Name:
-AI-Based Cyber Threat Intelligence Tool / CTI-Tool
+ACTIT: An AI-Assisted Cyber Threat Intelligence Tool for Integrating Internal Telemetry and External Threat Sources
 
 Part:
 Part 0: DNRTI NER Model Training Pipeline

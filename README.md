@@ -1,4 +1,4 @@
-# AI-Based Cyber Threat Intelligence Platform
+# ACTIT: An AI-Assisted Cyber Threat Intelligence Tool for Integrating Internal Telemetry and External Threat Sources
 
 This repository now contains the backend foundation of the graduation-project CTI platform as well as the external-source collectors. The backend joins external CTI with internal Wazuh and Dionaea telemetry in one source-independent schema, persists the results, exposes an analyst API, correlates events, detects outlier sessions, and supports STIX export and optional MISP sharing.
 
